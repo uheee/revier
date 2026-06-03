@@ -29,6 +29,16 @@ function submit(): void {
   form.repoPath = '';
   form.name = '';
 }
+
+async function selectDirectory(): Promise<void> {
+  const selection = await window.revier.projects.selectDirectory();
+  if (!selection) {
+    return;
+  }
+
+  form.repoPath = selection.path;
+  form.name = selection.name;
+}
 </script>
 
 <template>
@@ -39,7 +49,16 @@ function submit(): void {
 
     <label class="field">
       <span>仓库路径</span>
-      <el-input v-model="form.repoPath" placeholder="E:/Projects/revier" clearable />
+      <div class="path-picker">
+        <el-input v-model="form.repoPath" placeholder="E:/Projects/revier" clearable @click="selectDirectory" />
+        <el-button
+          data-test="select-repo-directory"
+          aria-label="选择仓库目录"
+          @click="selectDirectory"
+        >
+          <FolderOpen :size="16" aria-hidden="true" />
+        </el-button>
+      </div>
     </label>
 
     <label class="field">

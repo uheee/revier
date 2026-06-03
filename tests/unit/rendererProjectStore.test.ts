@@ -56,6 +56,21 @@ describe('renderer projectStore', () => {
     expect(api.projects.remove).toHaveBeenCalledWith(project.id);
     expect(api.projects.list).toHaveBeenCalledTimes(2);
   });
+
+  it('stores add-project errors from duplicate or invalid repositories', async () => {
+    const api = mockApi({
+      add: vi.fn(async () => {
+        throw new Error('该仓库已在项目列表中');
+      })
+    });
+    vi.stubGlobal('window', { revier: api });
+
+    const store = useProjectStore();
+    await store.addProject(project.repoPath, project.name);
+
+    expect(store.error).toBe('该仓库已在项目列表中');
+    expect(store.loading).toBe(false);
+  });
 });
 
 function mockApi(projects: Partial<RevierApi['projects']>): RevierApi {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import type { ProjectPreferences, ReviewProject } from '../../shared/projectTypes';
 
 interface ProjectStoreFile {
@@ -21,10 +21,15 @@ export class JsonProjectStore {
 
   async add(repoPath: string, options: Partial<ReviewProject> = {}): Promise<ReviewProject> {
     const data = await this.read();
+    const normalizedRepoPath = normalizeStoredRepoPath(repoPath);
+    if (data.projects.some((project) => normalizeStoredRepoPath(project.repoPath) === normalizedRepoPath)) {
+      throw new Error('该仓库已在项目列表中');
+    }
+
     const project: ReviewProject = {
       id: randomUUID(),
-      name: options.name?.trim() || basename(repoPath),
-      repoPath,
+      name: options.name?.trim() || basename(normalizedRepoPath),
+      repoPath: normalizedRepoPath,
       pinned: options.pinned ?? false,
       lastOpenedAt: new Date().toISOString(),
       preferences: {
@@ -76,4 +81,8 @@ export class JsonProjectStore {
 
 function isMissingFileError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+}
+
+function normalizeStoredRepoPath(repoPath: string): string {
+  return resolve(repoPath).replace(/\\/g, '/').replace(/\/$/, '');
 }

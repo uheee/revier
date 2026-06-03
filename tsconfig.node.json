@@ -17,7 +17,7 @@
     "vitest.config.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
-    "src/renderer/env.d.ts",
+    "src/renderer/**/*.d.ts",
     "src/renderer/stores/**/*.ts",
     "src/shared/**/*.ts",
     "tests/**/*.ts"

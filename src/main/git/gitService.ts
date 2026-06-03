@@ -1,8 +1,11 @@
 import simpleGit from 'simple-git';
+import { resolve } from 'node:path';
 import { normalizeGitPath, parseNameStatus, parseNumstat } from '../analysis/changedFiles';
 import type { GitBranch, RepositoryValidation } from '../../shared/projectTypes';
 import type { ChangedFile } from '../../shared/reviewTypes';
 import type { GitCommitSummary } from './gitTypes';
+
+const invalidRepositoryMessage = '请选择一个 Git 仓库目录';
 
 export class GitService {
   async validateRepository(repoPath: string): Promise<RepositoryValidation> {
@@ -10,13 +13,14 @@ export class GitService {
     try {
       const isRepo = await git.checkIsRepo();
       if (!isRepo) {
-        return { valid: false, repoPath, error: 'Not a Git repository' };
+        return { valid: false, repoPath, error: invalidRepositoryMessage };
       }
 
-      const branch = await git.branch();
-      return { valid: true, repoPath, currentBranch: branch.current };
-    } catch (error) {
-      return { valid: false, repoPath, error: String(error) };
+      const root = normalizeRepositoryPath((await git.revparse(['--show-toplevel'])).trim());
+      const branch = await simpleGit(root).branch();
+      return { valid: true, repoPath: root, currentBranch: branch.current };
+    } catch {
+      return { valid: false, repoPath, error: invalidRepositoryMessage };
     }
   }
 
@@ -72,4 +76,8 @@ export class GitService {
       return '';
     }
   }
+}
+
+function normalizeRepositoryPath(repoPath: string): string {
+  return resolve(repoPath).replace(/\\/g, '/').replace(/\/$/, '');
 }

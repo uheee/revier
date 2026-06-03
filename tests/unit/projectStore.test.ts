@@ -46,4 +46,20 @@ describe('JsonProjectStore', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('rejects duplicate normalized repository paths', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'revier-projects-'));
+    const file = join(dir, 'projects.json');
+
+    try {
+      const store = new JsonProjectStore(file);
+      await store.add('E:/repos/demo', { name: 'demo' });
+
+      await expect(store.add('E:/repos/demo/', { name: 'again' })).rejects.toThrow(
+        '该仓库已在项目列表中'
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
