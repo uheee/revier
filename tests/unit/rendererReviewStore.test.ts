@@ -1,0 +1,125 @@
+import { createPinia, setActivePinia } from 'pinia';
+import { useReviewStore } from '../../src/renderer/stores/reviewStore';
+import type { RevierApi } from '../../src/shared/ipcTypes';
+import type {
+  AnalysisTaskSnapshot,
+  ChangedFile,
+  DiffBlock,
+  FileOverlay,
+  ReviewFilters
+} from '../../src/shared/reviewTypes';
+
+const filters: ReviewFilters = {
+  projectId: 'project-1',
+  branch: 'develop',
+  globRules: ['src/**/*.ts']
+};
+
+const task: AnalysisTaskSnapshot = {
+  taskId: 'task-1',
+  projectId: 'project-1',
+  status: 'completed',
+  stage: 'ready',
+  progress: 1
+};
+
+const file: ChangedFile = {
+  path: 'src/main/index.ts',
+  status: 'modified',
+  additions: 3,
+  deletions: 1,
+  isBinary: false,
+  isPreviewable: true
+};
+
+const block: DiffBlock = {
+  id: 'block-1',
+  oldStart: 1,
+  oldEnd: 2,
+  newStart: 1,
+  newEnd: 3,
+  changeType: 'modified',
+  authors: [{ name: 'Snowind', email: 'jinks.tao@gmail.com' }],
+  rows: [],
+  relatedCommits: []
+};
+
+const overlay: FileOverlay = {
+  file,
+  range: {
+    branch: 'develop',
+    baseCommit: 'base',
+    headCommit: 'head'
+  },
+  blocks: [block],
+  warnings: []
+};
+
+describe('renderer reviewStore', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('starts analysis and loads changed files', async () => {
+    const api = mockApi({
+      startAnalysis: vi.fn(async () => task),
+      listChangedFiles: vi.fn(async () => [file])
+    });
+    vi.stubGlobal('window', { revier: api });
+
+    const store = useReviewStore();
+    await store.start(filters);
+
+    expect(api.review.startAnalysis).toHaveBeenCalledWith(filters);
+    expect(api.review.listChangedFiles).toHaveBeenCalledWith(task.taskId);
+    expect(store.task).toEqual(task);
+    expect(store.files).toEqual([file]);
+    expect(store.loading).toBe(false);
+    expect(store.error).toBeUndefined();
+  });
+
+  it('loads overlay and selects a diff block', async () => {
+    const api = mockApi({
+      getFileOverlay: vi.fn(async () => overlay)
+    });
+    vi.stubGlobal('window', { revier: api });
+
+    const store = useReviewStore();
+    store.task = task;
+    await store.loadOverlay(file.path);
+    store.selectBlock(block);
+
+    expect(api.review.getFileOverlay).toHaveBeenCalledWith({
+      taskId: task.taskId,
+      filePath: file.path
+    });
+    expect(store.overlay).toEqual(overlay);
+    expect(store.selectedBlock).toEqual(block);
+  });
+});
+
+function mockApi(review: Partial<RevierApi['review']>): RevierApi {
+  return {
+    projects: {
+      list: vi.fn(),
+      add: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn(),
+      validateRepository: vi.fn(),
+      listBranches: vi.fn()
+    },
+    review: {
+      startAnalysis: vi.fn(),
+      cancelAnalysis: vi.fn(),
+      getTask: vi.fn(),
+      onTaskUpdate: vi.fn(),
+      listChangedFiles: vi.fn(),
+      getFileOverlay: vi.fn(),
+      ...review
+    }
+  } as unknown as RevierApi;
+}
