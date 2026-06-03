@@ -12,7 +12,7 @@ import type {
 import { AnalysisTaskManager } from '../analysis/analysisTaskManager';
 import { attachAttribution } from '../analysis/attributionEngine';
 import { createGlobMatcher } from '../analysis/globRules';
-import { buildFileOverlayBlocks } from '../analysis/overlayEngine';
+import { buildFileOverlayDiff } from '../analysis/overlayEngine';
 import { parsePatchTouchedRanges } from '../analysis/patchRanges';
 import { selectRangeCommits, type ResolvedCommitRange } from '../analysis/rangeResolver';
 import { GitService } from '../git/gitService';
@@ -81,8 +81,10 @@ export async function buildFileOverlayForTask({
 }: BuildFileOverlayInput): Promise<FileOverlay> {
   if (file.isBinary || !file.isPreviewable) {
     return {
+      mode: 'range',
       file,
       range,
+      rows: [],
       blocks: [],
       warnings: [
         createAppError('BINARY_FILE', 'Binary file is not previewable', true, file.path)
@@ -97,17 +99,18 @@ export async function buildFileOverlayForTask({
   );
   const newText = await git.readFileAtCommit(project.repoPath, range.headCommit, file.path);
   const relatedCommits = await buildRelatedCommits(project.repoPath, file, rangeCommits, filters, git);
-  const blocks = attachAttribution(
-    buildFileOverlayBlocks({ file, oldText, newText }),
-    relatedCommits
-  );
+  const diff = buildFileOverlayDiff({ file, oldText, newText });
+  const blocks = attachAttribution(diff.blocks, relatedCommits);
+  const visibleBlocks = hasDisplayCommitFilters(filters)
+    ? blocks.filter((block) => block.relatedCommits.some((commit) => commit.matchedByFilter))
+    : blocks;
 
   return {
+    mode: 'range',
     file,
     range,
-    blocks: hasDisplayCommitFilters(filters)
-      ? blocks.filter((block) => block.relatedCommits.some((commit) => commit.matchedByFilter))
-      : blocks,
+    rows: maskFilteredRows(diff.rows, visibleBlocks),
+    blocks: visibleBlocks,
     warnings: []
   };
 }
@@ -198,6 +201,16 @@ function mapRangeCommits(
   return range.rangeCommits
     .map((commit) => commitsByHash.get(commit.hash))
     .filter((commit): commit is GitCommitSummary => commit !== undefined);
+}
+
+function maskFilteredRows(
+  rows: import('../../shared/reviewTypes').SideBySideDiffRow[],
+  blocks: import('../../shared/reviewTypes').DiffBlock[]
+) {
+  const visibleBlockIds = new Set(blocks.map((block) => block.id));
+  return rows.map((row) =>
+    row.blockId && !visibleBlockIds.has(row.blockId) ? { ...row, blockId: undefined } : row
+  );
 }
 
 async function filterFilesByMatchingCommits(

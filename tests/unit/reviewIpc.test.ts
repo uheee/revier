@@ -136,6 +136,10 @@ describe('reviewIpc', () => {
     });
 
     expect(overlay.blocks).toHaveLength(1);
+    expect(overlay.mode).toBe('range');
+    expect(overlay.rows?.map((row) => row.type)).toEqual(['modified']);
+    expect(overlay.blocks[0].rowStartIndex).toBe(0);
+    expect(overlay.blocks[0].rowEndIndex).toBe(0);
     expect(overlay.blocks[0].authors).toEqual([{ name: 'Alice', email: 'a@example.com' }]);
     expect(overlay.blocks[0].relatedCommits[0].matchedByFilter).toBe(true);
   });

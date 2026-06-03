@@ -7,8 +7,25 @@ export interface BuildOverlayInput {
   newText: string;
 }
 
+export interface BuiltFileOverlayDiff {
+  rows: SideBySideDiffRow[];
+  blocks: DiffBlock[];
+}
+
+export function buildFileOverlayDiff(input: BuildOverlayInput): BuiltFileOverlayDiff {
+  const rows = buildSideBySideRows(input.oldText, input.newText);
+  return {
+    rows,
+    blocks: groupChangedRows(rows)
+  };
+}
+
 export function buildFileOverlayBlocks(input: BuildOverlayInput): DiffBlock[] {
-  const parts = diffLines(input.oldText, input.newText, { newlineIsToken: false });
+  return buildFileOverlayDiff(input).blocks;
+}
+
+function buildSideBySideRows(oldText: string, newText: string): SideBySideDiffRow[] {
+  const parts = diffLines(oldText, newText, { newlineIsToken: false });
   const rows: SideBySideDiffRow[] = [];
   let oldLine = 1;
   let newLine = 1;
@@ -55,7 +72,7 @@ export function buildFileOverlayBlocks(input: BuildOverlayInput): DiffBlock[] {
     }
   }
 
-  return groupChangedRows(rows);
+  return rows;
 }
 
 function splitLines(value: string): string[] {
@@ -67,45 +84,53 @@ function splitLines(value: string): string[] {
 
 function groupChangedRows(rows: SideBySideDiffRow[]): DiffBlock[] {
   const blocks: DiffBlock[] = [];
-  let current: SideBySideDiffRow[] = [];
+  let current: Array<{ row: SideBySideDiffRow; index: number }> = [];
 
   const flush = () => {
     if (current.length === 0) {
       return;
     }
 
-    const oldNumbers = current
+    const blockId = `block-${blocks.length + 1}`;
+    for (const item of current) {
+      item.row.blockId = blockId;
+    }
+
+    const blockRows = current.map((item) => item.row);
+    const oldNumbers = blockRows
       .map((row) => row.oldLineNumber)
       .filter((line): line is number => line !== undefined);
-    const newNumbers = current
+    const newNumbers = blockRows
       .map((row) => row.newLineNumber)
       .filter((line): line is number => line !== undefined);
-    const changeTypes = new Set(current.map((row) => row.type));
+    const changeTypes = new Set(blockRows.map((row) => row.type));
     blocks.push({
-      id: `block-${blocks.length + 1}`,
+      id: blockId,
       oldStart: oldNumbers[0] ?? 0,
       oldEnd: oldNumbers.at(-1) ?? 0,
       newStart: newNumbers[0] ?? 0,
       newEnd: newNumbers.at(-1) ?? 0,
+      rowStartIndex: current[0].index,
+      rowEndIndex: current.at(-1)?.index ?? current[0].index,
       changeType: changeTypes.has('modified')
         ? 'modified'
         : changeTypes.has('added')
           ? 'added'
           : 'deleted',
       authors: [],
-      rows: current,
+      rows: blockRows,
       relatedCommits: []
     });
     current = [];
   };
 
-  for (const row of rows) {
+  rows.forEach((row, index) => {
     if (row.type === 'context') {
       flush();
     } else {
-      current.push(row);
+      current.push({ row, index });
     }
-  }
+  });
   flush();
   return blocks;
 }
