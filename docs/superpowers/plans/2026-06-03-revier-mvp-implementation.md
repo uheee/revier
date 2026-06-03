@@ -143,7 +143,7 @@ tests/
 运行：
 
 ```powershell
-fnm use 22
+fnm use 24
 pnpm test -- --run tests/unit/scaffold.test.ts
 ```
 
@@ -153,7 +153,7 @@ pnpm test -- --run tests/unit/scaffold.test.ts
 
 实现要求：
 
-- `.node-version` 固定为 `22`。
+- `.node-version` 固定为 `24`。
 - `.gitignore` 排除 `node_modules/`、`dist/`、`out/`、`coverage/`、`test-results/`、`playwright-report/`、`.vite/`、`.superpowers/`。
 - `package.json` 配置 `dev`、`build`、`preview`、`typecheck`、`test`、`test:e2e`、`test:perf`、`lint`。
 - 依赖包含 `vue`、`electron`、`electron-vite`、`pinia`、`vue-router`、`element-plus`、`lucide-vue-next`、`simple-git`、`minimatch`、`diff`、`vitest`、`playwright`。
@@ -166,7 +166,7 @@ pnpm test -- --run tests/unit/scaffold.test.ts
 运行：
 
 ```powershell
-fnm use 22
+fnm use 24
 pnpm install
 ```
 
