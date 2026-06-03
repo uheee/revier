@@ -6,7 +6,9 @@ import BlockDetailPanel from '../components/review/BlockDetailPanel.vue';
 import ChangedFileList from '../components/review/ChangedFileList.vue';
 import DiffViewer from '../components/review/DiffViewer.vue';
 import FilterPanel from '../components/review/FilterPanel.vue';
+import ReviewLayoutResizer from '../components/review/ReviewLayoutResizer.vue';
 import TaskProgress from '../components/review/TaskProgress.vue';
+import { useReviewLayoutSizes } from '../composables/useReviewLayoutSizes';
 import { useProjectStore } from '../stores/projectStore';
 import { useReviewStore } from '../stores/reviewStore';
 import type { ReviewFilters } from '../../shared/reviewTypes';
@@ -20,12 +22,15 @@ const { task, files, overlay, selectedBlock, authors, authorsLoading, loading, e
 const projectId = computed(() => String(route.params.projectId ?? ''));
 const selectedFilePath = ref<string>();
 const branches = ref<GitBranch[]>([]);
+const workspaceEl = ref<HTMLElement>();
+const layout = useReviewLayoutSizes();
 const project = computed(() => projectStore.projects.find((item) => item.id === projectId.value));
 const defaultBranch = computed(() => project.value?.preferences.defaultBranch ?? 'HEAD');
 const defaultGlobRules = computed(() => project.value?.preferences.defaultGlobRules ?? []);
 let unsubscribe: (() => void) | undefined;
 
 onMounted(() => {
+  layout.setContainer(workspaceEl.value);
   void initializeProject();
   unsubscribe = window.revier.review.onTaskUpdate((snapshot) => {
     if (snapshot.taskId === reviewStore.task?.taskId) {
@@ -70,7 +75,11 @@ async function selectFile(filePath: string): Promise<void> {
 </script>
 
 <template>
-  <main class="review-workspace">
+  <main
+    ref="workspaceEl"
+    class="review-workspace"
+    :style="{ gridTemplateColumns: layout.gridTemplateColumns.value }"
+  >
     <aside class="review-sidebar">
       <section class="review-project-summary">
         <el-button text @click="router.push({ name: 'projects' })">返回</el-button>
@@ -94,6 +103,8 @@ async function selectFile(filePath: string): Promise<void> {
       <ChangedFileList :files="files" :selected-path="selectedFilePath" @selected="selectFile" />
     </aside>
 
+    <ReviewLayoutResizer side="left" @resize="layout.resize" />
+
     <section class="review-diff-pane">
       <DiffViewer
         :overlay="overlay"
@@ -102,6 +113,8 @@ async function selectFile(filePath: string): Promise<void> {
         @selected="reviewStore.selectBlock"
       />
     </section>
+
+    <ReviewLayoutResizer side="right" @resize="layout.resize" />
 
     <BlockDetailPanel class="review-detail-pane" :block="selectedBlock" />
   </main>

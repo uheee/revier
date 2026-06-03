@@ -18,6 +18,7 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/renderer/**/*.d.ts",
+    "src/renderer/composables/**/*.ts",
     "src/renderer/stores/**/*.ts",
     "src/shared/**/*.ts",
     "tests/**/*.ts"

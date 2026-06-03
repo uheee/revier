@@ -207,7 +207,7 @@ textarea {
 
 .review-workspace {
   display: grid;
-  grid-template-columns: 320px minmax(520px, 1fr) 320px;
+  grid-template-columns: 320px 6px minmax(520px, 1fr) 6px 320px;
   height: 100vh;
   min-width: 1024px;
   overflow: hidden;
@@ -223,6 +223,20 @@ textarea {
 
 .review-sidebar {
   border-right: 1px solid #d7dbe2;
+}
+
+.review-resizer {
+  width: 6px;
+  min-width: 6px;
+  background: #f6f7f9;
+  border-inline: 1px solid #d7dbe2;
+  cursor: col-resize;
+}
+
+.review-resizer:hover,
+.review-resizer:focus-visible {
+  background: #d7dbe2;
+  outline: none;
 }
 
 .review-detail-pane {
@@ -636,6 +650,10 @@ textarea {
     height: auto;
     min-height: 100vh;
     overflow: visible;
+  }
+
+  .review-resizer {
+    display: none;
   }
 
   .review-sidebar,
