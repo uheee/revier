@@ -26,3 +26,8 @@ export interface GitBranch {
   name: string;
   current: boolean;
 }
+
+export interface DirectorySelection {
+  path: string;
+  name: string;
+}

@@ -8,6 +8,7 @@ const api: RevierApi = {
     add: (repoPath, options) => ipcRenderer.invoke(ipcChannels.projectsAdd, repoPath, options),
     update: (project) => ipcRenderer.invoke(ipcChannels.projectsUpdate, project),
     remove: (projectId) => ipcRenderer.invoke(ipcChannels.projectsRemove, projectId),
+    selectDirectory: () => ipcRenderer.invoke(ipcChannels.projectsSelectDirectory),
     validateRepository: (repoPath) =>
       ipcRenderer.invoke(ipcChannels.projectsValidateRepository, repoPath),
     listBranches: (projectId) => ipcRenderer.invoke(ipcChannels.projectsListBranches, projectId)
@@ -24,7 +25,9 @@ const api: RevierApi = {
       return () => ipcRenderer.removeListener(ipcChannels.reviewTaskUpdated, listener);
     },
     listChangedFiles: (taskId) => ipcRenderer.invoke(ipcChannels.reviewListChangedFiles, taskId),
-    getFileOverlay: (request) => ipcRenderer.invoke(ipcChannels.reviewGetFileOverlay, request)
+    getFileOverlay: (request) => ipcRenderer.invoke(ipcChannels.reviewGetFileOverlay, request),
+    listAuthors: (request) => ipcRenderer.invoke(ipcChannels.reviewListAuthors, request),
+    getCommitOverlay: (request) => ipcRenderer.invoke(ipcChannels.reviewGetCommitOverlay, request)
   }
 };
 

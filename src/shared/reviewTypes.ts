@@ -8,6 +8,7 @@ export interface ReviewFilters {
   branch: string;
   startAt?: string;
   endAt?: string;
+  authorKeys?: string[];
   authorQuery?: string;
   messageQuery?: string;
   globRules: string[];
@@ -60,6 +61,24 @@ export interface AuthorSummary {
   email?: string;
 }
 
+export interface AuthorFilterOption extends AuthorSummary {
+  key: string;
+  commitCount: number;
+}
+
+export interface ReviewAuthorOptionsRequest {
+  projectId: ProjectId;
+  branch: string;
+  startAt?: string;
+  endAt?: string;
+}
+
+export interface CommitOverlayRequest {
+  taskId: TaskId;
+  filePath: string;
+  commitHash: string;
+}
+
 export interface TouchedRange {
   oldStart?: number;
   oldEnd?: number;
@@ -91,6 +110,7 @@ export interface SideBySideDiffRow {
   newText?: string;
   type: 'context' | 'added' | 'deleted' | 'modified';
   wordChanges?: WordChange[];
+  blockId?: string;
 }
 
 export interface DiffBlock {
@@ -99,6 +119,8 @@ export interface DiffBlock {
   oldEnd: number;
   newStart: number;
   newEnd: number;
+  rowStartIndex?: number;
+  rowEndIndex?: number;
   changeType: 'added' | 'deleted' | 'modified';
   authors: AuthorSummary[];
   rows: SideBySideDiffRow[];
@@ -106,8 +128,12 @@ export interface DiffBlock {
 }
 
 export interface FileOverlay {
+  mode?: 'range' | 'commit';
   file: ChangedFile;
   range: AnalysisRange;
+  rows?: SideBySideDiffRow[];
   blocks: DiffBlock[];
   warnings: AppError[];
+  commit?: RelatedCommit;
+  parentHash?: string;
 }
