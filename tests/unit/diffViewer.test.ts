@@ -65,6 +65,9 @@ describe('DiffViewer', () => {
     const wrapper = mount(DiffViewer, {
       props: { overlay },
       global: {
+        directives: {
+          loading: {}
+        },
         stubs: {
           'el-empty': true,
           'el-alert': true,
