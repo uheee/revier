@@ -13,7 +13,7 @@ test('project entry UI is interactive', async () => {
   delete env.ELECTRON_RUN_AS_NODE;
 
   const app = await electron.launch({
-    args: [join(process.cwd(), 'out/main/index.js')],
+    args: [join(process.cwd(), 'dist/main/index.js')],
     env
   });
 

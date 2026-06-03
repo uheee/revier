@@ -9,9 +9,9 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "pnpm typecheck && electron-vite build",
-    "preview": "electron-vite preview",
+    "dev": "electron-vite dev --outDir dist",
+    "build": "pnpm typecheck && electron-vite build --outDir dist",
+    "preview": "electron-vite preview --outDir dist",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "test:watch": "vitest",
