@@ -459,13 +459,34 @@ textarea {
   min-width: 720px;
 }
 
+.diff-table--full {
+  min-width: 920px;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #d7dbe2;
+  border-radius: 8px;
+}
+
 .diff-row {
+  position: relative;
   display: grid;
   grid-template-columns: 48px minmax(260px, 1fr) 48px minmax(260px, 1fr);
   min-height: 24px;
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 13px;
   line-height: 22px;
+}
+
+.diff-row.is-clickable {
+  cursor: pointer;
+}
+
+.diff-row.is-clickable:hover {
+  box-shadow: inset 3px 0 0 #9ca3af;
+}
+
+.diff-row.is-selected {
+  box-shadow: inset 3px 0 0 #0f766e;
 }
 
 .diff-row--added {
@@ -514,6 +535,14 @@ textarea {
 .word--added {
   color: #155f34;
   background: #bfe9ce;
+}
+
+.diff-row__authors {
+  position: absolute;
+  top: 2px;
+  right: 8px;
+  z-index: 1;
+  max-width: 36%;
 }
 
 .block-detail-panel {

@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { DiffBlock, FileOverlay, SideBySideDiffRow, WordChange } from '../../../shared/reviewTypes';
 import DiffBlockAuthors from './DiffBlockAuthors.vue';
 
-defineProps<{
+const props = defineProps<{
   overlay?: FileOverlay;
   selectedBlockId?: string;
   loading?: boolean;
@@ -14,6 +15,29 @@ const emit = defineEmits<{
 
 function lineClass(row: SideBySideDiffRow): string {
   return `diff-row diff-row--${row.type}`;
+}
+
+const visibleRows = computed(() => props.overlay?.rows ?? props.overlay?.blocks.flatMap((block) => block.rows) ?? []);
+const blocksById = computed(() => new Map((props.overlay?.blocks ?? []).map((block) => [block.id, block])));
+
+function selectRow(row: SideBySideDiffRow): void {
+  if (!row.blockId) {
+    return;
+  }
+
+  const block = blocksById.value.get(row.blockId);
+  if (block) {
+    emit('selected', block);
+  }
+}
+
+function blockForRow(row: SideBySideDiffRow): DiffBlock | undefined {
+  return row.blockId ? blocksById.value.get(row.blockId) : undefined;
+}
+
+function isBlockStart(row: SideBySideDiffRow, index: number): boolean {
+  const block = blockForRow(row);
+  return Boolean(block && block.rowStartIndex === index);
 }
 
 function visibleWordChanges(row: SideBySideDiffRow, side: 'old' | 'new'): WordChange[] {
@@ -44,21 +68,20 @@ function visibleWordChanges(row: SideBySideDiffRow, side: 'old' | 'new'): WordCh
       </header>
 
       <el-empty v-if="overlay.blocks.length === 0" :image-size="96" description="无可显示变更" />
-      <article
-        v-for="block in overlay.blocks"
-        v-else
-        :key="block.id"
-        class="diff-block"
-        :class="{ 'is-selected': block.id === selectedBlockId }"
-        @click="emit('selected', block)"
-      >
-        <header class="diff-block__header">
-          <span>Lines {{ block.newStart || block.oldStart }}-{{ block.newEnd || block.oldEnd }}</span>
-          <DiffBlockAuthors :authors="block.authors" />
-        </header>
-
-        <div class="diff-table">
-          <div v-for="(row, index) in block.rows" :key="index" :class="lineClass(row)">
+      <div v-else class="diff-table diff-table--full">
+        <div
+          v-for="(row, index) in visibleRows"
+          :key="index"
+          :class="[
+            lineClass(row),
+            {
+              'is-clickable': row.blockId,
+              'is-selected': row.blockId === selectedBlockId
+            }
+          ]"
+          :data-block-id="row.blockId"
+          @click="selectRow(row)"
+        >
             <span class="line-number">{{ row.oldLineNumber ?? '' }}</span>
             <code class="code-cell code-cell--old">
               <template v-for="(change, changeIndex) in visibleWordChanges(row, 'old')" :key="changeIndex">
@@ -73,9 +96,13 @@ function visibleWordChanges(row: SideBySideDiffRow, side: 'old' | 'new'): WordCh
                 <span v-else>{{ change.value }}</span>
               </template>
             </code>
+            <DiffBlockAuthors
+              v-if="isBlockStart(row, index)"
+              class="diff-row__authors"
+              :authors="blockForRow(row)?.authors ?? []"
+            />
           </div>
-        </div>
-      </article>
+      </div>
     </template>
   </section>
 </template>
