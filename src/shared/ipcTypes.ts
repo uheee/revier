@@ -9,6 +9,21 @@ import type {
 
 export type Unsubscribe = () => void;
 
+export const ipcChannels = {
+  projectsList: 'projects:list',
+  projectsAdd: 'projects:add',
+  projectsUpdate: 'projects:update',
+  projectsRemove: 'projects:remove',
+  projectsValidateRepository: 'projects:validateRepository',
+  projectsListBranches: 'projects:listBranches',
+  reviewStartAnalysis: 'review:startAnalysis',
+  reviewCancelAnalysis: 'review:cancelAnalysis',
+  reviewGetTask: 'review:getTask',
+  reviewListChangedFiles: 'review:listChangedFiles',
+  reviewGetFileOverlay: 'review:getFileOverlay',
+  reviewTaskUpdated: 'review:taskUpdated'
+} as const;
+
 export interface RevierApi {
   projects: {
     list(): Promise<ReviewProject[]>;
