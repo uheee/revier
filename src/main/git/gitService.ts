@@ -1,5 +1,8 @@
 import simpleGit from 'simple-git';
+import { parseNameStatus, parseNumstat } from '../analysis/changedFiles';
 import type { GitBranch, RepositoryValidation } from '../../shared/projectTypes';
+import type { ChangedFile } from '../../shared/reviewTypes';
+import type { GitCommitSummary } from './gitTypes';
 
 export class GitService {
   async validateRepository(repoPath: string): Promise<RepositoryValidation> {
@@ -23,5 +26,28 @@ export class GitService {
       name,
       current: name === branchSummary.current
     }));
+  }
+
+  async listCommits(repoPath: string, branch: string): Promise<GitCommitSummary[]> {
+    const result = await simpleGit(repoPath).log([branch, '--date=iso-strict']);
+    return result.all.map((commit) => ({
+      hash: commit.hash,
+      shortHash: commit.hash.slice(0, 8),
+      authorName: commit.author_name,
+      authorEmail: commit.author_email,
+      committedAt: new Date(commit.date).toISOString(),
+      subject: commit.message
+    }));
+  }
+
+  async listChangedFiles(
+    repoPath: string,
+    baseCommit: string,
+    headCommit: string
+  ): Promise<ChangedFile[]> {
+    const git = simpleGit(repoPath);
+    const nameStatus = await git.diff(['--name-status', '--find-renames', `${baseCommit}..${headCommit}`]);
+    const numstat = await git.diff(['--numstat', `${baseCommit}..${headCommit}`]);
+    return parseNumstat(parseNameStatus(nameStatus), numstat);
   }
 }
