@@ -12,7 +12,7 @@ export function createWindow(): BrowserWindow {
     minHeight: 700,
     show: false,
     webPreferences: {
-      preload: join(currentDir, '../preload/index.js'),
+      preload: join(currentDir, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false

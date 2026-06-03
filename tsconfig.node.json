@@ -13,7 +13,6 @@
   "include": [
     "electron.vite.config.ts",
     "playwright.config.ts",
-    "vite.renderer.config.ts",
     "vitest.perf.config.ts",
     "vitest.config.ts",
     "src/main/**/*.ts",
