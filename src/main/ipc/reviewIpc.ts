@@ -161,6 +161,14 @@ export function registerReviewIpc(projectStore: JsonProjectStore): void {
   ipcMain.handle(ipcChannels.reviewListChangedFiles, (_event, taskId: string) =>
     filesByTask.get(taskId) ?? []
   );
+  ipcMain.handle(ipcChannels.reviewListAuthors, async (_event, request) => {
+    const project = (await projectStore.list()).find((item) => item.id === request.projectId);
+    if (!project) {
+      throw new Error('Project not found');
+    }
+
+    return git.listAuthors(project.repoPath, request.branch, request.startAt, request.endAt);
+  });
   ipcMain.handle(ipcChannels.reviewGetFileOverlay, async (_event, request): Promise<FileOverlay> => {
     const filters = filtersByTask.get(request.taskId);
     const range = rangesByTask.get(request.taskId);
@@ -270,17 +278,31 @@ async function touchedRangesForFile(
 }
 
 function hasDisplayCommitFilters(filters: ReviewFilters): boolean {
-  return Boolean(filters.authorQuery?.trim() || filters.messageQuery?.trim());
+  return Boolean((filters.authorKeys?.length ?? 0) > 0 || filters.authorQuery?.trim() || filters.messageQuery?.trim());
 }
 
 function commitMatchesDisplayFilters(commit: GitCommitSummary, filters: ReviewFilters): boolean {
   return (
+    matchesAuthorKeys(commit, filters.authorKeys ?? []) &&
     matchesQuery(`${commit.authorName} ${commit.authorEmail ?? ''}`, filters.authorQuery) &&
     matchesQuery(commit.subject, filters.messageQuery)
   );
 }
 
+function matchesAuthorKeys(commit: GitCommitSummary, authorKeys: string[]): boolean {
+  if (authorKeys.length === 0) {
+    return true;
+  }
+
+  const normalizedKeys = new Set(authorKeys.map((key) => key.toLowerCase()));
+  return normalizedKeys.has(authorKey(commit.authorName, commit.authorEmail));
+}
+
 function matchesQuery(value: string, query?: string): boolean {
   const normalized = query?.trim().toLowerCase();
   return !normalized || value.toLowerCase().includes(normalized);
+}
+
+function authorKey(name: string, email?: string): string {
+  return (email?.trim() || name.trim()).toLowerCase();
 }

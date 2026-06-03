@@ -80,7 +80,7 @@ describe('reviewIpc', () => {
       branch: 'main',
       startAt: '2026-05-01T00:00:00.000Z',
       endAt: '2026-05-31T00:00:00.000Z',
-      authorQuery: 'alice',
+      authorKeys: ['a@example.com'],
       messageQuery: 'feature',
       globRules: ['src/**/*.ts']
     };
@@ -121,7 +121,7 @@ describe('reviewIpc', () => {
       filters: {
         projectId: project.id,
         branch: 'main',
-        authorQuery: 'alice',
+        authorKeys: ['a@example.com'],
         globRules: []
       },
       rangeCommits: [commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app')],

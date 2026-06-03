@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { Play } from 'lucide-vue-next';
-import { reactive, watch } from 'vue';
-import type { ReviewFilters } from '../../../shared/reviewTypes';
+import { computed, reactive, watch } from 'vue';
+import type { GitBranch } from '../../../shared/projectTypes';
+import type { AuthorFilterOption, ReviewFilters } from '../../../shared/reviewTypes';
 
 const props = defineProps<{
   projectId: string;
   defaultBranch: string;
   defaultGlobRules: string[];
+  branches: GitBranch[];
+  authors: AuthorFilterOption[];
+  authorsLoading?: boolean;
   loading?: boolean;
 }>();
 
@@ -16,12 +20,15 @@ const emit = defineEmits<{
 
 const form = reactive({
   branch: props.defaultBranch,
-  startAt: '',
-  endAt: '',
-  authorQuery: '',
+  dateRange: [] as Date[],
+  authorKeys: [] as string[],
   messageQuery: '',
   globRules: props.defaultGlobRules.join('\n')
 });
+
+const branchOptions = computed(() =>
+  props.branches.length > 0 ? props.branches : [{ name: props.defaultBranch || 'HEAD', current: true }]
+);
 
 watch(
   () => props.defaultBranch,
@@ -45,9 +52,9 @@ function submit(): void {
   emit('submit', {
     projectId: props.projectId,
     branch: form.branch.trim() || 'HEAD',
-    startAt: optionalText(form.startAt),
-    endAt: optionalText(form.endAt),
-    authorQuery: optionalText(form.authorQuery),
+    startAt: form.dateRange[0]?.toISOString(),
+    endAt: form.dateRange[1]?.toISOString(),
+    authorKeys: [...form.authorKeys],
     messageQuery: optionalText(form.messageQuery),
     globRules: form.globRules
       .split(/\r?\n/)
@@ -70,23 +77,36 @@ function optionalText(value: string): string | undefined {
 
     <label class="field">
       <span>分支</span>
-      <el-input v-model="form.branch" placeholder="HEAD" />
+      <el-select v-model="form.branch" filterable>
+        <el-option
+          v-for="branch in branchOptions"
+          :key="branch.name"
+          :label="branch.current ? `${branch.name}（当前）` : branch.name"
+          :value="branch.name"
+        />
+      </el-select>
     </label>
 
-    <div class="field-grid">
-      <label class="field">
-        <span>开始时间</span>
-        <el-input v-model="form.startAt" placeholder="2026-05-01T00:00:00.000Z" />
-      </label>
-      <label class="field">
-        <span>结束时间</span>
-        <el-input v-model="form.endAt" placeholder="2026-06-01T00:00:00.000Z" />
-      </label>
-    </div>
+    <label class="field">
+      <span>时间范围</span>
+      <el-date-picker
+        v-model="form.dateRange"
+        type="datetimerange"
+        start-placeholder="开始时间"
+        end-placeholder="结束时间"
+      />
+    </label>
 
     <label class="field">
       <span>作者</span>
-      <el-input v-model="form.authorQuery" clearable />
+      <el-select v-model="form.authorKeys" multiple filterable clearable :loading="authorsLoading">
+        <el-option
+          v-for="author in authors"
+          :key="author.key"
+          :label="author.email ? `${author.name} <${author.email}>` : author.name"
+          :value="author.key"
+        />
+      </el-select>
     </label>
 
     <label class="field">

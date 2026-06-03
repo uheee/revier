@@ -2,7 +2,7 @@ import simpleGit from 'simple-git';
 import { resolve } from 'node:path';
 import { normalizeGitPath, parseNameStatus, parseNumstat } from '../analysis/changedFiles';
 import type { GitBranch, RepositoryValidation } from '../../shared/projectTypes';
-import type { ChangedFile } from '../../shared/reviewTypes';
+import type { AuthorFilterOption, ChangedFile } from '../../shared/reviewTypes';
 import type { GitCommitSummary } from './gitTypes';
 
 const invalidRepositoryMessage = '请选择一个 Git 仓库目录';
@@ -44,6 +44,41 @@ export class GitService {
     }));
   }
 
+  async listAuthors(
+    repoPath: string,
+    branch: string,
+    startAt?: string,
+    endAt?: string
+  ): Promise<AuthorFilterOption[]> {
+    const commits = await this.listCommits(repoPath, branch);
+    const startTime = startAt ? new Date(startAt).getTime() : Number.NEGATIVE_INFINITY;
+    const endTime = endAt ? new Date(endAt).getTime() : Number.POSITIVE_INFINITY;
+    const authors = new Map<string, AuthorFilterOption>();
+
+    for (const commit of commits) {
+      const committedTime = new Date(commit.committedAt).getTime();
+      if (committedTime < startTime || committedTime > endTime) {
+        continue;
+      }
+
+      const key = authorKey(commit.authorName, commit.authorEmail);
+      const current = authors.get(key);
+      authors.set(key, {
+        key,
+        name: commit.authorName,
+        email: commit.authorEmail,
+        commitCount: (current?.commitCount ?? 0) + 1
+      });
+    }
+
+    return [...authors.values()].sort((left, right) => {
+      if (right.commitCount !== left.commitCount) {
+        return right.commitCount - left.commitCount;
+      }
+      return left.name.localeCompare(right.name);
+    });
+  }
+
   async listChangedFiles(
     repoPath: string,
     baseCommit: string,
@@ -80,4 +115,8 @@ export class GitService {
 
 function normalizeRepositoryPath(repoPath: string): string {
   return resolve(repoPath).replace(/\\/g, '/').replace(/\/$/, '');
+}
+
+function authorKey(name: string, email?: string): string {
+  return (email?.trim() || name.trim()).toLowerCase();
 }

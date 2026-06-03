@@ -10,21 +10,23 @@ import TaskProgress from '../components/review/TaskProgress.vue';
 import { useProjectStore } from '../stores/projectStore';
 import { useReviewStore } from '../stores/reviewStore';
 import type { ReviewFilters } from '../../shared/reviewTypes';
+import type { GitBranch } from '../../shared/projectTypes';
 
 const route = useRoute();
 const router = useRouter();
 const projectStore = useProjectStore();
 const reviewStore = useReviewStore();
-const { task, files, overlay, selectedBlock, loading, error } = storeToRefs(reviewStore);
+const { task, files, overlay, selectedBlock, authors, authorsLoading, loading, error } = storeToRefs(reviewStore);
 const projectId = computed(() => String(route.params.projectId ?? ''));
 const selectedFilePath = ref<string>();
+const branches = ref<GitBranch[]>([]);
 const project = computed(() => projectStore.projects.find((item) => item.id === projectId.value));
 const defaultBranch = computed(() => project.value?.preferences.defaultBranch ?? 'HEAD');
 const defaultGlobRules = computed(() => project.value?.preferences.defaultGlobRules ?? []);
 let unsubscribe: (() => void) | undefined;
 
 onMounted(() => {
-  void projectStore.loadProjects();
+  void initializeProject();
   unsubscribe = window.revier.review.onTaskUpdate((snapshot) => {
     if (snapshot.taskId === reviewStore.task?.taskId) {
       reviewStore.task = snapshot;
@@ -42,6 +44,23 @@ async function runAnalysis(filters: ReviewFilters): Promise<void> {
   if (reviewStore.files[0]) {
     await selectFile(reviewStore.files[0].path);
   }
+}
+
+async function initializeProject(): Promise<void> {
+  await projectStore.loadProjects();
+  await loadReviewMetadata();
+}
+
+async function loadReviewMetadata(): Promise<void> {
+  if (!projectId.value) {
+    return;
+  }
+
+  branches.value = await window.revier.projects.listBranches(projectId.value);
+  await reviewStore.loadAuthors({
+    projectId: projectId.value,
+    branch: defaultBranch.value
+  });
 }
 
 async function selectFile(filePath: string): Promise<void> {
@@ -65,6 +84,9 @@ async function selectFile(filePath: string): Promise<void> {
         :project-id="projectId"
         :default-branch="defaultBranch"
         :default-glob-rules="defaultGlobRules"
+        :branches="branches"
+        :authors="authors"
+        :authors-loading="authorsLoading"
         :loading="loading"
         @submit="runAnalysis"
       />

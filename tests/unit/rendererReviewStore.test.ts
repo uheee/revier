@@ -6,6 +6,7 @@ import type {
   ChangedFile,
   DiffBlock,
   FileOverlay,
+  ReviewAuthorOptionsRequest,
   ReviewFilters
 } from '../../src/shared/reviewTypes';
 
@@ -100,6 +101,27 @@ describe('renderer reviewStore', () => {
     expect(store.overlay).toEqual(overlay);
     expect(store.selectedBlock).toEqual(block);
   });
+
+  it('loads author filter options', async () => {
+    const request: ReviewAuthorOptionsRequest = {
+      projectId: 'project-1',
+      branch: 'develop'
+    };
+    const authors = [
+      { key: 'alice@example.com', name: 'Alice', email: 'alice@example.com', commitCount: 2 }
+    ];
+    const api = mockApi({
+      listAuthors: vi.fn(async () => authors)
+    });
+    vi.stubGlobal('window', { revier: api });
+
+    const store = useReviewStore();
+    await store.loadAuthors(request);
+
+    expect(api.review.listAuthors).toHaveBeenCalledWith(request);
+    expect(store.authors).toEqual(authors);
+    expect(store.authorsLoading).toBe(false);
+  });
 });
 
 function mockApi(review: Partial<RevierApi['review']>): RevierApi {
@@ -119,6 +141,8 @@ function mockApi(review: Partial<RevierApi['review']>): RevierApi {
       onTaskUpdate: vi.fn(),
       listChangedFiles: vi.fn(),
       getFileOverlay: vi.fn(),
+      listAuthors: vi.fn(),
+      getCommitOverlay: vi.fn(),
       ...review
     }
   } as unknown as RevierApi;

@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia';
 import type {
   AnalysisTaskSnapshot,
+  AuthorFilterOption,
   ChangedFile,
   DiffBlock,
   FileOverlay,
+  ReviewAuthorOptionsRequest,
   ReviewFilters
 } from '../../shared/reviewTypes';
 
@@ -12,6 +14,8 @@ interface ReviewState {
   files: ChangedFile[];
   overlay?: FileOverlay;
   selectedBlock?: DiffBlock;
+  authors: AuthorFilterOption[];
+  authorsLoading: boolean;
   loading: boolean;
   error?: string;
 }
@@ -22,6 +26,8 @@ export const useReviewStore = defineStore('review', {
     files: [],
     overlay: undefined,
     selectedBlock: undefined,
+    authors: [],
+    authorsLoading: false,
     loading: false,
     error: undefined
   }),
@@ -64,6 +70,18 @@ export const useReviewStore = defineStore('review', {
 
     selectBlock(block?: DiffBlock): void {
       this.selectedBlock = block;
+    },
+
+    async loadAuthors(request: ReviewAuthorOptionsRequest): Promise<void> {
+      this.authorsLoading = true;
+      this.error = undefined;
+      try {
+        this.authors = await window.revier.review.listAuthors(request);
+      } catch (error) {
+        this.error = toErrorMessage(error);
+      } finally {
+        this.authorsLoading = false;
+      }
     }
   }
 });
