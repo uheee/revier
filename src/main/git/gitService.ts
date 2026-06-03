@@ -1,5 +1,5 @@
 import simpleGit from 'simple-git';
-import { parseNameStatus, parseNumstat } from '../analysis/changedFiles';
+import { normalizeGitPath, parseNameStatus, parseNumstat } from '../analysis/changedFiles';
 import type { GitBranch, RepositoryValidation } from '../../shared/projectTypes';
 import type { ChangedFile } from '../../shared/reviewTypes';
 import type { GitCommitSummary } from './gitTypes';
@@ -49,5 +49,27 @@ export class GitService {
     const nameStatus = await git.diff(['--name-status', '--find-renames', `${baseCommit}..${headCommit}`]);
     const numstat = await git.diff(['--numstat', `${baseCommit}..${headCommit}`]);
     return parseNumstat(parseNameStatus(nameStatus), numstat);
+  }
+
+  async readFileAtCommit(repoPath: string, commit: string, filePath: string): Promise<string> {
+    try {
+      return await simpleGit(repoPath).show([`${commit}:${normalizeGitPath(filePath)}`]);
+    } catch {
+      return '';
+    }
+  }
+
+  async showFilePatch(repoPath: string, commit: string, filePath: string): Promise<string> {
+    try {
+      return await simpleGit(repoPath).show([
+        '--format=',
+        '--find-renames',
+        commit,
+        '--',
+        normalizeGitPath(filePath)
+      ]);
+    } catch {
+      return '';
+    }
   }
 }
