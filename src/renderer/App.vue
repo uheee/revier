@@ -1,5 +1,7 @@
 <template>
-  <main class="app-shell">
-    <h1>Revier</h1>
-  </main>
+  <RouterView />
 </template>
+
+<script setup lang="ts">
+import { RouterView } from 'vue-router';
+</script>

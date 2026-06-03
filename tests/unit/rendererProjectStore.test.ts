@@ -1,0 +1,81 @@
+import { createPinia, setActivePinia } from 'pinia';
+import { useProjectStore } from '../../src/renderer/stores/projectStore';
+import type { RevierApi } from '../../src/shared/ipcTypes';
+import type { ReviewProject } from '../../src/shared/projectTypes';
+
+const project: ReviewProject = {
+  id: 'project-1',
+  name: 'Revier',
+  repoPath: 'E:/Projects/revier',
+  pinned: true,
+  lastOpenedAt: '2026-06-03T00:00:00.000Z',
+  preferences: {
+    defaultBranch: 'develop',
+    defaultDays: 30,
+    defaultGlobRules: ['src/**/*.ts']
+  }
+};
+
+describe('renderer projectStore', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('loads projects through preload API', async () => {
+    const api = mockApi({
+      list: vi.fn(async () => [project])
+    });
+    vi.stubGlobal('window', { revier: api });
+
+    const store = useProjectStore();
+    await store.loadProjects();
+
+    expect(api.projects.list).toHaveBeenCalledTimes(1);
+    expect(store.projects).toEqual([project]);
+    expect(store.loading).toBe(false);
+    expect(store.error).toBeUndefined();
+  });
+
+  it('adds and removes projects then refreshes the list', async () => {
+    const api = mockApi({
+      list: vi.fn(async () => []),
+      add: vi.fn(async () => project),
+      remove: vi.fn(async () => undefined)
+    });
+    vi.stubGlobal('window', { revier: api });
+
+    const store = useProjectStore();
+    await store.addProject(project.repoPath, project.name);
+    await store.removeProject(project.id);
+
+    expect(api.projects.add).toHaveBeenCalledWith(project.repoPath, { name: project.name });
+    expect(api.projects.remove).toHaveBeenCalledWith(project.id);
+    expect(api.projects.list).toHaveBeenCalledTimes(2);
+  });
+});
+
+function mockApi(projects: Partial<RevierApi['projects']>): RevierApi {
+  return {
+    projects: {
+      list: vi.fn(async () => []),
+      add: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn(),
+      validateRepository: vi.fn(),
+      listBranches: vi.fn(),
+      ...projects
+    },
+    review: {
+      startAnalysis: vi.fn(),
+      cancelAnalysis: vi.fn(),
+      getTask: vi.fn(),
+      onTaskUpdate: vi.fn(),
+      listChangedFiles: vi.fn(),
+      getFileOverlay: vi.fn()
+    }
+  } as unknown as RevierApi;
+}
