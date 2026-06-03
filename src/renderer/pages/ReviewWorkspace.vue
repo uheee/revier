@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import BlockDetailPanel from '../components/review/BlockDetailPanel.vue';
 import ChangedFileList from '../components/review/ChangedFileList.vue';
+import DiffDrilldownOverlay from '../components/review/DiffDrilldownOverlay.vue';
 import DiffViewer from '../components/review/DiffViewer.vue';
 import FilterPanel from '../components/review/FilterPanel.vue';
 import ReviewLayoutResizer from '../components/review/ReviewLayoutResizer.vue';
@@ -11,14 +12,26 @@ import TaskProgress from '../components/review/TaskProgress.vue';
 import { useReviewLayoutSizes } from '../composables/useReviewLayoutSizes';
 import { useProjectStore } from '../stores/projectStore';
 import { useReviewStore } from '../stores/reviewStore';
-import type { ReviewFilters } from '../../shared/reviewTypes';
+import type { RelatedCommit, ReviewFilters } from '../../shared/reviewTypes';
 import type { GitBranch } from '../../shared/projectTypes';
 
 const route = useRoute();
 const router = useRouter();
 const projectStore = useProjectStore();
 const reviewStore = useReviewStore();
-const { task, files, overlay, selectedBlock, authors, authorsLoading, loading, error } = storeToRefs(reviewStore);
+const {
+  task,
+  files,
+  overlay,
+  selectedBlock,
+  drilldownOverlay,
+  selectedCommitHash,
+  drilldownLoading,
+  authors,
+  authorsLoading,
+  loading,
+  error
+} = storeToRefs(reviewStore);
 const projectId = computed(() => String(route.params.projectId ?? ''));
 const selectedFilePath = ref<string>();
 const branches = ref<GitBranch[]>([]);
@@ -72,6 +85,14 @@ async function selectFile(filePath: string): Promise<void> {
   selectedFilePath.value = filePath;
   await reviewStore.loadOverlay(filePath);
 }
+
+async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
+  if (!selectedFilePath.value) {
+    return;
+  }
+
+  await reviewStore.loadCommitOverlay(selectedFilePath.value, commit.hash);
+}
 </script>
 
 <template>
@@ -112,10 +133,20 @@ async function selectFile(filePath: string): Promise<void> {
         :selected-block-id="selectedBlock?.id"
         @selected="reviewStore.selectBlock"
       />
+      <DiffDrilldownOverlay
+        :overlay="drilldownOverlay"
+        :loading="drilldownLoading"
+        @close="reviewStore.closeCommitDrilldown"
+      />
     </section>
 
     <ReviewLayoutResizer side="right" @resize="layout.resize" />
 
-    <BlockDetailPanel class="review-detail-pane" :block="selectedBlock" />
+    <BlockDetailPanel
+      class="review-detail-pane"
+      :block="selectedBlock"
+      :selected-commit-hash="selectedCommitHash"
+      @commit-selected="openCommitDrilldown"
+    />
   </main>
 </template>

@@ -89,6 +89,7 @@ export const useReviewStore = defineStore('review', {
       this.drilldownLoading = true;
       this.error = undefined;
       this.selectedCommitHash = commitHash;
+      this.drilldownOverlay = undefined;
       try {
         this.drilldownOverlay = await window.revier.review.getCommitOverlay({
           taskId: this.task.taskId,

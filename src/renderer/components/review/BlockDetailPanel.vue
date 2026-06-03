@@ -4,6 +4,11 @@ import DiffBlockAuthors from './DiffBlockAuthors.vue';
 
 defineProps<{
   block?: DiffBlock;
+  selectedCommitHash?: string;
+}>();
+
+const emit = defineEmits<{
+  commitSelected: [commit: RelatedCommit];
 }>();
 
 function formatDate(value: string): string {
@@ -43,13 +48,21 @@ function commitKey(commit: RelatedCommit): string {
         <span class="detail-kicker">相关提交</span>
         <el-empty v-if="block.relatedCommits.length === 0" :image-size="64" description="暂无提交" />
         <ul v-else class="commit-list">
-          <li v-for="commit in block.relatedCommits" :key="commitKey(commit)" class="commit-row">
-            <div class="commit-row__top">
-              <code>{{ commit.shortHash }}</code>
-              <el-tag v-if="commit.matchedByFilter" size="small" type="success" effect="plain">命中筛选</el-tag>
-            </div>
-            <p>{{ commit.subject }}</p>
-            <span>{{ commit.authorName }} · {{ formatDate(commit.committedAt) }}</span>
+          <li v-for="commit in block.relatedCommits" :key="commitKey(commit)" class="commit-list__item">
+            <button
+              class="commit-row"
+              :class="{ 'is-selected': commit.hash === selectedCommitHash }"
+              :data-commit-hash="commit.hash"
+              type="button"
+              @click="emit('commitSelected', commit)"
+            >
+              <div class="commit-row__top">
+                <code>{{ commit.shortHash }}</code>
+                <el-tag v-if="commit.matchedByFilter" size="small" type="success" effect="plain">命中筛选</el-tag>
+              </div>
+              <p>{{ commit.subject }}</p>
+              <span>{{ commit.authorName }} · {{ formatDate(commit.committedAt) }}</span>
+            </button>
           </li>
         </ul>
       </section>

@@ -244,6 +244,7 @@ textarea {
 }
 
 .review-diff-pane {
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -594,11 +595,27 @@ textarea {
   list-style: none;
 }
 
+.commit-list__item {
+  margin: 0;
+  padding: 0;
+}
+
 .commit-row {
   display: grid;
   gap: 5px;
+  width: 100%;
   padding: 10px 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
   border-bottom: 1px solid #eceff3;
+  cursor: pointer;
+  text-align: left;
+}
+
+.commit-row:hover,
+.commit-row.is-selected {
+  background: #eef8f6;
 }
 
 .commit-row__top {
@@ -628,6 +645,79 @@ textarea {
 .commit-row span {
   color: #6b7280;
   font-size: 12px;
+}
+
+.diff-drilldown {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: auto;
+  background: #f6f7f9;
+  border-left: 1px solid #d7dbe2;
+}
+
+.diff-drilldown__bar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #d7dbe2;
+}
+
+.diff-drilldown__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: #1f2937;
+  font-size: 13px;
+}
+
+.diff-drilldown__title code {
+  color: #0f766e;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.diff-drilldown__title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drilldown-cover-enter-active {
+  transition:
+    transform 200ms ease,
+    opacity 200ms ease;
+}
+
+.drilldown-cover-enter-from {
+  opacity: 0.92;
+  transform: translateX(100%);
+}
+
+.drilldown-cover-enter-to {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.drilldown-cover-leave-active {
+  transition: opacity 120ms ease;
+}
+
+.drilldown-cover-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drilldown-cover-enter-active,
+  .drilldown-cover-leave-active {
+    transition: none;
+  }
 }
 
 @media (max-width: 860px) {
