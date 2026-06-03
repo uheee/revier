@@ -46,6 +46,7 @@ const block: DiffBlock = {
 };
 
 const overlay: FileOverlay = {
+  mode: 'range',
   file,
   range: {
     branch: 'develop',
@@ -53,6 +54,7 @@ const overlay: FileOverlay = {
     headCommit: 'head'
   },
   blocks: [block],
+  rows: [],
   warnings: []
 };
 
@@ -121,6 +123,44 @@ describe('renderer reviewStore', () => {
     expect(api.review.listAuthors).toHaveBeenCalledWith(request);
     expect(store.authors).toEqual(authors);
     expect(store.authorsLoading).toBe(false);
+  });
+
+  it('loads and clears commit drilldown overlay', async () => {
+    const commitOverlay: FileOverlay = {
+      ...overlay,
+      mode: 'commit',
+      commit: {
+        hash: 'abc123',
+        shortHash: 'abc123',
+        authorName: 'Alice',
+        authorEmail: 'alice@example.com',
+        committedAt: '2026-05-10T00:00:00.000Z',
+        subject: 'feature: update app',
+        matchedByFilter: true,
+        touchedRanges: []
+      },
+      parentHash: 'parent'
+    };
+    const api = mockApi({
+      getCommitOverlay: vi.fn(async () => commitOverlay)
+    });
+    vi.stubGlobal('window', { revier: api });
+
+    const store = useReviewStore();
+    store.task = task;
+    await store.loadCommitOverlay(file.path, 'abc123');
+
+    expect(api.review.getCommitOverlay).toHaveBeenCalledWith({
+      taskId: task.taskId,
+      filePath: file.path,
+      commitHash: 'abc123'
+    });
+    expect(store.drilldownOverlay).toEqual(commitOverlay);
+    expect(store.selectedCommitHash).toBe('abc123');
+
+    store.closeCommitDrilldown();
+    expect(store.drilldownOverlay).toBeUndefined();
+    expect(store.selectedCommitHash).toBeUndefined();
   });
 });
 

@@ -7,7 +7,11 @@ vi.mock('electron', () => ({
   }
 }));
 
-import { buildFileOverlayForTask, resolveAnalysisScope } from '../../src/main/ipc/reviewIpc';
+import {
+  buildCommitOverlayForTask,
+  buildFileOverlayForTask,
+  resolveAnalysisScope
+} from '../../src/main/ipc/reviewIpc';
 import type { ReviewProject } from '../../src/shared/projectTypes';
 import type { AnalysisRange, ChangedFile, ReviewFilters } from '../../src/shared/reviewTypes';
 
@@ -142,6 +146,36 @@ describe('reviewIpc', () => {
     expect(overlay.blocks[0].rowEndIndex).toBe(0);
     expect(overlay.blocks[0].authors).toEqual([{ name: 'Alice', email: 'a@example.com' }]);
     expect(overlay.blocks[0].relatedCommits[0].matchedByFilter).toBe(true);
+  });
+
+  it('builds a commit overlay from the commit first parent to the commit', async () => {
+    const range: AnalysisRange = {
+      branch: 'main',
+      baseCommit: 'base',
+      headCommit: 'head'
+    };
+    const related = commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app');
+    const overlay = await buildCommitOverlayForTask({
+      project,
+      file: modifiedFile,
+      range,
+      commitHash: related.hash,
+      rangeCommits: [related],
+      git: {
+        listCommits: vi.fn(),
+        listChangedFiles: vi.fn(),
+        readFileAtCommit: vi.fn(async (_repoPath, commitHash) =>
+          commitHash === 'parent' ? 'const name = "old";\n' : 'const name = "new";\n'
+        ),
+        showFilePatch: vi.fn(async () => '@@ -1 +1 @@\n-old\n+new\n'),
+        getFirstParent: vi.fn(async () => 'parent')
+      }
+    });
+
+    expect(overlay.mode).toBe('commit');
+    expect(overlay.parentHash).toBe('parent');
+    expect(overlay.commit?.hash).toBe('alice');
+    expect(overlay.blocks).toHaveLength(1);
   });
 });
 

@@ -14,6 +14,9 @@ interface ReviewState {
   files: ChangedFile[];
   overlay?: FileOverlay;
   selectedBlock?: DiffBlock;
+  drilldownOverlay?: FileOverlay;
+  selectedCommitHash?: string;
+  drilldownLoading: boolean;
   authors: AuthorFilterOption[];
   authorsLoading: boolean;
   loading: boolean;
@@ -26,6 +29,9 @@ export const useReviewStore = defineStore('review', {
     files: [],
     overlay: undefined,
     selectedBlock: undefined,
+    drilldownOverlay: undefined,
+    selectedCommitHash: undefined,
+    drilldownLoading: false,
     authors: [],
     authorsLoading: false,
     loading: false,
@@ -37,6 +43,7 @@ export const useReviewStore = defineStore('review', {
       this.error = undefined;
       this.overlay = undefined;
       this.selectedBlock = undefined;
+      this.closeCommitDrilldown();
       try {
         this.task = await window.revier.review.startAnalysis(filters);
         this.files = await window.revier.review.listChangedFiles(this.task.taskId);
@@ -56,6 +63,7 @@ export const useReviewStore = defineStore('review', {
       this.loading = true;
       this.error = undefined;
       this.selectedBlock = undefined;
+      this.closeCommitDrilldown();
       try {
         this.overlay = await window.revier.review.getFileOverlay({
           taskId: this.task.taskId,
@@ -70,6 +78,33 @@ export const useReviewStore = defineStore('review', {
 
     selectBlock(block?: DiffBlock): void {
       this.selectedBlock = block;
+    },
+
+    async loadCommitOverlay(filePath: string, commitHash: string): Promise<void> {
+      if (!this.task) {
+        this.error = 'No active analysis task';
+        return;
+      }
+
+      this.drilldownLoading = true;
+      this.error = undefined;
+      this.selectedCommitHash = commitHash;
+      try {
+        this.drilldownOverlay = await window.revier.review.getCommitOverlay({
+          taskId: this.task.taskId,
+          filePath,
+          commitHash
+        });
+      } catch (error) {
+        this.error = toErrorMessage(error);
+      } finally {
+        this.drilldownLoading = false;
+      }
+    },
+
+    closeCommitDrilldown(): void {
+      this.drilldownOverlay = undefined;
+      this.selectedCommitHash = undefined;
     },
 
     async loadAuthors(request: ReviewAuthorOptionsRequest): Promise<void> {

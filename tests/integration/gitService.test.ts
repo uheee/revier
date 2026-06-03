@@ -96,4 +96,23 @@ describe('GitService repository validation', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('resolves the first parent of a commit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'revier-git-parent-'));
+
+    try {
+      const repo = await initTestRepo(dir);
+      const child = await commitFiles(repo, {
+        message: 'feat: child',
+        files: { 'src/app.ts': 'export const value = 1;\n' }
+      });
+      const service = new GitService();
+      const parent = await service.getFirstParent(dir, child);
+
+      expect(parent).toHaveLength(40);
+      expect(parent).not.toBe(child);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

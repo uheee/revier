@@ -111,6 +111,12 @@ export class GitService {
       return '';
     }
   }
+
+  async getFirstParent(repoPath: string, commitHash: string): Promise<string> {
+    const line = (await simpleGit(repoPath).raw(['rev-list', '--parents', '-n', '1', commitHash])).trim();
+    const [, parent] = line.split(/\s+/);
+    return parent ?? `${commitHash}^`;
+  }
 }
 
 function normalizeRepositoryPath(repoPath: string): string {

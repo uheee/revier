@@ -30,6 +30,10 @@ interface AnalysisGitClient {
   showFilePatch(repoPath: string, commit: string, filePath: string): Promise<string>;
 }
 
+interface CommitOverlayGitClient extends AnalysisGitClient {
+  getFirstParent(repoPath: string, commitHash: string): Promise<string>;
+}
+
 interface ResolveAnalysisScopeInput {
   project: ReviewProject;
   filters: ReviewFilters;
@@ -49,6 +53,15 @@ interface BuildFileOverlayInput {
   rangeCommits: GitCommitSummary[];
   filters: ReviewFilters;
   git: AnalysisGitClient;
+}
+
+interface BuildCommitOverlayInput {
+  project: ReviewProject;
+  file: ChangedFile;
+  range: AnalysisRange;
+  commitHash: string;
+  rangeCommits: GitCommitSummary[];
+  git: CommitOverlayGitClient;
 }
 
 export async function resolveAnalysisScope({
@@ -112,6 +125,55 @@ export async function buildFileOverlayForTask({
     rows: maskFilteredRows(diff.rows, visibleBlocks),
     blocks: visibleBlocks,
     warnings: []
+  };
+}
+
+export async function buildCommitOverlayForTask({
+  project,
+  file,
+  range,
+  commitHash,
+  rangeCommits,
+  git
+}: BuildCommitOverlayInput): Promise<FileOverlay> {
+  const commit = rangeCommits.find((item) => item.hash === commitHash);
+  if (!commit) {
+    throw new Error('该提交不在当前筛选范围内');
+  }
+
+  const patch = await showPatchForAnyFilePath(project.repoPath, commitHash, file, git);
+  if (!patch.trim()) {
+    throw new Error('该提交未修改当前文件');
+  }
+
+  const parentHash = await git.getFirstParent(project.repoPath, commitHash);
+  const oldText = await git.readFileAtCommit(project.repoPath, parentHash, file.oldPath ?? file.path);
+  const newText = await git.readFileAtCommit(project.repoPath, commitHash, file.path);
+  const diff = buildFileOverlayDiff({ file, oldText, newText });
+  const relatedCommit: RelatedCommit = {
+    hash: commit.hash,
+    shortHash: commit.shortHash,
+    authorName: commit.authorName,
+    authorEmail: commit.authorEmail,
+    committedAt: commit.committedAt,
+    subject: commit.subject,
+    matchedByFilter: false,
+    touchedRanges: parsePatchTouchedRanges(patch)
+  };
+
+  return {
+    mode: 'commit',
+    file,
+    range,
+    rows: diff.rows,
+    blocks: diff.blocks.map((block) => ({
+      ...block,
+      authors: [{ name: commit.authorName, email: commit.authorEmail }],
+      relatedCommits: [relatedCommit]
+    })),
+    warnings: [],
+    commit: relatedCommit,
+    parentHash
   };
 }
 
@@ -188,6 +250,24 @@ export function registerReviewIpc(projectStore: JsonProjectStore): void {
       range,
       rangeCommits,
       filters,
+      git
+    });
+  });
+  ipcMain.handle(ipcChannels.reviewGetCommitOverlay, async (_event, request): Promise<FileOverlay> => {
+    const range = rangesByTask.get(request.taskId);
+    const project = projectsByTask.get(request.taskId);
+    const rangeCommits = rangeCommitsByTask.get(request.taskId) ?? [];
+    const file = filesByTask.get(request.taskId)?.find((item) => item.path === request.filePath);
+    if (!range || !project || !file) {
+      throw new Error('Commit overlay request is not associated with an active task file');
+    }
+
+    return buildCommitOverlayForTask({
+      project,
+      file,
+      range,
+      commitHash: request.commitHash,
+      rangeCommits,
       git
     });
   });
@@ -288,6 +368,22 @@ async function touchedRangesForFile(
     ranges.push(...parsePatchTouchedRanges(patch));
   }
   return ranges;
+}
+
+async function showPatchForAnyFilePath(
+  repoPath: string,
+  commitHash: string,
+  file: ChangedFile,
+  git: Pick<AnalysisGitClient, 'showFilePatch'>
+): Promise<string> {
+  const paths = [...new Set([file.path, file.oldPath].filter((path): path is string => Boolean(path)))];
+  for (const path of paths) {
+    const patch = await git.showFilePatch(repoPath, commitHash, path);
+    if (patch.trim()) {
+      return patch;
+    }
+  }
+  return '';
 }
 
 function hasDisplayCommitFilters(filters: ReviewFilters): boolean {
