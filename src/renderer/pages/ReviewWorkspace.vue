@@ -103,7 +103,7 @@ async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
   >
     <aside class="review-sidebar">
       <section class="review-project-summary">
-        <el-button text @click="router.push({ name: 'projects' })">返回</el-button>
+        <n-button text @click="router.push({ name: 'projects' })">返回</n-button>
         <div>
           <h1>{{ project?.name ?? 'Review' }}</h1>
           <p>{{ project?.repoPath ?? projectId }}</p>

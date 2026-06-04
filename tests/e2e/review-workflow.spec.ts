@@ -35,8 +35,8 @@ test('project entry UI is interactive', async () => {
     await expect(page.getByText(normalizedRepoPath)).toBeVisible();
     await page.getByRole('button', { name: '打开' }).first().click();
     await expect(page.getByRole('heading', { name: '筛选' })).toBeVisible();
-    await expect(page.locator('.filter-panel .el-select').first()).toBeVisible();
-    await expect(page.locator('.filter-panel .el-date-editor')).toBeVisible();
+    await expect(page.locator('[data-test="branch-select"]')).toBeVisible();
+    await expect(page.locator('[data-test="date-range"]')).toBeVisible();
 
     await page.getByRole('button', { name: /分析/ }).click();
     await expect(page.locator('.diff-table--full')).toBeVisible({ timeout: 20000 });

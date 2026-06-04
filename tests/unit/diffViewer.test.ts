@@ -69,10 +69,11 @@ describe('DiffViewer', () => {
           loading: {}
         },
         stubs: {
-          'el-empty': true,
-          'el-alert': true,
-          'el-tag': { template: '<span><slot /></span>' },
-          'el-tooltip': { template: '<span><slot /></span>' }
+          'n-spin': { template: '<div><slot /></div>' },
+          'n-empty': true,
+          'n-alert': true,
+          'n-tag': { template: '<span><slot /></span>' },
+          'n-tooltip': { template: '<span><slot /></span>' }
         }
       }
     });

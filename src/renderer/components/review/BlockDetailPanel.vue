@@ -32,7 +32,7 @@ function commitKey(commit: RelatedCommit): string {
       <h2>详情</h2>
     </header>
 
-    <el-empty v-if="!block" :image-size="80" description="未选择变更块" />
+    <n-empty v-if="!block" size="small" description="未选择变更块" />
     <template v-else>
       <section class="detail-section">
         <span class="detail-kicker">行区间</span>
@@ -46,7 +46,7 @@ function commitKey(commit: RelatedCommit): string {
 
       <section class="detail-section">
         <span class="detail-kicker">相关提交</span>
-        <el-empty v-if="block.relatedCommits.length === 0" :image-size="64" description="暂无提交" />
+        <n-empty v-if="block.relatedCommits.length === 0" size="small" description="暂无提交" />
         <ul v-else class="commit-list">
           <li v-for="commit in block.relatedCommits" :key="commitKey(commit)" class="commit-list__item">
             <button
@@ -58,7 +58,7 @@ function commitKey(commit: RelatedCommit): string {
             >
               <div class="commit-row__top">
                 <code>{{ commit.shortHash }}</code>
-                <el-tag v-if="commit.matchedByFilter" size="small" type="success" effect="plain">命中筛选</el-tag>
+                <n-tag v-if="commit.matchedByFilter" size="small" type="success" :bordered="false">命中筛选</n-tag>
               </div>
               <p>{{ commit.subject }}</p>
               <span>{{ commit.authorName }} · {{ formatDate(commit.committedAt) }}</span>

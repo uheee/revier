@@ -44,7 +44,7 @@ function stageText(task?: AnalysisTaskSnapshot): string {
       <h2>任务</h2>
     </header>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
+    <n-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
     <template v-else>
       <div class="task-progress__row">
         <span>状态</span>
@@ -54,10 +54,10 @@ function stageText(task?: AnalysisTaskSnapshot): string {
         <span>阶段</span>
         <strong>{{ stageText(task) }}</strong>
       </div>
-      <el-progress
+      <n-progress
         v-if="loading || task"
         :percentage="Math.round((task?.progress ?? (loading ? 0.35 : 0)) * 100)"
-        :show-text="false"
+        :show-indicator="false"
       />
       <p v-if="task?.message" class="task-progress__message">{{ task.message }}</p>
     </template>

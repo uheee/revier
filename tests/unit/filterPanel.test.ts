@@ -20,27 +20,23 @@ describe('FilterPanel', () => {
       },
       global: {
         stubs: {
-          'el-select': {
-            props: ['modelValue', 'multiple'],
-            emits: ['update:modelValue'],
+          'n-select': {
+            props: ['value', 'multiple'],
+            emits: ['update:value'],
             template:
-              '<div><button type="button" data-test="set-select" @click="$emit(\'update:modelValue\', multiple !== undefined ? [\'alice@example.com\'] : \'main\')">set</button><slot /></div>'
+              '<div><button type="button" data-test="set-select" @click="$emit(\'update:value\', multiple !== undefined ? [\'alice@example.com\'] : \'main\')">set</button><slot /></div>'
           },
-          'el-option': {
-            props: ['value', 'label'],
-            template: '<option :value="value">{{ label }}</option>'
-          },
-          'el-date-picker': {
-            emits: ['update:modelValue'],
+          'n-date-picker': {
+            emits: ['update:value'],
             template:
-              '<button type="button" data-test="set-date-range" @click="$emit(\'update:modelValue\', [new Date(\'2026-05-01T00:00:00.000Z\'), new Date(\'2026-06-01T00:00:00.000Z\')])">date</button>'
+              '<div><button type="button" data-test="set-date-range" @click="$emit(\'update:value\', [Date.parse(\'2026-05-01T00:00:00.000Z\'), Date.parse(\'2026-06-01T00:00:00.000Z\')])">date</button></div>'
           },
-          'el-input': {
-            props: ['modelValue'],
-            emits: ['update:modelValue'],
-            template: '<textarea :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />'
+          'n-input': {
+            props: ['value'],
+            emits: ['update:value'],
+            template: '<textarea :value="value" @input="$emit(\'update:value\', $event.target.value)" />'
           },
-          'el-button': {
+          'n-button': {
             template: '<button type="submit"><slot /></button>'
           }
         }

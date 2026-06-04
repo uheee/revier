@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { h } from 'vue';
+import { NButton, NPopconfirm, type DataTableColumns } from 'naive-ui';
 import type { ReviewProject } from '../../../shared/projectTypes';
 
 defineProps<{
@@ -24,6 +26,92 @@ function formatDate(value?: string): string {
     minute: '2-digit'
   }).format(new Date(value));
 }
+
+const columns: DataTableColumns<ReviewProject> = [
+  {
+    title: '项目',
+    key: 'name',
+    width: 150,
+    render(row) {
+      return h('div', { class: 'project-name-cell' }, [
+        row.pinned ? h('span', { class: 'pin-dot', 'aria-label': '已固定' }) : null,
+        h('span', row.name)
+      ]);
+    }
+  },
+  {
+    title: '仓库路径',
+    key: 'repoPath',
+    width: 280,
+    render(row) {
+      return h('span', { class: 'path-cell' }, row.repoPath);
+    }
+  },
+  {
+    title: '默认分支',
+    key: 'defaultBranch',
+    width: 110,
+    render(row) {
+      return row.preferences.defaultBranch || '-';
+    }
+  },
+  {
+    title: '默认天数',
+    key: 'defaultDays',
+    width: 100,
+    render(row) {
+      return String(row.preferences.defaultDays ?? '-');
+    }
+  },
+  {
+    title: '最近打开',
+    key: 'lastOpenedAt',
+    width: 140,
+    render(row) {
+      return formatDate(row.lastOpenedAt);
+    }
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 100,
+    render(row) {
+      return h('div', { class: 'project-actions' }, [
+        h(
+          NButton,
+          {
+            text: true,
+            type: 'primary',
+            size: 'small',
+            onClick: () => emit('open', row.id)
+          },
+          { default: () => '打开' }
+        ),
+        h(
+          NPopconfirm,
+          {
+            positiveText: '移除',
+            negativeText: '取消',
+            onPositiveClick: () => emit('remove', row.id)
+          },
+          {
+            trigger: () =>
+              h(
+                NButton,
+                {
+                  text: true,
+                  type: 'error',
+                  size: 'small'
+                },
+                { default: () => '移除' }
+              ),
+            default: () => '移除这个项目记录？'
+          }
+        )
+      ]);
+    }
+  }
+];
 </script>
 
 <template>
@@ -32,57 +120,18 @@ function formatDate(value?: string): string {
       <h2>项目列表</h2>
     </header>
 
-    <el-table
-      v-loading="loading"
+    <n-data-table
       class="project-table"
+      :loading="loading"
+      :columns="columns"
       :data="projects"
-      height="100%"
+      :row-key="(row: ReviewProject) => row.id"
+      :bordered="false"
+      :single-line="false"
+      :scroll-x="880"
       table-layout="fixed"
-      empty-text="暂无项目"
-    >
-      <el-table-column label="项目" min-width="170">
-        <template #default="{ row }: { row: ReviewProject }">
-          <div class="project-name-cell">
-            <span v-if="row.pinned" class="pin-dot" aria-label="已固定" />
-            <span>{{ row.name }}</span>
-          </div>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="仓库路径" min-width="300">
-        <template #default="{ row }: { row: ReviewProject }">
-          <span class="path-cell">{{ row.repoPath }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="默认分支" width="120">
-        <template #default="{ row }: { row: ReviewProject }">
-          {{ row.preferences.defaultBranch || '-' }}
-        </template>
-      </el-table-column>
-
-      <el-table-column label="默认天数" width="110">
-        <template #default="{ row }: { row: ReviewProject }">
-          {{ row.preferences.defaultDays ?? '-' }}
-        </template>
-      </el-table-column>
-
-      <el-table-column label="最近打开" width="170">
-        <template #default="{ row }: { row: ReviewProject }">
-          {{ formatDate(row.lastOpenedAt) }}
-        </template>
-      </el-table-column>
-
-      <el-table-column label="操作" width="150" fixed="right">
-        <template #default="{ row }: { row: ReviewProject }">
-          <el-button link type="primary" @click="emit('open', row.id)">打开</el-button>
-          <el-popconfirm title="移除这个项目记录？" @confirm="emit('remove', row.id)">
-            <template #reference>
-              <el-button link type="danger">移除</el-button>
-            </template>
-          </el-popconfirm>
-        </template>
-      </el-table-column>
-    </el-table>
+      flex-height
+      size="small"
+    />
   </section>
 </template>

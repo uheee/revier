@@ -50,38 +50,39 @@ function visibleWordChanges(row: SideBySideDiffRow, side: 'old' | 'new'): WordCh
 </script>
 
 <template>
-  <section class="diff-viewer" v-loading="loading">
-    <el-empty v-if="!overlay" :image-size="96" description="选择文件后显示 diff" />
-    <template v-else-if="overlay.file.isBinary || !overlay.file.isPreviewable">
-      <header class="diff-viewer__header">
-        <h2>{{ overlay.file.path }}</h2>
-      </header>
-      <el-alert title="不可预览" type="info" show-icon :closable="false" />
-    </template>
-    <template v-else>
-      <header class="diff-viewer__header">
-        <div>
+  <section class="diff-viewer">
+    <n-spin :show="Boolean(loading)" class="diff-viewer__spin">
+      <n-empty v-if="!overlay" size="large" description="选择文件后显示 diff" />
+      <template v-else-if="overlay.file.isBinary || !overlay.file.isPreviewable">
+        <header class="diff-viewer__header">
           <h2>{{ overlay.file.path }}</h2>
-          <span>{{ overlay.range.baseCommit.slice(0, 8) }}..{{ overlay.range.headCommit.slice(0, 8) }}</span>
-        </div>
-        <span class="diff-viewer__count">{{ overlay.blocks.length }} 个变更块</span>
-      </header>
+        </header>
+        <n-alert title="不可预览" type="info" show-icon :closable="false" />
+      </template>
+      <template v-else>
+        <header class="diff-viewer__header">
+          <div>
+            <h2>{{ overlay.file.path }}</h2>
+            <span>{{ overlay.range.baseCommit.slice(0, 8) }}..{{ overlay.range.headCommit.slice(0, 8) }}</span>
+          </div>
+          <span class="diff-viewer__count">{{ overlay.blocks.length }} 个变更块</span>
+        </header>
 
-      <el-empty v-if="overlay.blocks.length === 0" :image-size="96" description="无可显示变更" />
-      <div v-else class="diff-table diff-table--full">
-        <div
-          v-for="(row, index) in visibleRows"
-          :key="index"
-          :class="[
-            lineClass(row),
-            {
-              'is-clickable': row.blockId,
-              'is-selected': row.blockId === selectedBlockId
-            }
-          ]"
-          :data-block-id="row.blockId"
-          @click="selectRow(row)"
-        >
+        <n-empty v-if="overlay.blocks.length === 0" size="large" description="无可显示变更" />
+        <div v-else class="diff-table diff-table--full">
+          <div
+            v-for="(row, index) in visibleRows"
+            :key="index"
+            :class="[
+              lineClass(row),
+              {
+                'is-clickable': row.blockId,
+                'is-selected': row.blockId === selectedBlockId
+              }
+            ]"
+            :data-block-id="row.blockId"
+            @click="selectRow(row)"
+          >
             <span class="line-number">{{ row.oldLineNumber ?? '' }}</span>
             <code class="code-cell code-cell--old">
               <template v-for="(change, changeIndex) in visibleWordChanges(row, 'old')" :key="changeIndex">
@@ -102,7 +103,8 @@ function visibleWordChanges(row: SideBySideDiffRow, side: 'old' | 'new'): WordCh
               :authors="blockForRow(row)?.authors ?? []"
             />
           </div>
-      </div>
-    </template>
+        </div>
+      </template>
+    </n-spin>
   </section>
 </template>

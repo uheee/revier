@@ -34,10 +34,10 @@ function openProject(projectId: string): void {
         <h1>Revier</h1>
         <span>{{ projects.length }} 个项目</span>
       </div>
-      <el-button :loading="loading" @click="projectStore.loadProjects()">刷新</el-button>
+      <n-button :loading="loading" @click="projectStore.loadProjects()">刷新</n-button>
     </header>
 
-    <el-alert
+    <n-alert
       v-if="error"
       class="project-alert"
       :title="error"

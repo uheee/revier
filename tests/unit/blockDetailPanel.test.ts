@@ -34,9 +34,9 @@ describe('BlockDetailPanel', () => {
       props: { block, selectedCommitHash: undefined },
       global: {
         stubs: {
-          'el-empty': true,
-          'el-tag': { template: '<span><slot /></span>' },
-          'el-tooltip': { template: '<span><slot /></span>' }
+          'n-empty': true,
+          'n-tag': { template: '<span><slot /></span>' },
+          'n-tooltip': { template: '<span><slot /></span>' }
         }
       }
     });

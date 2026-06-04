@@ -8,15 +8,17 @@ defineProps<{
 
 <template>
   <div class="diff-authors">
-    <el-tag v-if="authors.length === 0" size="small" effect="plain">未知作者</el-tag>
-    <el-tooltip
+    <n-tag v-if="authors.length === 0" size="small" :bordered="false">未知作者</n-tag>
+    <n-tooltip
       v-for="author in authors"
       v-else
       :key="`${author.name}-${author.email ?? ''}`"
-      :content="author.email || author.name"
       placement="top"
     >
-      <el-tag size="small" effect="plain">{{ author.name }}</el-tag>
-    </el-tooltip>
+      <template #trigger>
+        <n-tag size="small" :bordered="false">{{ author.name }}</n-tag>
+      </template>
+      {{ author.email || author.name }}
+    </n-tooltip>
   </div>
 </template>

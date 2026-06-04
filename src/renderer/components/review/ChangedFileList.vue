@@ -25,7 +25,7 @@ const statusLabels: Record<ChangedFile['status'], string> = {
       <h2>变更文件</h2>
     </header>
 
-    <el-empty v-if="files.length === 0" :image-size="72" description="暂无文件" />
+    <n-empty v-if="files.length === 0" size="small" description="暂无文件" />
     <div v-else class="changed-file-list__items">
       <button
         v-for="file in files"
@@ -39,7 +39,7 @@ const statusLabels: Record<ChangedFile['status'], string> = {
           <template v-if="file.oldPath">{{ file.oldPath }} -> </template>{{ file.path }}
         </span>
         <span class="changed-file-row__meta">
-          <el-tag size="small" effect="plain">{{ statusLabels[file.status] }}</el-tag>
+          <n-tag size="small" :bordered="false">{{ statusLabels[file.status] }}</n-tag>
           <span class="line-stat add">+{{ file.additions }}</span>
           <span class="line-stat del">-{{ file.deletions }}</span>
         </span>

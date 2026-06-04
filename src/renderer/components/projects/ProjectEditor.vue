@@ -50,25 +50,25 @@ async function selectDirectory(): Promise<void> {
     <label class="field">
       <span>仓库路径</span>
       <div class="path-picker">
-        <el-input v-model="form.repoPath" placeholder="E:/Projects/revier" clearable @click="selectDirectory" />
-        <el-button
+        <n-input v-model:value="form.repoPath" placeholder="E:/Projects/revier" clearable @click="selectDirectory" />
+        <n-button
           data-test="select-repo-directory"
           aria-label="选择仓库目录"
           @click="selectDirectory"
         >
           <FolderOpen :size="16" aria-hidden="true" />
-        </el-button>
+        </n-button>
       </div>
     </label>
 
     <label class="field">
       <span>项目名称</span>
-      <el-input v-model="form.name" placeholder="Revier" clearable />
+      <n-input v-model:value="form.name" placeholder="Revier" clearable />
     </label>
 
-    <el-button class="project-editor__submit" type="primary" native-type="submit" :disabled="!canSubmit">
+    <n-button class="project-editor__submit" type="primary" attr-type="submit" :disabled="!canSubmit">
       <FolderOpen :size="16" aria-hidden="true" />
       <span>添加项目</span>
-    </el-button>
+    </n-button>
   </form>
 </template>

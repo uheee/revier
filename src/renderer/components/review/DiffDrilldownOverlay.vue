@@ -21,10 +21,10 @@ const emit = defineEmits<{
       class="diff-drilldown"
     >
       <header class="diff-drilldown__bar">
-        <el-button text type="primary" @click="emit('close')">
+        <n-button text type="primary" @click="emit('close')">
           <ArrowLeft :size="16" aria-hidden="true" />
           <span>返回</span>
-        </el-button>
+        </n-button>
         <div class="diff-drilldown__title">
           <code>{{ overlay?.commit?.shortHash ?? 'loading' }}</code>
           <span>{{ overlay?.commit?.subject ?? '加载提交变更' }}</span>

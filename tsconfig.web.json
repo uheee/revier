@@ -9,7 +9,7 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vitest/globals"],
+    "types": ["vitest/globals", "naive-ui/volar"],
     "baseUrl": ".",
     "paths": {
       "@renderer/*": ["src/renderer/*"],

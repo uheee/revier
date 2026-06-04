@@ -19,13 +19,13 @@ describe('ProjectEditor', () => {
     const wrapper = mount(ProjectEditor, {
       global: {
         stubs: {
-          'el-input': {
-            props: ['modelValue'],
-            emits: ['update:modelValue'],
+          'n-input': {
+            props: ['value'],
+            emits: ['update:value'],
             template:
-              '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />'
+              '<input :value="value" @input="$emit(\'update:value\', $event.target.value)" />'
           },
-          'el-button': {
+          'n-button': {
             emits: ['click'],
             template: '<button type="button" @click="$emit(\'click\')"><slot /></button>'
           }
