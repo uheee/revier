@@ -14,23 +14,17 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <Transition name="drilldown-cover" mode="out-in">
-    <section
-      v-if="overlay || loading"
-      :key="overlay?.commit?.hash ?? 'loading'"
-      class="diff-drilldown"
-    >
-      <header class="diff-drilldown__bar">
-        <n-button text type="primary" @click="emit('close')">
-          <ArrowLeft :size="16" aria-hidden="true" />
-          <span>返回</span>
-        </n-button>
-        <div class="diff-drilldown__title">
-          <code>{{ overlay?.commit?.shortHash ?? 'loading' }}</code>
-          <span>{{ overlay?.commit?.subject ?? '加载提交变更' }}</span>
-        </div>
-      </header>
-      <DiffViewer :overlay="overlay" :loading="loading" />
-    </section>
-  </Transition>
+  <section v-if="overlay || loading" class="diff-drilldown">
+    <header class="diff-drilldown__bar">
+      <n-button text type="primary" @click="emit('close')">
+        <ArrowLeft :size="16" aria-hidden="true" />
+        <span>返回</span>
+      </n-button>
+      <div class="diff-drilldown__title">
+        <code>{{ overlay?.commit?.shortHash ?? 'loading' }}</code>
+        <span>{{ overlay?.commit?.subject ?? '加载提交变更' }}</span>
+      </div>
+    </header>
+    <DiffViewer :overlay="overlay" :loading="loading" />
+  </section>
 </template>

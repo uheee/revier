@@ -285,7 +285,7 @@ textarea {
   position: relative;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   background: #f2f5f8;
 }
 
@@ -435,7 +435,9 @@ textarea {
 }
 
 .diff-viewer {
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
   padding: 18px;
 }
 
@@ -708,9 +710,16 @@ textarea {
   position: absolute;
   inset: 0;
   z-index: 3;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   background: #f2f5f8;
   border-left: 1px solid var(--rv-border);
+}
+
+.diff-drilldown > .diff-viewer {
+  flex: 1 1 auto;
 }
 
 .diff-drilldown__bar {
@@ -747,37 +756,6 @@ textarea {
   white-space: nowrap;
 }
 
-.drilldown-cover-enter-active {
-  transition:
-    transform 200ms ease,
-    opacity 200ms ease;
-}
-
-.drilldown-cover-enter-from {
-  opacity: 0.92;
-  transform: translateX(100%);
-}
-
-.drilldown-cover-enter-to {
-  opacity: 1;
-  transform: translateX(0);
-}
-
-.drilldown-cover-leave-active {
-  transition: opacity 120ms ease;
-}
-
-.drilldown-cover-leave-to {
-  opacity: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .drilldown-cover-enter-active,
-  .drilldown-cover-leave-active {
-    transition: none;
-  }
-}
-
 @media (max-width: 860px) {
   .project-home {
     height: auto;
@@ -808,10 +786,16 @@ textarea {
   }
 
   .review-sidebar,
-  .review-detail-pane,
-  .review-diff-pane {
+  .review-detail-pane {
     min-height: 360px;
     overflow: visible;
+    border: 0;
+    border-bottom: 1px solid var(--rv-border);
+  }
+
+  .review-diff-pane {
+    min-height: 360px;
+    overflow: hidden;
     border: 0;
     border-bottom: 1px solid var(--rv-border);
   }
