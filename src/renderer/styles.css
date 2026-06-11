@@ -551,15 +551,15 @@ textarea {
 }
 
 .diff-row--added {
-  background: #e7f6ed;
+  background: #d8f0e1;
 }
 
 .diff-row--deleted {
-  background: #fdeceb;
+  background: #ffdad6;
 }
 
 .diff-row--modified {
-  background: #eef5ff;
+  background: transparent;
 }
 
 .line-number {
@@ -581,6 +581,16 @@ textarea {
 
 .code-cell--old {
   border-right: 1px solid var(--rv-border);
+}
+
+.diff-row--modified .line-number:first-child,
+.diff-row--modified .code-cell--old {
+  background: #ffdad6;
+}
+
+.diff-row--modified .line-number:nth-child(3),
+.diff-row--modified .code-cell--new {
+  background: #d8f0e1;
 }
 
 .word {
