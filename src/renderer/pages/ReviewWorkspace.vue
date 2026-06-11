@@ -13,7 +13,7 @@ import { useReviewLayoutSizes } from '../composables/useReviewLayoutSizes';
 import { useProjectStore } from '../stores/projectStore';
 import { useReviewStore } from '../stores/reviewStore';
 import type { RelatedCommit, ReviewFilters } from '../../shared/reviewTypes';
-import type { GitBranch } from '../../shared/projectTypes';
+import type { GitBranch, ProjectReviewFilters } from '../../shared/projectTypes';
 
 const route = useRoute();
 const router = useRouter();
@@ -39,8 +39,13 @@ const workspaceEl = ref<HTMLElement>();
 const layout = useReviewLayoutSizes();
 const project = computed(() => projectStore.projects.find((item) => item.id === projectId.value));
 const defaultBranch = computed(() => project.value?.preferences.defaultBranch ?? 'HEAD');
+const defaultDays = computed(() => project.value?.preferences.defaultDays ?? 30);
 const defaultGlobRules = computed(() => project.value?.preferences.defaultGlobRules ?? []);
+const savedFilters = computed(() => project.value?.preferences.reviewFilters);
+const initialAuthorBranch = computed(() => savedFilters.value?.branch ?? defaultBranch.value);
 let unsubscribe: (() => void) | undefined;
+let pendingReviewFilterSave: number | undefined;
+let latestReviewFilters: ReviewFilters | undefined;
 
 onMounted(() => {
   layout.setContainer(workspaceEl.value);
@@ -53,6 +58,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  flushPendingReviewFilterSave();
   unsubscribe?.();
 });
 
@@ -77,8 +83,46 @@ async function loadReviewMetadata(): Promise<void> {
   branches.value = await window.revier.projects.listBranches(projectId.value);
   await reviewStore.loadAuthors({
     projectId: projectId.value,
-    branch: defaultBranch.value
+    branch: initialAuthorBranch.value
   });
+}
+
+function scheduleReviewFilterSave(filters: ReviewFilters): void {
+  latestReviewFilters = filters;
+  if (pendingReviewFilterSave !== undefined) {
+    window.clearTimeout(pendingReviewFilterSave);
+  }
+
+  pendingReviewFilterSave = window.setTimeout(() => {
+    flushPendingReviewFilterSave();
+  }, 300);
+}
+
+function flushPendingReviewFilterSave(): void {
+  if (pendingReviewFilterSave !== undefined) {
+    window.clearTimeout(pendingReviewFilterSave);
+    pendingReviewFilterSave = undefined;
+  }
+
+  if (!latestReviewFilters) {
+    return;
+  }
+
+  const filters = latestReviewFilters;
+  latestReviewFilters = undefined;
+  void projectStore.saveReviewFilters(filters.projectId, toProjectReviewFilters(filters));
+}
+
+function toProjectReviewFilters(filters: ReviewFilters): ProjectReviewFilters {
+  return {
+    branch: filters.branch,
+    startAt: filters.startAt,
+    endAt: filters.endAt,
+    authorKeys: filters.authorKeys ?? [],
+    authorQuery: filters.authorQuery,
+    messageQuery: filters.messageQuery,
+    globRules: filters.globRules
+  };
 }
 
 async function selectFile(filePath: string): Promise<void> {
@@ -113,11 +157,14 @@ async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
       <FilterPanel
         :project-id="projectId"
         :default-branch="defaultBranch"
+        :default-days="defaultDays"
         :default-glob-rules="defaultGlobRules"
+        :saved-filters="savedFilters"
         :branches="branches"
         :authors="authors"
         :authors-loading="authorsLoading"
         :loading="loading"
+        @change="scheduleReviewFilterSave"
         @submit="runAnalysis"
       />
       <TaskProgress :task="task" :loading="loading" :error="error" />

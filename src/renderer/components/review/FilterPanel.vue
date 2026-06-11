@@ -2,13 +2,15 @@
 import { Play } from 'lucide-vue-next';
 import { computed, reactive, watch } from 'vue';
 import type { SelectOption } from 'naive-ui';
-import type { GitBranch } from '../../../shared/projectTypes';
+import type { GitBranch, ProjectReviewFilters } from '../../../shared/projectTypes';
 import type { AuthorFilterOption, ReviewFilters } from '../../../shared/reviewTypes';
 
 const props = defineProps<{
   projectId: string;
   defaultBranch: string;
+  defaultDays?: number;
   defaultGlobRules: string[];
+  savedFilters?: ProjectReviewFilters;
   branches: GitBranch[];
   authors: AuthorFilterOption[];
   authorsLoading?: boolean;
@@ -17,17 +19,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   submit: [filters: ReviewFilters];
+  change: [filters: ReviewFilters];
 }>();
 
 type DateRangeValue = [number, number] | null;
 
-const form = reactive({
-  branch: props.defaultBranch,
-  dateRange: null as DateRangeValue,
-  authorKeys: [] as string[],
-  messageQuery: '',
-  globRules: props.defaultGlobRules.join('\n')
-});
+const form = reactive(createInitialForm());
+let applyingInitialFilters = false;
 
 const branchOptions = computed<SelectOption[]>(() =>
   (props.branches.length > 0 ? props.branches : [{ name: props.defaultBranch || 'HEAD', current: true }]).map(
@@ -46,25 +44,27 @@ const authorOptions = computed<SelectOption[]>(() =>
 );
 
 watch(
-  () => props.defaultBranch,
-  (branch) => {
-    if (!form.branch || form.branch === 'HEAD') {
-      form.branch = branch;
-    }
-  }
+  () => [props.defaultBranch, props.defaultDays, props.defaultGlobRules, props.savedFilters] as const,
+  () => applyInitialFilters(),
+  { deep: true, flush: 'sync' }
 );
 
 watch(
-  () => props.defaultGlobRules,
-  (rules) => {
-    if (!form.globRules.trim()) {
-      form.globRules = rules.join('\n');
+  form,
+  () => {
+    if (!applyingInitialFilters) {
+      emit('change', buildFilters());
     }
-  }
+  },
+  { deep: true, flush: 'sync' }
 );
 
 function submit(): void {
-  emit('submit', {
+  emit('submit', buildFilters());
+}
+
+function buildFilters(): ReviewFilters {
+  return {
     projectId: props.projectId,
     branch: form.branch.trim() || 'HEAD',
     startAt: toIsoString(form.dateRange?.[0]),
@@ -75,7 +75,54 @@ function submit(): void {
       .split(/\r?\n/)
       .map((rule) => rule.trim())
       .filter(Boolean)
-  });
+  };
+}
+
+function createInitialForm() {
+  return {
+    branch: props.savedFilters?.branch?.trim() || props.defaultBranch || 'HEAD',
+    dateRange: resolveInitialDateRange(),
+    authorKeys: [...(props.savedFilters?.authorKeys ?? [])],
+    messageQuery: props.savedFilters?.messageQuery ?? '',
+    globRules: (props.savedFilters?.globRules ?? props.defaultGlobRules).join('\n')
+  };
+}
+
+function applyInitialFilters(): void {
+  applyingInitialFilters = true;
+  const initialForm = createInitialForm();
+  form.branch = initialForm.branch;
+  form.dateRange = initialForm.dateRange;
+  form.authorKeys = initialForm.authorKeys;
+  form.messageQuery = initialForm.messageQuery;
+  form.globRules = initialForm.globRules;
+  applyingInitialFilters = false;
+}
+
+function resolveInitialDateRange(): DateRangeValue {
+  const savedStart = toTimestamp(props.savedFilters?.startAt);
+  const savedEnd = toTimestamp(props.savedFilters?.endAt);
+  if (savedStart !== undefined && savedEnd !== undefined) {
+    return [savedStart, savedEnd];
+  }
+
+  const end = new Date();
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - defaultDays());
+  return [start.getTime(), end.getTime()];
+}
+
+function defaultDays(): number {
+  return props.defaultDays && props.defaultDays > 0 ? props.defaultDays : 30;
+}
+
+function toTimestamp(value?: string): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
 function optionalText(value: string): string | undefined {

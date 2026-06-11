@@ -57,6 +57,51 @@ describe('renderer projectStore', () => {
     expect(api.projects.list).toHaveBeenCalledTimes(2);
   });
 
+  it('异步保存项目的分析筛选偏好且不进入全局加载状态', async () => {
+    const api = mockApi({
+      update: vi.fn(async (updatedProject) => updatedProject)
+    });
+    vi.stubGlobal('window', { revier: api });
+
+    const store = useProjectStore();
+    store.projects = [project];
+    const savePromise = store.saveReviewFilters(project.id, {
+      branch: 'main',
+      startAt: '2026-05-01T00:00:00.000Z',
+      endAt: '2026-06-01T00:00:00.000Z',
+      authorKeys: ['alice@example.com'],
+      messageQuery: 'feature',
+      globRules: ['docs/**/*.md']
+    });
+
+    expect(store.loading).toBe(false);
+    expect(store.projects[0].preferences).toMatchObject({
+      defaultBranch: 'main',
+      defaultGlobRules: ['docs/**/*.md'],
+      reviewFilters: {
+        branch: 'main',
+        startAt: '2026-05-01T00:00:00.000Z',
+        endAt: '2026-06-01T00:00:00.000Z',
+        authorKeys: ['alice@example.com'],
+        messageQuery: 'feature',
+        globRules: ['docs/**/*.md']
+      }
+    });
+
+    await savePromise;
+
+    expect(api.projects.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: project.id,
+        preferences: expect.objectContaining({
+          reviewFilters: expect.objectContaining({
+            branch: 'main'
+          })
+        })
+      })
+    );
+  });
+
   it('stores add-project errors from duplicate or invalid repositories', async () => {
     const api = mockApi({
       add: vi.fn(async () => {

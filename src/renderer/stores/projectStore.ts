@@ -1,11 +1,13 @@
 import { defineStore } from 'pinia';
-import type { ReviewProject } from '../../shared/projectTypes';
+import type { ProjectId, ProjectReviewFilters, ReviewProject } from '../../shared/projectTypes';
 
 interface ProjectState {
   projects: ReviewProject[];
   loading: boolean;
   error?: string;
 }
+
+let reviewFilterSaveSequence = 0;
 
 export const useProjectStore = defineStore('projects', {
   state: (): ProjectState => ({
@@ -48,10 +50,56 @@ export const useProjectStore = defineStore('projects', {
         this.error = toErrorMessage(error);
         this.loading = false;
       }
+    },
+
+    async saveReviewFilters(projectId: ProjectId, filters: ProjectReviewFilters): Promise<void> {
+      const index = this.projects.findIndex((project) => project.id === projectId);
+      if (index === -1) {
+        return;
+      }
+
+      this.error = undefined;
+      const updatedProject = withReviewFilters(this.projects[index], filters);
+      this.projects.splice(index, 1, updatedProject);
+
+      const saveId = ++reviewFilterSaveSequence;
+      try {
+        const savedProject = await window.revier.projects.update(updatedProject);
+        if (saveId !== reviewFilterSaveSequence) {
+          return;
+        }
+
+        const savedIndex = this.projects.findIndex((project) => project.id === projectId);
+        if (savedIndex !== -1) {
+          this.projects.splice(savedIndex, 1, savedProject);
+        }
+      } catch (error) {
+        this.error = toErrorMessage(error);
+      }
     }
   }
 });
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function withReviewFilters(
+  project: ReviewProject,
+  filters: ProjectReviewFilters
+): ReviewProject {
+  return {
+    ...project,
+    preferences: {
+      ...project.preferences,
+      defaultBranch: filters.branch ?? project.preferences.defaultBranch,
+      defaultGlobRules: filters.globRules ?? project.preferences.defaultGlobRules,
+      reviewFilters: {
+        ...project.preferences.reviewFilters,
+        ...filters,
+        authorKeys: filters.authorKeys ?? [],
+        globRules: filters.globRules ?? project.preferences.reviewFilters?.globRules
+      }
+    }
+  };
 }

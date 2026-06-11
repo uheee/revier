@@ -1,9 +1,20 @@
 export type ProjectId = string;
 
+export interface ProjectReviewFilters {
+  branch?: string;
+  startAt?: string;
+  endAt?: string;
+  authorKeys?: string[];
+  authorQuery?: string;
+  messageQuery?: string;
+  globRules?: string[];
+}
+
 export interface ProjectPreferences {
   defaultBranch?: string;
   defaultDays?: number;
   defaultGlobRules: string[];
+  reviewFilters?: ProjectReviewFilters;
 }
 
 export interface ReviewProject {
