@@ -13,10 +13,14 @@ files:
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
 win:
+  icon: build/icon.ico
   target:
     - target: msi
       arch:
         - x64
+
+msi:
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
 
 linux:
   category: Development
