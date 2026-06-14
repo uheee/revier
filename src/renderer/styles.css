@@ -87,29 +87,68 @@ textarea {
   margin-bottom: 16px;
 }
 
-.project-layout {
-  display: grid;
-  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
-  gap: 16px;
+.project-topbar__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.project-content {
+  display: flex;
   height: calc(100vh - 92px);
   min-height: 0;
 }
 
-.project-side-panel,
-.project-main-panel {
+.project-main-panel,
+.project-empty {
   min-width: 0;
+  width: 100%;
   background: var(--rv-surface);
   border: 1px solid var(--rv-border);
   border-radius: 8px;
   box-shadow: var(--rv-shadow);
 }
 
-.project-side-panel {
-  padding: 24px;
-}
-
 .project-main-panel {
   overflow: hidden;
+}
+
+.project-empty {
+  display: grid;
+  place-items: center;
+  min-height: 360px;
+  padding: 48px 24px;
+}
+
+.project-empty__content {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  max-width: 420px;
+  text-align: center;
+}
+
+.project-empty h2 {
+  margin: 0;
+  color: var(--rv-text);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.project-empty p {
+  margin: 0 0 4px;
+  color: var(--rv-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.project-dialog {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.project-dialog__alert {
+  margin-bottom: 16px;
 }
 
 .panel-heading {
@@ -763,14 +802,31 @@ textarea {
     padding: 16px;
   }
 
-  .project-layout {
-    grid-template-columns: 1fr;
+  .project-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .project-topbar__actions {
+    width: 100%;
+  }
+
+  .project-topbar__actions .n-button {
+    flex: 1 1 0;
+  }
+
+  .project-content {
     height: auto;
-    min-height: auto;
+    min-height: 420px;
   }
 
   .project-main-panel {
     min-height: 420px;
+  }
+
+  .project-empty {
+    min-height: 360px;
+    padding: 32px 20px;
   }
 
   .review-workspace {
