@@ -26,6 +26,8 @@ const {
   selectedBlock,
   drilldownOverlay,
   selectedCommitHash,
+  activeOverlayPath,
+  activeCommitHash,
   drilldownLoading,
   authors,
   authorsLoading,
@@ -166,9 +168,16 @@ async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
         :loading="loading"
         @change="scheduleReviewFilterSave"
         @submit="runAnalysis"
+        @cancel="reviewStore.cancelAnalysis"
       />
       <TaskProgress :task="task" :loading="loading" :error="error" />
-      <ChangedFileList :files="files" :selected-path="selectedFilePath" @selected="selectFile" />
+      <ChangedFileList
+        :files="files"
+        :selected-path="selectedFilePath"
+        :loading-path="activeOverlayPath"
+        @selected="selectFile"
+        @cancel="reviewStore.cancelOverlay"
+      />
     </aside>
 
     <ReviewLayoutResizer side="left" @resize="layout.resize" />
@@ -184,6 +193,7 @@ async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
         :overlay="drilldownOverlay"
         :loading="drilldownLoading"
         @close="reviewStore.closeCommitDrilldown"
+        @cancel="reviewStore.closeCommitDrilldown"
       />
     </section>
 
@@ -193,7 +203,9 @@ async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
       class="review-detail-pane"
       :block="selectedBlock"
       :selected-commit-hash="selectedCommitHash"
+      :active-commit-hash="activeCommitHash"
       @commit-selected="openCommitDrilldown"
+      @cancel-commit="reviewStore.closeCommitDrilldown"
     />
   </main>
 </template>

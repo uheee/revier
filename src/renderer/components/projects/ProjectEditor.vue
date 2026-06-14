@@ -58,7 +58,7 @@ async function selectDirectory(): Promise<void> {
     <label class="field">
       <span>仓库路径</span>
       <div class="path-picker">
-        <n-input v-model:value="form.repoPath" placeholder="E:/Projects/revier" clearable @click="selectDirectory" />
+        <n-input v-model:value="form.repoPath" placeholder="选择或输入本地仓库路径" clearable @click="selectDirectory" />
         <n-button
           data-test="select-repo-directory"
           aria-label="选择仓库目录"

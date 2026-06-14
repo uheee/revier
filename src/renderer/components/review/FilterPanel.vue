@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Play } from 'lucide-vue-next';
+import { LoaderCircle, OctagonX, Play } from 'lucide-vue-next';
 import { computed, reactive, watch } from 'vue';
 import type { SelectOption } from 'naive-ui';
 import type { GitBranch, ProjectReviewFilters } from '../../../shared/projectTypes';
@@ -20,6 +20,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   submit: [filters: ReviewFilters];
   change: [filters: ReviewFilters];
+  cancel: [];
 }>();
 
 type DateRangeValue = [number, number] | null;
@@ -185,9 +186,16 @@ function toIsoString(value?: number): string | undefined {
       <n-input v-model:value="form.globRules" type="textarea" :rows="4" />
     </label>
 
-    <n-button class="filter-panel__submit" type="primary" attr-type="submit" :loading="loading">
-      <Play :size="15" aria-hidden="true" />
-      <span>分析</span>
-    </n-button>
+    <div class="action-row">
+      <n-button class="filter-panel__submit" type="primary" attr-type="submit" :loading="loading">
+        <Play :size="15" aria-hidden="true" />
+        <span>分析</span>
+      </n-button>
+      <n-button v-if="loading" class="cancel-work-button" secondary type="warning" @click="emit('cancel')">
+        <OctagonX :size="15" aria-hidden="true" />
+        <LoaderCircle class="spin-icon" :size="15" aria-hidden="true" />
+        <span>取消</span>
+      </n-button>
+    </div>
   </form>
 </template>

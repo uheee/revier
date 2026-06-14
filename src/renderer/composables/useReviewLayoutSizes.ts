@@ -2,6 +2,10 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 export const reviewLayoutStorageKey = 'revier.reviewLayout.v1';
 export const defaultReviewLayout = { left: 320, right: 320 };
+const leftMin = 240;
+const leftMax = 460;
+const rightMin = 180;
+const rightMax = 640;
 
 export interface ReviewLayoutSizes {
   left: number;
@@ -18,15 +22,16 @@ export function clampReviewLayout(
   options: ClampReviewLayoutOptions
 ): ReviewLayoutSizes {
   const maxSideTotal = Math.max(0, options.containerWidth - options.centerMin);
-  let left = Math.min(Math.max(sizes.left, 260), 460);
-  let right = Math.min(Math.max(sizes.right, 280), 520);
+  let left = Math.min(Math.max(sizes.left, leftMin), leftMax);
+  let right = Math.min(Math.max(sizes.right, rightMin), rightMax);
   const total = left + right;
 
   if (total > maxSideTotal) {
-    const overflow = total - maxSideTotal;
-    const leftShare = left / total;
-    left = Math.max(260, Math.floor(left - overflow * leftShare));
-    right = Math.max(280, Math.floor(right - overflow * (1 - leftShare)));
+    let overflow = total - maxSideTotal;
+    const rightReduction = Math.min(overflow, Math.max(0, right - rightMin));
+    right -= rightReduction;
+    overflow -= rightReduction;
+    left = Math.max(leftMin, left - overflow);
   }
 
   return { left, right };
@@ -36,7 +41,7 @@ export function useReviewLayoutSizes() {
   const container = ref<HTMLElement>();
   const sizes = ref<ReviewLayoutSizes>(loadStoredLayout());
   const gridTemplateColumns = computed(
-    () => `${sizes.value.left}px 6px minmax(520px, 1fr) 6px ${sizes.value.right}px`
+    () => `${sizes.value.left}px 6px minmax(0, 1fr) 6px ${sizes.value.right}px`
   );
 
   function setContainer(element?: HTMLElement): void {
@@ -48,14 +53,14 @@ export function useReviewLayoutSizes() {
     sizes.value =
       side === 'left'
         ? { ...sizes.value, left: sizes.value.left + delta }
-        : { ...sizes.value, right: sizes.value.right - delta };
+        : { ...sizes.value, right: Math.min(Math.max(sizes.value.right - delta, rightMin), rightMax) };
     applyClamp();
     window.localStorage.setItem(reviewLayoutStorageKey, JSON.stringify(sizes.value));
   }
 
   function applyClamp(): void {
     const width = container.value?.clientWidth ?? window.innerWidth;
-    sizes.value = clampReviewLayout(sizes.value, { containerWidth: width, centerMin: 520 });
+    sizes.value = clampReviewLayout(sizes.value, { containerWidth: width, centerMin: 360 });
   }
 
   onMounted(() => window.addEventListener('resize', applyClamp));

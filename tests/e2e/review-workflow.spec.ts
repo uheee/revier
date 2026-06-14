@@ -20,13 +20,13 @@ test('project entry UI is interactive', async () => {
   try {
     const page = await app.firstWindow();
     await expect(page.getByRole('heading', { name: 'Revier' })).toBeVisible();
-    await expect(page.getByPlaceholder('E:/Projects/revier')).toHaveCount(0);
+    await expect(page.getByPlaceholder('选择或输入本地仓库路径')).toHaveCount(0);
 
     await page.locator('[data-test="open-project-dialog"]').first().click();
     const projectDialog = page.locator('[data-test="project-dialog"]');
     await expect(projectDialog).toBeVisible();
 
-    const repoPathInput = projectDialog.getByPlaceholder('E:/Projects/revier');
+    const repoPathInput = projectDialog.getByPlaceholder('选择或输入本地仓库路径');
     await expect(repoPathInput).toBeVisible();
     await repoPathInput.evaluate((element, value) => {
       const input = element as HTMLInputElement;

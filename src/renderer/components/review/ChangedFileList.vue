@@ -1,13 +1,16 @@
 <script setup lang="ts">
+import { LoaderCircle, OctagonX } from 'lucide-vue-next';
 import type { ChangedFile } from '../../../shared/reviewTypes';
 
 defineProps<{
   files: ChangedFile[];
   selectedPath?: string;
+  loadingPath?: string;
 }>();
 
 const emit = defineEmits<{
   selected: [path: string];
+  cancel: [];
 }>();
 
 const statusLabels: Record<ChangedFile['status'], string> = {
@@ -39,11 +42,26 @@ const statusLabels: Record<ChangedFile['status'], string> = {
           <template v-if="file.oldPath">{{ file.oldPath }} -> </template>{{ file.path }}
         </span>
         <span class="changed-file-row__meta">
+          <span v-if="loadingPath === file.path" class="inline-loading">
+            <LoaderCircle class="spin-icon" :size="14" aria-hidden="true" />
+          </span>
           <n-tag size="small" :bordered="false">{{ statusLabels[file.status] }}</n-tag>
           <span class="line-stat add">+{{ file.additions }}</span>
           <span class="line-stat del">-{{ file.deletions }}</span>
         </span>
       </button>
+      <n-button
+        v-if="loadingPath"
+        class="cancel-work-button changed-file-list__cancel"
+        size="small"
+        secondary
+        type="warning"
+        @click="emit('cancel')"
+      >
+        <OctagonX :size="14" aria-hidden="true" />
+        <LoaderCircle class="spin-icon" :size="14" aria-hidden="true" />
+        <span>取消文件下钻</span>
+      </n-button>
     </div>
   </section>
 </template>
