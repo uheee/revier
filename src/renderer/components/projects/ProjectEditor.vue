@@ -2,9 +2,17 @@
 import { FolderOpen } from 'lucide-vue-next';
 import { computed, reactive } from 'vue';
 
-const props = defineProps<{
-  loading?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    loading?: boolean;
+    title?: string;
+    submitLabel?: string;
+  }>(),
+  {
+    title: '新增项目',
+    submitLabel: '添加项目'
+  }
+);
 
 const emit = defineEmits<{
   submit: [payload: { repoPath: string; name?: string }];
@@ -44,7 +52,7 @@ async function selectDirectory(): Promise<void> {
 <template>
   <form class="project-editor" @submit.prevent="submit">
     <header class="panel-heading">
-      <h2>新增项目</h2>
+      <h2>{{ title }}</h2>
     </header>
 
     <label class="field">
@@ -66,9 +74,15 @@ async function selectDirectory(): Promise<void> {
       <n-input v-model:value="form.name" placeholder="Revier" clearable />
     </label>
 
-    <n-button class="project-editor__submit" type="primary" attr-type="submit" :disabled="!canSubmit">
+    <n-button
+      class="project-editor__submit"
+      data-test="project-editor-submit"
+      type="primary"
+      attr-type="submit"
+      :disabled="!canSubmit"
+    >
       <FolderOpen :size="16" aria-hidden="true" />
-      <span>添加项目</span>
+      <span>{{ submitLabel }}</span>
     </n-button>
   </form>
 </template>

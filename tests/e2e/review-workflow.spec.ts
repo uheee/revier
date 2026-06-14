@@ -5,7 +5,6 @@ import { _electron as electron, expect, test } from '@playwright/test';
 
 test('project entry UI is interactive', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'revier-e2e-'));
-  const normalizedRepoPath = process.cwd().replaceAll('\\', '/');
   const env: Record<string, string> = {
     ...stringEnv(),
     ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
@@ -21,19 +20,22 @@ test('project entry UI is interactive', async () => {
   try {
     const page = await app.firstWindow();
     await expect(page.getByRole('heading', { name: 'Revier' })).toBeVisible();
+    await expect(page.getByPlaceholder('E:/Projects/revier')).toHaveCount(0);
 
-    const repoPathInput = page.getByPlaceholder('E:/Projects/revier');
+    await page.locator('[data-test="open-project-dialog"]').first().click();
+    const projectDialog = page.locator('[data-test="project-dialog"]');
+    await expect(projectDialog).toBeVisible();
+
+    const repoPathInput = projectDialog.getByPlaceholder('E:/Projects/revier');
     await expect(repoPathInput).toBeVisible();
     await repoPathInput.evaluate((element, value) => {
       const input = element as HTMLInputElement;
       input.value = value;
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }, process.cwd());
-    await page.getByRole('textbox', { name: '项目名称' }).fill('Revier');
-    await page.getByRole('button', { name: /添加项目/ }).click();
+    await projectDialog.getByRole('textbox', { name: '项目名称' }).fill('Revier');
+    await projectDialog.locator('[data-test="project-editor-submit"]').click();
 
-    await expect(page.getByText(normalizedRepoPath)).toBeVisible();
-    await page.getByRole('button', { name: '打开' }).first().click();
     await expect(page.getByRole('heading', { name: '筛选' })).toBeVisible();
     await expect(page.locator('[data-test="branch-select"]')).toBeVisible();
     await expect(page.locator('[data-test="date-range"]')).toBeVisible();
