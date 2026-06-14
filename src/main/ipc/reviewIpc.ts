@@ -10,7 +10,7 @@ import type {
   ReviewFilters
 } from '../../shared/reviewTypes';
 import { AnalysisTaskManager } from '../analysis/analysisTaskManager';
-import { attachAttribution } from '../analysis/attributionEngine';
+import { buildFileOverlay } from '../../analysis-core';
 import { createGlobMatcher } from '../analysis/globRules';
 import { buildFileOverlayDiff } from '../analysis/overlayEngine';
 import { parsePatchTouchedRanges } from '../analysis/patchRanges';
@@ -28,6 +28,9 @@ interface AnalysisGitClient {
   ): Promise<ChangedFile[]>;
   readFileAtCommit(repoPath: string, commit: string, filePath: string): Promise<string>;
   showFilePatch(repoPath: string, commit: string, filePath: string): Promise<string>;
+  blameFileRange?(repoPath: string, commit: string, filePath: string, startLine: number, endLine: number): Promise<import('../../analysis-core').BlameLine[]>;
+  listParents?(repoPath: string, commitHash: string): Promise<string[]>;
+  getCommit?(repoPath: string, commitHash: string): Promise<RelatedCommit | undefined>;
 }
 
 interface CommitOverlayGitClient extends AnalysisGitClient {
@@ -105,26 +108,28 @@ export async function buildFileOverlayForTask({
     };
   }
 
-  const oldText = await git.readFileAtCommit(
-    project.repoPath,
-    range.baseCommit,
-    file.oldPath ?? file.path
-  );
-  const newText = await git.readFileAtCommit(project.repoPath, range.headCommit, file.path);
-  const relatedCommits = await buildRelatedCommits(project.repoPath, file, rangeCommits, filters, git);
-  const diff = buildFileOverlayDiff({ file, oldText, newText });
-  const blocks = attachAttribution(diff.blocks, relatedCommits);
-  const visibleBlocks = hasDisplayCommitFilters(filters)
-    ? blocks.filter((block) => block.relatedCommits.some((commit) => commit.matchedByFilter))
-    : blocks;
-
-  return {
-    mode: 'range',
+  const overlay = await buildFileOverlay({
+    repoPath: project.repoPath,
     file,
     range,
-    rows: maskFilteredRows(diff.rows, visibleBlocks),
-    blocks: visibleBlocks,
-    warnings: []
+    rangeCommits,
+    filters,
+    git: {
+      ...git,
+      blameFileRange: git.blameFileRange?.bind(git) ?? (async () => []),
+      listParents: git.listParents?.bind(git) ?? (async () => []),
+      getCommit: git.getCommit?.bind(git) ?? (async () => undefined)
+    }
+  });
+
+  const visibleBlocks = hasDisplayCommitFilters(filters)
+    ? overlay.blocks.filter((block) => block.relatedCommits.some((commit) => commit.matchedByFilter))
+    : overlay.blocks;
+
+  return {
+    ...overlay,
+    rows: maskFilteredRows(overlay.rows ?? [], visibleBlocks),
+    blocks: visibleBlocks
   };
 }
 

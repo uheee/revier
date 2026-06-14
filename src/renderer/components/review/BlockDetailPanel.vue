@@ -41,7 +41,14 @@ function commitKey(commit: RelatedCommit): string {
 
       <section class="detail-section">
         <span class="detail-kicker">作者</span>
-        <DiffBlockAuthors :authors="block.authors" />
+        <DiffBlockAuthors :authors="block.authors" :attribution="block.attribution" />
+      </section>
+
+      <section v-if="block.attribution?.warnings.length" class="detail-section">
+        <span class="detail-kicker">归因可信度</span>
+        <n-alert type="warning" :bordered="false">
+          {{ block.attribution.warnings.map((warning) => warning.message).join('；') }}
+        </n-alert>
       </section>
 
       <section class="detail-section">
@@ -62,6 +69,7 @@ function commitKey(commit: RelatedCommit): string {
               </div>
               <p>{{ commit.subject }}</p>
               <span>{{ commit.authorName }} · {{ formatDate(commit.committedAt) }}</span>
+              <small v-if="commit.attribution?.viaMergeHashes.length">Merge 链路：{{ commit.attribution.viaMergeHashes.map((hash) => hash.slice(0, 8)).join(' → ') }}</small>
             </button>
           </li>
         </ul>

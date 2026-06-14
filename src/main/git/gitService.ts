@@ -2,7 +2,9 @@ import simpleGit from 'simple-git';
 import { resolve } from 'node:path';
 import { normalizeGitPath, parseNameStatus, parseNumstat } from '../analysis/changedFiles';
 import type { GitBranch, RepositoryValidation } from '../../shared/projectTypes';
-import type { AuthorFilterOption, ChangedFile } from '../../shared/reviewTypes';
+import type { AuthorFilterOption, ChangedFile, RelatedCommit } from '../../shared/reviewTypes';
+import { parseBlamePorcelain } from '../../analysis-core/git/blameParser';
+import type { BlameLine } from '../../analysis-core/git/analysisGitClient';
 import type { GitCommitSummary } from './gitTypes';
 
 const invalidRepositoryMessage = '请选择一个 Git 仓库目录';
@@ -109,6 +111,62 @@ export class GitService {
       ]);
     } catch {
       return '';
+    }
+  }
+
+  async blameFileRange(
+    repoPath: string,
+    commit: string,
+    filePath: string,
+    startLine: number,
+    endLine: number
+  ): Promise<BlameLine[]> {
+    if (startLine <= 0 || endLine < startLine) {
+      return [];
+    }
+    try {
+      const output = await simpleGit(repoPath).raw([
+        'blame',
+        '--line-porcelain',
+        '-M',
+        '-C',
+        `-L${startLine},${endLine}`,
+        commit,
+        '--',
+        normalizeGitPath(filePath)
+      ]);
+      return parseBlamePorcelain(output);
+    } catch {
+      return [];
+    }
+  }
+
+  async listParents(repoPath: string, commitHash: string): Promise<string[]> {
+    const line = (await simpleGit(repoPath).raw(['rev-list', '--parents', '-n', '1', commitHash])).trim();
+    return line.split(/\s+/).slice(1);
+  }
+
+  async getCommit(repoPath: string, commitHash: string): Promise<RelatedCommit | undefined> {
+    try {
+      const output = await simpleGit(repoPath).show([
+        '-s',
+        '--date=iso-strict',
+        '--format=%H%x00%an%x00%ae%x00%aI%x00%s',
+        commitHash
+      ]);
+      const [hash, authorName, authorEmail, committedAt, subject] = output.trim().split('\0');
+      return {
+        hash,
+        shortHash: hash.slice(0, 8),
+        authorName,
+        authorEmail,
+        committedAt,
+        subject,
+        matchedByFilter: false,
+        touchedRanges: []
+      };
+    } catch {
+      return undefined;
     }
   }
 

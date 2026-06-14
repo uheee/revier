@@ -101,6 +101,7 @@ function visibleWordChanges(row: SideBySideDiffRow, side: 'old' | 'new'): WordCh
               v-if="isBlockStart(row, index)"
               class="diff-row__authors"
               :authors="blockForRow(row)?.authors ?? []"
+              :attribution="blockForRow(row)?.attribution"
             />
           </div>
         </div>
