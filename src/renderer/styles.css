@@ -856,3 +856,47 @@ textarea {
     border-bottom: 1px solid var(--rv-border);
   }
 }
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cancel-work-button {
+  flex: 0 0 auto;
+}
+
+.spin-icon {
+  animation: rv-spin 0.9s linear infinite;
+}
+
+.inline-loading {
+  display: inline-flex;
+  align-items: center;
+  color: var(--rv-muted);
+}
+
+.changed-file-list__items {
+  position: relative;
+}
+
+.changed-file-list__cancel {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  width: 100%;
+  margin-top: 8px;
+  background: var(--rv-surface);
+}
+
+.commit-list__cancel {
+  width: 100%;
+  margin-top: 6px;
+}
+
+@keyframes rv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

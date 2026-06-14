@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft } from 'lucide-vue-next';
+import { ArrowLeft, LoaderCircle, OctagonX } from 'lucide-vue-next';
 import type { FileOverlay } from '../../../shared/reviewTypes';
 import DiffViewer from './DiffViewer.vue';
 
@@ -10,6 +10,7 @@ defineProps<{
 
 const emit = defineEmits<{
   close: [];
+  cancel: [];
 }>();
 </script>
 
@@ -24,6 +25,11 @@ const emit = defineEmits<{
         <code>{{ overlay?.commit?.shortHash ?? 'loading' }}</code>
         <span>{{ overlay?.commit?.subject ?? '加载提交变更' }}</span>
       </div>
+      <n-button v-if="loading" class="cancel-work-button" size="small" secondary type="warning" @click="emit('cancel')">
+        <OctagonX :size="14" aria-hidden="true" />
+        <LoaderCircle class="spin-icon" :size="14" aria-hidden="true" />
+        <span>取消</span>
+      </n-button>
     </header>
     <DiffViewer :overlay="overlay" :loading="loading" />
   </section>

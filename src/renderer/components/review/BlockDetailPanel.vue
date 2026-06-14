@@ -1,14 +1,17 @@
 <script setup lang="ts">
+import { LoaderCircle, OctagonX } from 'lucide-vue-next';
 import type { DiffBlock, RelatedCommit } from '../../../shared/reviewTypes';
 import DiffBlockAuthors from './DiffBlockAuthors.vue';
 
 defineProps<{
   block?: DiffBlock;
   selectedCommitHash?: string;
+  activeCommitHash?: string;
 }>();
 
 const emit = defineEmits<{
   commitSelected: [commit: RelatedCommit];
+  cancelCommit: [];
 }>();
 
 function formatDate(value: string): string {
@@ -66,11 +69,24 @@ function commitKey(commit: RelatedCommit): string {
               <div class="commit-row__top">
                 <code>{{ commit.shortHash }}</code>
                 <n-tag v-if="commit.matchedByFilter" size="small" type="success" :bordered="false">命中筛选</n-tag>
+                <LoaderCircle v-if="activeCommitHash === commit.hash" class="spin-icon" :size="14" aria-hidden="true" />
               </div>
               <p>{{ commit.subject }}</p>
               <span>{{ commit.authorName }} · {{ formatDate(commit.committedAt) }}</span>
               <small v-if="commit.attribution?.viaMergeHashes.length">Merge 链路：{{ commit.attribution.viaMergeHashes.map((hash) => hash.slice(0, 8)).join(' → ') }}</small>
             </button>
+            <n-button
+              v-if="activeCommitHash === commit.hash"
+              class="cancel-work-button commit-list__cancel"
+              size="small"
+              secondary
+              type="warning"
+              @click="emit('cancelCommit')"
+            >
+              <OctagonX :size="14" aria-hidden="true" />
+              <LoaderCircle class="spin-icon" :size="14" aria-hidden="true" />
+              <span>取消提交下钻</span>
+            </n-button>
           </li>
         </ul>
       </section>
