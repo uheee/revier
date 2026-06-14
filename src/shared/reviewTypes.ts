@@ -66,6 +66,31 @@ export interface AuthorFilterOption extends AuthorSummary {
   commitCount: number;
 }
 
+export type AttributionConfidence = 'precise' | 'inferred' | 'partial';
+
+export type AttributionMethod = 'blame' | 'merge-trace' | 'patch-inference';
+
+export type AttributionWarningCode =
+  | 'BLAME_UNAVAILABLE'
+  | 'MERGE_TRACE_AMBIGUOUS'
+  | 'PATH_HISTORY_INCOMPLETE'
+  | 'DELETION_TRACE_INCOMPLETE';
+
+export interface AttributionWarning {
+  code: AttributionWarningCode;
+  message: string;
+}
+
+export interface BlockAttributionSummary {
+  confidence: AttributionConfidence;
+  warnings: AttributionWarning[];
+}
+
+export interface RelatedCommitAttribution {
+  method: AttributionMethod;
+  viaMergeHashes: string[];
+}
+
 export interface ReviewAuthorOptionsRequest {
   projectId: ProjectId;
   branch: string;
@@ -101,6 +126,7 @@ export interface RelatedCommit {
   subject: string;
   matchedByFilter: boolean;
   touchedRanges: TouchedRange[];
+  attribution?: RelatedCommitAttribution;
 }
 
 export interface SideBySideDiffRow {
@@ -125,6 +151,7 @@ export interface DiffBlock {
   authors: AuthorSummary[];
   rows: SideBySideDiffRow[];
   relatedCommits: RelatedCommit[];
+  attribution?: BlockAttributionSummary;
 }
 
 export interface FileOverlay {

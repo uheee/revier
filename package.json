@@ -24,7 +24,9 @@
     "dist": "pnpm prepare:win-icon && pnpm build && pnpm dlx electron-builder@26.15.1 --publish=never",
     "dist:win": "pnpm prepare:win-icon && pnpm build && pnpm dlx electron-builder@26.15.1 --win msi --x64 --publish=never",
     "dist:linux": "pnpm build && pnpm dlx electron-builder@26.15.1 --linux deb rpm --x64 --publish=never",
-    "dist:mac": "pnpm build && pnpm dlx electron-builder@26.15.1 --mac dmg zip --x64 --arm64 --publish=never"
+    "dist:mac": "pnpm build && pnpm dlx electron-builder@26.15.1 --mac dmg zip --x64 --arm64 --publish=never",
+    "build:cli": "tsc -p tsconfig.cli.json",
+    "revier-analysis": "pnpm build:cli && node dist/cli/cli/revier-analysis.js"
   },
   "dependencies": {
     "@vueuse/components": "^10.11.0",
