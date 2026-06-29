@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/revier-analysis"]
+resolver = "2"

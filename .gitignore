@@ -9,5 +9,6 @@ playwright-report/
 *.local
 *.tsbuildinfo
 release/
+target/
 
 build/icon.ico
