@@ -15,6 +15,21 @@ pub struct RenameChange {
     pub similarity: Option<f32>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CommitFileChange {
+    pub commit_hash: String,
+    pub parent_hash: String,
+    pub parent_index: usize,
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: String,
+    pub additions: u64,
+    pub deletions: u64,
+    pub is_binary: bool,
+    pub is_previewable: bool,
+    pub similarity: Option<f32>,
+}
+
 pub fn pairwise_parent_changes(
     repo: &gix::Repository,
     commit_hash: &str,
@@ -146,6 +161,202 @@ pub fn rename_changes(
     .map_err(|error| AppError::Repository(error.to_string()))?;
 
     Ok(renames)
+}
+
+pub fn commit_file_changes(
+    repo: &gix::Repository,
+    commit_hash: &str,
+) -> Result<Vec<CommitFileChange>, AppError> {
+    let commit = resolve_commit(repo, commit_hash)?;
+    let parent_ids = commit
+        .parent_ids()
+        .map(|parent_id| parent_id.detach())
+        .collect::<Vec<_>>();
+
+    if parent_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut changes = Vec::new();
+    for (parent_index, parent_id) in parent_ids.iter().enumerate() {
+        let parent = repo
+            .find_commit(*parent_id)
+            .map_err(|error| AppError::Repository(error.to_string()))?;
+        changes.extend(pairwise_file_changes(repo, &parent, &commit, parent_index)?);
+    }
+    Ok(changes)
+}
+
+fn pairwise_file_changes(
+    repo: &gix::Repository,
+    parent: &gix::Commit<'_>,
+    commit: &gix::Commit<'_>,
+    parent_index: usize,
+) -> Result<Vec<CommitFileChange>, AppError> {
+    let parent_tree = parent
+        .tree()
+        .map_err(|error| AppError::Repository(error.to_string()))?;
+    let commit_tree = commit
+        .tree()
+        .map_err(|error| AppError::Repository(error.to_string()))?;
+    let parent_iter = gix_object::TreeRefIter::from_bytes(&parent_tree.data, parent_tree.id.kind());
+    let commit_iter = gix_object::TreeRefIter::from_bytes(&commit_tree.data, commit_tree.id.kind());
+    let mut resource_cache = diff_resource_cache()?;
+    let mut state = gix_diff::tree::State::default();
+    let mut changes = Vec::new();
+
+    gix_diff::tree_with_rewrites(
+        parent_iter,
+        commit_iter,
+        &mut resource_cache,
+        &mut state,
+        &repo.objects,
+        |change| {
+            if let Some(file_change) = map_tree_change(repo, parent, commit, parent_index, change)?
+            {
+                changes.push(file_change);
+            }
+            Ok::<gix_diff::tree_with_rewrites::Action, AppError>(
+                std::ops::ControlFlow::Continue(()),
+            )
+        },
+        gix_diff::tree_with_rewrites::Options {
+            location: Some(gix_diff::tree::recorder::Location::Path),
+            rewrites: Some(gix_diff::Rewrites::default()),
+        },
+    )
+    .map_err(|error| AppError::Repository(error.to_string()))?;
+
+    Ok(changes)
+}
+
+fn map_tree_change(
+    repo: &gix::Repository,
+    parent: &gix::Commit<'_>,
+    commit: &gix::Commit<'_>,
+    parent_index: usize,
+    change: gix_diff::tree_with_rewrites::ChangeRef<'_>,
+) -> Result<Option<CommitFileChange>, AppError> {
+    match change {
+        gix_diff::tree_with_rewrites::ChangeRef::Addition {
+            location,
+            entry_mode,
+            id,
+            ..
+        } => {
+            let is_binary = blob_contains_nul(repo, entry_mode, id)?;
+            Ok(Some(file_change(
+                commit,
+                parent,
+                parent_index,
+                location,
+                None,
+                if is_binary { "binary" } else { "added" },
+                is_binary,
+                None,
+            )))
+        }
+        gix_diff::tree_with_rewrites::ChangeRef::Deletion {
+            location,
+            entry_mode,
+            id,
+            ..
+        } => {
+            let is_binary = blob_contains_nul(repo, entry_mode, id)?;
+            Ok(Some(file_change(
+                commit,
+                parent,
+                parent_index,
+                location,
+                None,
+                if is_binary { "binary" } else { "deleted" },
+                is_binary,
+                None,
+            )))
+        }
+        gix_diff::tree_with_rewrites::ChangeRef::Modification {
+            location,
+            previous_entry_mode,
+            previous_id,
+            entry_mode,
+            id,
+        } => {
+            let is_binary = blob_contains_nul(repo, previous_entry_mode, previous_id)?
+                || blob_contains_nul(repo, entry_mode, id)?;
+            Ok(Some(file_change(
+                commit,
+                parent,
+                parent_index,
+                location,
+                None,
+                if is_binary { "binary" } else { "modified" },
+                is_binary,
+                None,
+            )))
+        }
+        gix_diff::tree_with_rewrites::ChangeRef::Rewrite {
+            source_location,
+            location,
+            copy: false,
+            diff,
+            entry_mode,
+            id,
+            ..
+        } => {
+            let is_binary = blob_contains_nul(repo, entry_mode, id)?;
+            Ok(Some(file_change(
+                commit,
+                parent,
+                parent_index,
+                location,
+                Some(source_location),
+                if is_binary { "binary" } else { "renamed" },
+                is_binary,
+                diff.map(|stats| stats.similarity),
+            )))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn file_change(
+    commit: &gix::Commit<'_>,
+    parent: &gix::Commit<'_>,
+    parent_index: usize,
+    path: &gix::bstr::BStr,
+    old_path: Option<&gix::bstr::BStr>,
+    status: &str,
+    is_binary: bool,
+    similarity: Option<f32>,
+) -> CommitFileChange {
+    CommitFileChange {
+        commit_hash: commit.id.to_string(),
+        parent_hash: parent.id.to_string(),
+        parent_index,
+        path: String::from_utf8_lossy(path.as_ref()).into_owned(),
+        old_path: old_path.map(|value| String::from_utf8_lossy(value.as_ref()).into_owned()),
+        status: status.to_string(),
+        additions: 0,
+        deletions: 0,
+        is_binary,
+        is_previewable: !is_binary,
+        similarity,
+    }
+}
+
+fn blob_contains_nul(
+    repo: &gix::Repository,
+    entry_mode: gix_object::tree::EntryMode,
+    id: gix::ObjectId,
+) -> Result<bool, AppError> {
+    if !entry_mode.is_blob_or_symlink() {
+        return Ok(false);
+    }
+
+    let blob = repo
+        .find_blob(id)
+        .map_err(|error| AppError::Repository(error.to_string()))?;
+    Ok(blob.data.iter().take(8000).any(|byte| *byte == 0))
 }
 
 pub(crate) fn diff_resource_cache() -> Result<gix_diff::blob::Platform, AppError> {

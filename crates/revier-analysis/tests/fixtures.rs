@@ -139,6 +139,28 @@ pub fn rename_merge() -> FixtureRepo {
     }
 }
 
+pub fn binary_change() -> FixtureRepo {
+    let repo = init_repo("binary-change");
+    write_file(repo.path(), "README.md", "base\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    let full_path = repo.path().join("assets/logo.bin");
+    fs::create_dir_all(full_path.parent().expect("binary parent")).expect("创建 binary 目录");
+    fs::write(&full_path, [0_u8, 159, 146, 150, 0, 1, 2, 3]).expect("写入 binary");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: add binary"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "binary-change",
+        repo,
+        base,
+        head,
+    }
+}
+
 fn init_repo(name: &'static str) -> TempDir {
     let repo = tempfile::Builder::new()
         .prefix(&format!("revier-{name}-"))
