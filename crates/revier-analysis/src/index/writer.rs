@@ -29,6 +29,13 @@ pub fn write_index(
     )
     .map_err(|error| AppError::DuckDb(error.to_string()))?;
 
+    conn.execute("delete from commit_files", [])
+        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+    conn.execute("delete from commit_parents", [])
+        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+    conn.execute("delete from commits", [])
+        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+
     for commit in commits {
         conn.execute(
             "insert or replace into commits

@@ -111,3 +111,57 @@ fn index_build_then_status_returns_ready() {
             >= 1
     );
 }
+
+#[test]
+fn index_build_replaces_stale_file_rows() {
+    let fixture = fixtures::linear_with_authors();
+    let dir = tempfile::tempdir().expect("创建临时目录");
+    let db_path = dir.path().join("index.duckdb");
+
+    run_index_build(&fixture, &db_path);
+    let conn = revier_analysis::index::connection::open_database(&db_path).expect("打开 DuckDB");
+    let first_count = count_commit_files(&conn);
+    conn.execute(
+        "insert into commit_files
+         (commit_hash, parent_hash, parent_index, path, old_path, status, additions, deletions, is_binary, is_previewable, similarity)
+         values (?, ?, 0, 'stale.txt', '', 'modified', 0, 0, false, true, null)",
+        duckdb::params![fixture.head, fixture.base],
+    )
+    .expect("写入 stale 文件行");
+    drop(conn);
+
+    run_index_build(&fixture, &db_path);
+
+    let conn = revier_analysis::index::connection::open_database(&db_path).expect("打开 DuckDB");
+    let second_count = count_commit_files(&conn);
+    assert_eq!(second_count, first_count);
+}
+
+fn run_index_build(fixture: &fixtures::FixtureRepo, db_path: &std::path::Path) {
+    let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
+        .args([
+            "index",
+            "build",
+            "--repo",
+            fixture.repo.path().to_str().expect("repo path"),
+            "--db",
+            db_path.to_str().expect("db path"),
+            "--branch",
+            "main",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("运行 index build");
+
+    assert!(
+        output.status.success(),
+        "index build 应成功，stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn count_commit_files(conn: &duckdb::Connection) -> i64 {
+    conn.query_row("select count(*) from commit_files", [], |row| row.get(0))
+        .expect("读取 commit_files 数量")
+}
