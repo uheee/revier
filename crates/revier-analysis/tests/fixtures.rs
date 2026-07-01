@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -24,6 +26,54 @@ pub fn linear() -> FixtureRepo {
 
     FixtureRepo {
         name: "linear",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn linear_with_authors() -> FixtureRepo {
+    let repo = init_repo("linear-authors");
+    write_file(repo.path(), "src/app.txt", "base\n");
+    git_with_author(repo.path(), ["add", "."], "Base", "base@example.com", None);
+    git_with_author(
+        repo.path(),
+        ["commit", "-m", "feat: base"],
+        "Base",
+        "base@example.com",
+        Some("2026-05-01T00:00:00Z"),
+    );
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_file(repo.path(), "src/app.txt", "base\nalice\n");
+    git_with_author(
+        repo.path(),
+        ["add", "."],
+        "Alice",
+        "alice@example.com",
+        None,
+    );
+    git_with_author(
+        repo.path(),
+        ["commit", "-m", "feat: alice change"],
+        "Alice",
+        "alice@example.com",
+        Some("2026-05-02T00:00:00Z"),
+    );
+
+    write_file(repo.path(), "src/app.txt", "base\nalice\nbob\n");
+    git_with_author(repo.path(), ["add", "."], "Bob", "bob@example.com", None);
+    git_with_author(
+        repo.path(),
+        ["commit", "-m", "fix: bob change"],
+        "Bob",
+        "bob@example.com",
+        Some("2026-05-03T00:00:00Z"),
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "linear-authors",
         repo,
         base,
         head,
@@ -137,6 +187,35 @@ fn git<const N: usize>(repo: &Path, args: [&str; N]) {
     assert!(
         output.status.success(),
         "git command failed: {}\nstdout: {}\nstderr: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn git_with_author<const N: usize>(
+    repo: &Path,
+    args: [&str; N],
+    name: &str,
+    email: &str,
+    date: Option<&str>,
+) {
+    let mut command = Command::new("git");
+    command
+        .current_dir(repo)
+        .env("GIT_AUTHOR_NAME", name)
+        .env("GIT_AUTHOR_EMAIL", email)
+        .env("GIT_COMMITTER_NAME", name)
+        .env("GIT_COMMITTER_EMAIL", email);
+    if let Some(date) = date {
+        command
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date);
+    }
+    let output = command.args(args).output().expect("运行 git 命令");
+    assert!(
+        output.status.success(),
+        "git 命令失败: {}\nstdout: {}\nstderr: {}",
         args.join(" "),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
