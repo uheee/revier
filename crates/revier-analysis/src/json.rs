@@ -91,15 +91,16 @@ pub struct IndexBuildOutput {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QueryFilesRangeOutput {
     pub base_commit: String,
     pub head_commit: String,
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChangedFileOutput {
     pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub old_path: Option<String>,
     pub status: String,
     pub additions: u64,
@@ -109,6 +110,7 @@ pub struct ChangedFileOutput {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QueryFilesOutput {
     pub version: u8,
     pub range: QueryFilesRangeOutput,
