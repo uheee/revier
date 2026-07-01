@@ -112,6 +112,88 @@ describe('reviewIpc', () => {
     expect(result.files).toEqual([modifiedFile]);
   });
 
+  it('uses Rust query-files when display commit filters are present', async () => {
+    const filters: ReviewFilters = {
+      projectId: project.id,
+      branch: 'main',
+      startAt: '2026-05-01T00:00:00.000Z',
+      endAt: '2026-05-31T00:00:00.000Z',
+      authorKeys: ['alice@example.com'],
+      globRules: ['src/**/*.ts']
+    };
+    const rustQueryFiles = vi.fn(async () => ({
+      files: [modifiedFile],
+      warnings: []
+    }));
+    const listChangedFiles = vi.fn(async () => [readmeFile]);
+
+    const result = await resolveAnalysisScope({
+      project,
+      filters,
+      git: {
+        listCommits: vi.fn(async () => [
+          commit('head', '2026-05-20T00:00:00.000Z', 'Alice', 'feature'),
+          commit('base', '2026-05-01T00:00:00.000Z', 'Base', 'base')
+        ]),
+        listChangedFiles,
+        readFileAtCommit: vi.fn(),
+        showFilePatch: vi.fn()
+      },
+      rust: {
+        queryFiles: rustQueryFiles
+      }
+    });
+
+    expect(rustQueryFiles).toHaveBeenCalledWith({
+      repoPath: project.repoPath,
+      baseCommit: 'base',
+      headCommit: 'head',
+      branch: 'main',
+      startAt: '2026-05-01T00:00:00.000Z',
+      endAt: '2026-05-31T00:00:00.000Z',
+      authorKeys: ['alice@example.com'],
+      authorQuery: undefined,
+      messageQuery: undefined,
+      globRules: ['src/**/*.ts']
+    });
+    expect(listChangedFiles).not.toHaveBeenCalled();
+    expect(result.files).toEqual([modifiedFile]);
+  });
+
+  it('falls back to TypeScript filtering when Rust query-files is recoverable', async () => {
+    const filters: ReviewFilters = {
+      projectId: project.id,
+      branch: 'main',
+      startAt: '2026-05-01T00:00:00.000Z',
+      endAt: '2026-05-31T00:00:00.000Z',
+      authorKeys: ['a@example.com'],
+      globRules: ['src/**/*.ts']
+    };
+    const rustError = Object.assign(new Error('索引不可用'), { recoverable: true });
+
+    const result = await resolveAnalysisScope({
+      project,
+      filters,
+      git: {
+        listCommits: vi.fn(async () => [
+          commit('head', '2026-05-20T00:00:00.000Z', 'Bob', 'fix bug'),
+          commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app'),
+          commit('base', '2026-05-01T00:00:00.000Z', 'Base', 'base')
+        ]),
+        listChangedFiles: vi.fn(async () => [modifiedFile]),
+        readFileAtCommit: vi.fn(),
+        showFilePatch: vi.fn(async () => '@@ -1 +1 @@\n-old\n+new\n')
+      },
+      rust: {
+        queryFiles: vi.fn(async () => {
+          throw rustError;
+        })
+      }
+    });
+
+    expect(result.files).toEqual([modifiedFile]);
+  });
+
   it('builds file overlay from real base and head content with related authors', async () => {
     const range: AnalysisRange = {
       branch: 'main',

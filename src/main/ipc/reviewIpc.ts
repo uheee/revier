@@ -15,6 +15,7 @@ import { createGlobMatcher } from '../analysis/globRules';
 import { buildFileOverlayDiff } from '../analysis/overlayEngine';
 import { parsePatchTouchedRanges } from '../analysis/patchRanges';
 import { selectRangeCommits, type ResolvedCommitRange } from '../analysis/rangeResolver';
+import { RustAnalysisClient, type QueryFilesResult } from '../analysis/rustAnalysisClient';
 import { GitService } from '../git/gitService';
 import type { GitCommitSummary } from '../git/gitTypes';
 import type { JsonProjectStore } from '../projects/projectStore';
@@ -37,10 +38,26 @@ interface CommitOverlayGitClient extends AnalysisGitClient {
   getFirstParent(repoPath: string, commitHash: string): Promise<string>;
 }
 
+interface RustAnalysisQueryClient {
+  queryFiles(request: {
+    repoPath: string;
+    baseCommit: string;
+    headCommit: string;
+    branch: string;
+    startAt?: string;
+    endAt?: string;
+    authorKeys?: string[];
+    authorQuery?: string;
+    messageQuery?: string;
+    globRules: string[];
+  }): Promise<QueryFilesResult>;
+}
+
 interface ResolveAnalysisScopeInput {
   project: ReviewProject;
   filters: ReviewFilters;
   git: AnalysisGitClient;
+  rust?: RustAnalysisQueryClient;
 }
 
 interface ResolvedAnalysisScope {
@@ -70,12 +87,36 @@ interface BuildCommitOverlayInput {
 export async function resolveAnalysisScope({
   project,
   filters,
-  git
+  git,
+  rust
 }: ResolveAnalysisScopeInput): Promise<ResolvedAnalysisScope> {
   const commits = await git.listCommits(project.repoPath, filters.branch);
   const range = selectRangeCommits(commits, filters);
   const matcher = createGlobMatcher(filters.globRules);
   const rangeCommits = mapRangeCommits(commits, range);
+
+  if (hasDisplayCommitFilters(filters) && rust) {
+    try {
+      const result = await rust.queryFiles({
+        repoPath: project.repoPath,
+        baseCommit: range.baseCommit,
+        headCommit: range.headCommit,
+        branch: filters.branch,
+        startAt: range.startAt,
+        endAt: range.endAt,
+        authorKeys: filters.authorKeys,
+        authorQuery: filters.authorQuery,
+        messageQuery: filters.messageQuery,
+        globRules: filters.globRules
+      });
+      return { range, files: result.files, rangeCommits };
+    } catch (error) {
+      if (!isRecoverableRustError(error)) {
+        throw error;
+      }
+    }
+  }
+
   let files = (await git.listChangedFiles(project.repoPath, range.baseCommit, range.headCommit)).filter(
     (file) => matcher(file.path)
   );
@@ -184,6 +225,7 @@ export async function buildCommitOverlayForTask({
 
 export function registerReviewIpc(projectStore: JsonProjectStore): void {
   const git = new GitService();
+  const rust = new RustAnalysisClient();
   const taskManager = new AnalysisTaskManager();
   const filesByTask = new Map<string, ChangedFile[]>();
   const rangesByTask = new Map<string, AnalysisRange>();
@@ -207,7 +249,7 @@ export function registerReviewIpc(projectStore: JsonProjectStore): void {
       throw new Error('Project not found');
     }
 
-    const scope = await resolveAnalysisScope({ project, filters, git });
+    const scope = await resolveAnalysisScope({ project, filters, git, rust });
     filesByTask.set(task.taskId, scope.files);
     rangeCommitsByTask.set(task.taskId, scope.rangeCommits);
     projectsByTask.set(task.taskId, project);
@@ -393,6 +435,15 @@ async function showPatchForAnyFilePath(
 
 function hasDisplayCommitFilters(filters: ReviewFilters): boolean {
   return Boolean((filters.authorKeys?.length ?? 0) > 0 || filters.authorQuery?.trim() || filters.messageQuery?.trim());
+}
+
+function isRecoverableRustError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'recoverable' in error &&
+      (error as { recoverable?: unknown }).recoverable
+  );
 }
 
 function commitMatchesDisplayFilters(commit: GitCommitSummary, filters: ReviewFilters): boolean {
