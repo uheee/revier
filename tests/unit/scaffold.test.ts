@@ -17,4 +17,16 @@ describe('project scaffold', () => {
     expect(rendererEntry).toContain("from 'naive-ui'");
     expect(rendererEntry).not.toContain('element-plus');
   });
+
+  it('exposes Rust index debug scripts', () => {
+    expect(packageJson.scripts['rust:index:status']).toBe(
+      'cargo run -p revier-analysis -- index status'
+    );
+    expect(packageJson.scripts['rust:index:build']).toBe(
+      'cargo run -p revier-analysis -- index build'
+    );
+    expect(packageJson.scripts['rust:index:query-files']).toBe(
+      'cargo run -p revier-analysis -- index query-files'
+    );
+  });
 });

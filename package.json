@@ -28,7 +28,10 @@
     "build:cli": "tsc -p tsconfig.cli.json",
     "revier-analysis": "pnpm build:cli && node dist/cli/cli/revier-analysis.js",
     "rust:test": "cargo test --workspace",
-    "rust:spike": "cargo run -p revier-analysis -- spike run"
+    "rust:spike": "cargo run -p revier-analysis -- spike run",
+    "rust:index:status": "cargo run -p revier-analysis -- index status",
+    "rust:index:build": "cargo run -p revier-analysis -- index build",
+    "rust:index:query-files": "cargo run -p revier-analysis -- index query-files"
   },
   "dependencies": {
     "@vueuse/components": "^10.11.0",
