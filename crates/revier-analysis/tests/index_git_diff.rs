@@ -33,3 +33,18 @@ fn marks_binary_files_as_not_previewable() {
     assert!(binary.is_binary);
     assert!(!binary.is_previewable);
 }
+
+#[test]
+fn omits_tree_entries_from_file_changes() {
+    let fixture = fixtures::binary_change();
+    let repo =
+        revier_analysis::git::repository::open_repository(fixture.repo.path()).expect("打开仓库");
+
+    let changes = revier_analysis::git::diff::commit_file_changes(&repo, &fixture.head)
+        .expect("读取提交文件变更");
+
+    assert!(changes
+        .iter()
+        .any(|change| change.path == "assets/logo.bin"));
+    assert!(!changes.iter().any(|change| change.path == "assets"));
+}

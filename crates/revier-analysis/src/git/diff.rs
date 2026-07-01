@@ -244,6 +244,9 @@ fn map_tree_change(
             id,
             ..
         } => {
+            if entry_mode.is_tree() {
+                return Ok(None);
+            }
             let is_binary = blob_contains_nul(repo, entry_mode, id)?;
             Ok(Some(file_change(
                 commit,
@@ -262,6 +265,9 @@ fn map_tree_change(
             id,
             ..
         } => {
+            if entry_mode.is_tree() {
+                return Ok(None);
+            }
             let is_binary = blob_contains_nul(repo, entry_mode, id)?;
             Ok(Some(file_change(
                 commit,
@@ -281,6 +287,9 @@ fn map_tree_change(
             entry_mode,
             id,
         } => {
+            if previous_entry_mode.is_tree() || entry_mode.is_tree() {
+                return Ok(None);
+            }
             let is_binary = blob_contains_nul(repo, previous_entry_mode, previous_id)?
                 || blob_contains_nul(repo, entry_mode, id)?;
             Ok(Some(file_change(
@@ -299,10 +308,14 @@ fn map_tree_change(
             location,
             copy: false,
             diff,
+            source_entry_mode,
             entry_mode,
             id,
             ..
         } => {
+            if source_entry_mode.is_tree() || entry_mode.is_tree() {
+                return Ok(None);
+            }
             let is_binary = blob_contains_nul(repo, entry_mode, id)?;
             Ok(Some(file_change(
                 commit,
