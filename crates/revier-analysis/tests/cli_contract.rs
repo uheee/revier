@@ -23,6 +23,25 @@ fn help_command_exits_successfully() {
 }
 
 #[test]
+fn index_help_lists_status_build_and_query_files_commands() {
+    let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
+        .args(["index", "--help"])
+        .output()
+        .expect("运行 revier-analysis index --help");
+
+    assert!(
+        output.status.success(),
+        "index --help 应成功，stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("status"));
+    assert!(stdout.contains("build"));
+    assert!(stdout.contains("query-files"));
+}
+
+#[test]
 fn spike_run_outputs_stable_json_shape_for_requested_fixture() {
     let fixture = crate::fixtures::rename_merge();
     let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
