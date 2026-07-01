@@ -1,3 +1,7 @@
+mod fixtures;
+
+use serde_json::Value;
+use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
@@ -43,4 +47,67 @@ fn reports_incompatible_schema_version() {
         result,
         Err(revier_analysis::error::AppError::SchemaIncompatible(_))
     ));
+}
+
+#[test]
+fn index_build_then_status_returns_ready() {
+    let fixture = fixtures::linear_with_authors();
+    let dir = tempfile::tempdir().expect("创建临时目录");
+    let db_path = dir.path().join("index.duckdb");
+
+    let build = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
+        .args([
+            "index",
+            "build",
+            "--repo",
+            fixture.repo.path().to_str().expect("repo path"),
+            "--db",
+            db_path.to_str().expect("db path"),
+            "--branch",
+            "main",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("运行 index build");
+
+    assert!(
+        build.status.success(),
+        "index build 应成功，stderr: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let build_json: Value = serde_json::from_slice(&build.stdout).expect("解析 build json");
+    assert_eq!(build_json["version"], 1);
+    assert_eq!(build_json["status"], "completed");
+    assert!(
+        build_json["indexedCommitCount"]
+            .as_u64()
+            .expect("commit count")
+            >= 3
+    );
+
+    let status = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
+        .args([
+            "index",
+            "status",
+            "--repo",
+            fixture.repo.path().to_str().expect("repo path"),
+            "--db",
+            db_path.to_str().expect("db path"),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("运行 index status");
+
+    assert!(status.status.success());
+    let status_json: Value = serde_json::from_slice(&status.stdout).expect("解析 status json");
+    assert_eq!(status_json["status"], "ready");
+    assert!(
+        status_json["indexedFileCount"]
+            .as_u64()
+            .expect("file count")
+            >= 1
+    );
 }

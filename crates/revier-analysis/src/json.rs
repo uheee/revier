@@ -59,6 +59,7 @@ pub enum IndexStatusKind {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexStatusOutput {
     pub version: u8,
     pub repo_id: String,
@@ -78,6 +79,7 @@ pub enum IndexRunStatus {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexBuildOutput {
     pub version: u8,
     pub repo_id: String,
