@@ -12,7 +12,7 @@ pub fn build_file_overlay(
     args: FileOverlayArgs,
 ) -> Result<FileOverlayCommandOutput, AppError> {
     let context = crate::attribution::context::AttributionContext::open(repo, &args.common)?;
-    let warnings = context.warnings.clone();
+    let mut warnings = context.warnings.clone();
 
     let change = crate::git::diff::changed_file_between(
         repo,
@@ -21,6 +21,15 @@ pub fn build_file_overlay(
         &args.file,
     )?
     .ok_or_else(|| AppError::FileNotAnalyzable(format!("文件在范围内未变更：{}", args.file)))?;
+
+    let path_candidates = crate::attribution::path_history::path_candidates(
+        &context,
+        &args.common.base,
+        &args.common.head,
+        &change.path,
+        change.old_path.as_deref(),
+    )?;
+    append_warnings(&mut warnings, path_candidates.warnings);
 
     if change.is_binary {
         return Err(AppError::FileNotAnalyzable(format!(
@@ -58,6 +67,16 @@ pub fn build_file_overlay(
         args.common.author_query.as_deref(),
         args.common.message.as_deref(),
     )?;
+    let blocks = crate::attribution::deletion_trace::attach_deletion_trace(
+        &context,
+        blocks,
+        &path_candidates.paths,
+        &change.path,
+        change.old_path.as_deref(),
+        &args.common.authors,
+        args.common.author_query.as_deref(),
+        args.common.message.as_deref(),
+    )?;
 
     Ok(FileOverlayCommandOutput {
         version: 1,
@@ -77,6 +96,14 @@ pub fn build_file_overlay(
         },
         warnings,
     })
+}
+
+fn append_warnings(warnings: &mut Vec<String>, new_warnings: Vec<String>) {
+    for warning in new_warnings {
+        if !warnings.contains(&warning) {
+            warnings.push(warning);
+        }
+    }
 }
 
 fn old_text_path(change: &CommitFileChange) -> Option<&str> {

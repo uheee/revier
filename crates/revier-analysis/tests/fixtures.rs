@@ -32,6 +32,70 @@ pub fn linear() -> FixtureRepo {
     }
 }
 
+pub fn linear_deletion() -> FixtureRepo {
+    let repo = init_repo("linear-deletion");
+    write_file(repo.path(), "src/app.txt", "keep\ndelete me\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_file(repo.path(), "src/app.txt", "keep\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "fix: delete line"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "linear-deletion",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn replacement_hunk_deletion() -> FixtureRepo {
+    let repo = init_repo("replacement-hunk-deletion");
+    write_file(repo.path(), "src/app.txt", "keep\ndelete me\ntail\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_file(repo.path(), "src/app.txt", "keep\nreplacement\ntail\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "fix: replace deleted line"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "replacement-hunk-deletion",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn stale_modified_deletion_then_final_change() -> FixtureRepo {
+    let repo = init_repo("stale-modified-deletion");
+    write_file(repo.path(), "src/app.txt", "foo\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base foo"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_file(repo.path(), "src/app.txt", "bar\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "fix: foo to bar"]);
+
+    write_file(repo.path(), "src/app.txt", "baz\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "fix: bar to baz"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "stale-modified-deletion",
+        repo,
+        base,
+        head,
+    }
+}
+
 pub fn linear_with_authors() -> FixtureRepo {
     let repo = init_repo("linear-authors");
     write_file(repo.path(), "src/app.txt", "base\n");
@@ -105,6 +169,57 @@ pub fn merge_conflict() -> FixtureRepo {
 
     FixtureRepo {
         name: "merge-conflict",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn deletion_merge() -> FixtureRepo {
+    let repo = init_repo("deletion-merge");
+    write_file(repo.path(), "src/app.txt", "keep\ndelete me\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "src/app.txt", "keep\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "fix: delete line"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    git(
+        repo.path(),
+        ["merge", "--no-ff", "feature", "-m", "merge: delete feature"],
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "deletion-merge",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn duplicate_deletions_same_text() -> FixtureRepo {
+    let repo = init_repo("duplicate-deletions-same-text");
+    write_file(repo.path(), "src/app.txt", "dup\nkeep\ndup\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: duplicate base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_file(repo.path(), "src/app.txt", "keep\ndup\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "fix: delete first dup"]);
+
+    write_file(repo.path(), "src/app.txt", "keep\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "fix: delete second dup"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "duplicate-deletions-same-text",
         repo,
         base,
         head,
@@ -295,6 +410,75 @@ pub fn rename_then_reused_old_path() -> FixtureRepo {
 
     FixtureRepo {
         name: "rename-reused-old-path",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn rename_delete_then_reused_old_path_delete() -> FixtureRepo {
+    let repo = init_repo("rename-delete-reused-old-path");
+    write_file(
+        repo.path(),
+        "src/old.txt",
+        "keep\nstay\nanother\ndelete me\n",
+    );
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: add old file"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["mv", "src/old.txt", "src/new.txt"]);
+    write_file(repo.path(), "src/new.txt", "keep\nstay\nanother\n");
+    git(repo.path(), ["add", "."]);
+    git(
+        repo.path(),
+        ["commit", "-m", "fix: rename and delete tracked line"],
+    );
+
+    write_file(
+        repo.path(),
+        "src/old.txt",
+        "keep\nstay\nanother\ndelete me\n",
+    );
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "chore: recreate old path"]);
+
+    fs::remove_file(repo.path().join("src/old.txt")).expect("删除复用旧路径文件");
+    git(repo.path(), ["add", "."]);
+    git(
+        repo.path(),
+        ["commit", "-m", "chore: delete reused old path"],
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "rename-delete-reused-old-path",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn multi_hop_rename_delete() -> FixtureRepo {
+    let repo = init_repo("multi-hop-rename-delete");
+    write_file(repo.path(), "src/a.txt", "keep\nstay\nanother\ndelete me\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: add a"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["mv", "src/a.txt", "src/b.txt"]);
+    git(repo.path(), ["commit", "-m", "refactor: rename a to b"]);
+
+    write_file(repo.path(), "src/b.txt", "keep\nstay\nanother\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "fix: delete line on b"]);
+
+    git(repo.path(), ["mv", "src/b.txt", "src/c.txt"]);
+    git(repo.path(), ["commit", "-m", "refactor: rename b to c"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "multi-hop-rename-delete",
         repo,
         base,
         head,

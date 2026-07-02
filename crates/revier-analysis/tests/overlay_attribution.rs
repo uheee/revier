@@ -321,6 +321,170 @@ fn parent_text_match_outside_block_window_does_not_explain_merge_source() {
     );
 }
 
+#[test]
+fn linear_deleted_block_uses_precise_deletion_trace() {
+    let fixture = fixtures::linear_deletion();
+    let value = run_file_overlay(&fixture, "src/app.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let related_commit = related_commit_with_subject(block, "fix: delete line");
+    let warnings = block["attribution"]["warnings"]
+        .as_array()
+        .expect("warnings 数组");
+
+    assert_eq!(block["changeType"], "deleted");
+    assert_eq!(block["attribution"]["confidence"], "precise");
+    assert_eq!(related_commit["attribution"]["method"], "deletion-trace");
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning["code"] == "DELETION_TRACE_INCOMPLETE"),
+        "明确 deletion-trace 不应保留 deletion incomplete warning，实际为 {warnings:?}"
+    );
+}
+
+#[test]
+fn replacement_hunk_old_side_deletion_uses_deletion_trace() {
+    let fixture = fixtures::replacement_hunk_deletion();
+    let value = run_file_overlay(&fixture, "src/app.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let related_commit = related_commit_with_subject(block, "fix: replace deleted line");
+
+    assert_eq!(block["changeType"], "modified");
+    assert_eq!(block["attribution"]["confidence"], "precise");
+    assert_eq!(related_commit["attribution"]["method"], "deletion-trace");
+}
+
+#[test]
+fn stale_modified_deletion_does_not_override_final_change_blame() {
+    let fixture = fixtures::stale_modified_deletion_then_final_change();
+    let value = run_file_overlay(&fixture, "src/app.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let related_commits = block["relatedCommits"]
+        .as_array()
+        .expect("relatedCommits 数组");
+
+    assert_eq!(block["changeType"], "modified");
+    assert!(
+        related_commits
+            .iter()
+            .any(|commit| commit["subject"] == "fix: bar to baz"),
+        "最终 modified block 应保留最终新侧提交归因，实际为 {related_commits:?}"
+    );
+    assert!(
+        related_commits.iter().all(|commit| {
+            !(commit["subject"] == "fix: foo to bar"
+                && commit["attribution"]["method"] == "deletion-trace")
+        }),
+        "旧侧删除提交不能作为 precise deletion-trace 覆盖最终 modified block，实际为 {related_commits:?}"
+    );
+}
+
+#[test]
+fn deleted_block_uses_deletion_trace_or_inference() {
+    let fixture = fixtures::deletion_merge();
+    let value = run_file_overlay(&fixture, "src/app.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let confidence = block["attribution"]["confidence"]
+        .as_str()
+        .expect("归因 confidence");
+    let related_commits = block["relatedCommits"]
+        .as_array()
+        .expect("relatedCommits 数组");
+    let warnings = block["attribution"]["warnings"]
+        .as_array()
+        .expect("warnings 数组");
+    let subjects = related_commits
+        .iter()
+        .map(|commit| commit["subject"].as_str().expect("提交主题"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(block["changeType"], "deleted");
+    assert!(
+        ["precise", "inferred", "partial"].contains(&confidence),
+        "删除块 confidence 应为 precise/inferred/partial 之一，实际为 {confidence}"
+    );
+    assert!(
+        subjects
+            .iter()
+            .any(|subject| subject.contains("delete line")),
+        "relatedCommits 应包含删除提交，实际为 {subjects:?}"
+    );
+    assert!(
+        !subjects.contains(&"merge: delete feature"),
+        "普通 merge 不应作为删除块主要来源，实际为 {subjects:?}"
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning["code"] == "DELETION_TRACE_INCOMPLETE"),
+        "找到删除提交后不应继续标记删除追踪不完整，实际为 {warnings:?}"
+    );
+}
+
+#[test]
+fn repeated_deleted_text_does_not_attribute_other_location_to_current_block() {
+    let fixture = fixtures::duplicate_deletions_same_text();
+    let value = run_file_overlay(&fixture, "src/app.txt");
+    let blocks = value["overlay"]["blocks"].as_array().expect("blocks 数组");
+    let first_block = blocks
+        .iter()
+        .find(|block| block["oldStart"] == 1)
+        .expect("应存在第一处删除 block");
+    let subjects = related_subjects(first_block);
+
+    assert!(
+        subjects.contains(&"fix: delete first dup"),
+        "第一处删除 block 应包含实际删除提交，实际为 {subjects:?}"
+    );
+    assert!(
+        !subjects.contains(&"fix: delete second dup"),
+        "同文件其它位置的相同删除文本不应污染当前 block，实际为 {subjects:?}"
+    );
+}
+
+#[test]
+fn deletion_trace_does_not_use_reused_old_path_after_rename() {
+    let fixture = fixtures::rename_delete_then_reused_old_path_delete();
+    let value = run_file_overlay(&fixture, "src/new.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let subjects = related_subjects(block);
+
+    assert_eq!(block["changeType"], "deleted");
+    assert!(
+        subjects.contains(&"fix: rename and delete tracked line"),
+        "删除追踪应保留当前文件路径上的真实删除提交，实际为 {subjects:?}"
+    );
+    let related_commit = related_commit_with_subject(block, "fix: rename and delete tracked line");
+    assert_eq!(related_commit["attribution"]["method"], "deletion-trace");
+    assert!(
+        !subjects.contains(&"chore: delete reused old path"),
+        "rename 后复用旧路径的删除不应污染当前文件，实际为 {subjects:?}"
+    );
+}
+
+#[test]
+fn deletion_trace_follows_multi_hop_rename_middle_path() {
+    let fixture = fixtures::multi_hop_rename_delete();
+    let value = run_file_overlay(&fixture, "src/c.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let related_commit = related_commit_with_subject(block, "fix: delete line on b");
+
+    assert_eq!(value["overlay"]["file"]["oldPath"], "src/a.txt");
+    assert_eq!(block["changeType"], "deleted");
+    assert_eq!(block["attribution"]["confidence"], "precise");
+    assert_eq!(related_commit["attribution"]["method"], "deletion-trace");
+}
+
+#[test]
+fn rename_overlay_uses_old_path_and_does_not_drop_blocks() {
+    let fixture = fixtures::rename_merge();
+    let value = run_file_overlay(&fixture, "src/new.txt");
+    let blocks = value["overlay"]["blocks"].as_array().expect("blocks 数组");
+
+    assert_eq!(value["overlay"]["file"]["oldPath"], "src/old.txt");
+    assert!(blocks.len() >= 1, "rename overlay 不应丢失 blocks");
+}
+
 fn run_file_overlay(fixture: &fixtures::FixtureRepo, file: &str) -> Value {
     let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
         .args([
@@ -348,4 +512,27 @@ fn run_file_overlay(fixture: &fixtures::FixtureRepo, file: &str) -> Value {
     );
 
     serde_json::from_slice(&output.stdout).expect("解析 file-overlay JSON")
+}
+
+fn related_subjects(block: &Value) -> Vec<&str> {
+    block["relatedCommits"]
+        .as_array()
+        .expect("relatedCommits 数组")
+        .iter()
+        .map(|commit| commit["subject"].as_str().expect("提交主题"))
+        .collect()
+}
+
+fn related_commit_with_subject<'a>(block: &'a Value, subject: &str) -> &'a Value {
+    block["relatedCommits"]
+        .as_array()
+        .expect("relatedCommits 数组")
+        .iter()
+        .find(|commit| commit["subject"] == subject)
+        .unwrap_or_else(|| {
+            panic!(
+                "relatedCommits 应包含 {subject}，实际为 {:?}",
+                block["relatedCommits"]
+            )
+        })
 }
