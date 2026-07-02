@@ -111,6 +111,108 @@ pub fn merge_conflict() -> FixtureRepo {
     }
 }
 
+pub fn multi_parent_ambiguous() -> FixtureRepo {
+    let repo = init_repo("multi-parent-ambiguous");
+    write_file(repo.path(), "src/app.txt", "base\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["checkout", "-b", "left"]);
+    write_file(repo.path(), "src/app.txt", "base\nshared\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: left shared"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    git(repo.path(), ["checkout", "-b", "right"]);
+    write_file(repo.path(), "src/app.txt", "base\nshared\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: right shared"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    let tree = rev_parse(repo.path(), "left^{tree}");
+    let left = rev_parse(repo.path(), "left");
+    let right = rev_parse(repo.path(), "right");
+    let head = git_commit_tree(
+        repo.path(),
+        &tree,
+        [&base, &left, &right],
+        "merge: ambiguous shared",
+    );
+    git(repo.path(), ["reset", "--hard", &head]);
+
+    FixtureRepo {
+        name: "multi-parent-ambiguous",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn merge_adds_duplicate_text_with_parent_match_elsewhere() -> FixtureRepo {
+    let repo = init_repo("merge-duplicate-text-window");
+    write_file(repo.path(), "src/app.txt", "shared\nbase\n");
+    git(repo.path(), ["add", "."]);
+    git(
+        repo.path(),
+        ["commit", "-m", "feat: base with shared header"],
+    );
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["checkout", "-b", "docs"]);
+    write_file(repo.path(), "docs/notes.txt", "docs only\n");
+    git(repo.path(), ["add", "."]);
+    git(
+        repo.path(),
+        ["commit", "-m", "docs: parent with same text elsewhere"],
+    );
+
+    git(repo.path(), ["checkout", "main"]);
+    git(repo.path(), ["merge", "--no-ff", "--no-commit", "docs"]);
+    write_file(repo.path(), "src/app.txt", "shared\nbase\nshared\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "merge: add duplicate shared"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "merge-duplicate-text-window",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn unrelated_merge_contains_same_block_text() -> FixtureRepo {
+    let repo = init_repo("unrelated-merge-same-text");
+    write_file(repo.path(), "src/app.txt", "base\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_file(repo.path(), "src/app.txt", "base\nshared\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: add shared line"]);
+
+    git(repo.path(), ["checkout", "-b", "docs"]);
+    write_file(repo.path(), "docs/notes.txt", "docs only\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "docs: add notes"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    git(
+        repo.path(),
+        ["merge", "--no-ff", "docs", "-m", "merge: docs only"],
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "unrelated-merge-same-text",
+        repo,
+        base,
+        head,
+    }
+}
+
 pub fn rename_merge() -> FixtureRepo {
     let repo = init_repo("rename-merge");
     write_file(repo.path(), "src/old.txt", "alpha\nbeta\n");
@@ -251,6 +353,37 @@ fn rev_parse(repo: &Path, rev: &str) -> String {
     assert!(
         output.status.success(),
         "git rev-parse failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("utf8 hash")
+        .trim()
+        .to_string()
+}
+
+fn git_commit_tree<const N: usize>(
+    repo: &Path,
+    tree: &str,
+    parents: [&str; N],
+    message: &str,
+) -> String {
+    let mut args = vec!["commit-tree", tree];
+    for parent in parents {
+        args.push("-p");
+        args.push(parent);
+    }
+    args.push("-m");
+    args.push(message);
+
+    let output = Command::new("git")
+        .current_dir(repo)
+        .args(args)
+        .output()
+        .expect("run git commit-tree");
+
+    assert!(
+        output.status.success(),
+        "git commit-tree failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout)

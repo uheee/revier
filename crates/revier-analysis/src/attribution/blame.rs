@@ -1,5 +1,6 @@
 use crate::attribution::commit_lookup;
 use crate::attribution::context::AttributionContext;
+use crate::attribution::merge_trace;
 use crate::attribution::patch_inference::FilterMatcher;
 use crate::error::AppError;
 use crate::git::blame::BlameLine;
@@ -29,11 +30,20 @@ pub fn attach_blame_attribution(
     message: Option<&str>,
 ) -> Result<Vec<DiffBlockOutput>, AppError> {
     let filter = FilterMatcher::new(authors, author_query, message);
+    let mut merge_text_cache = merge_trace::MergeTraceTextCache::new();
 
-    blocks
-        .into_iter()
-        .map(|block| attach_block_blame_attribution(context, head, path, block, &filter))
-        .collect()
+    let mut attributed_blocks = Vec::new();
+    for block in blocks {
+        attributed_blocks.push(attach_block_blame_attribution(
+            context,
+            head,
+            path,
+            block,
+            &filter,
+            &mut merge_text_cache,
+        )?);
+    }
+    Ok(attributed_blocks)
 }
 
 fn attach_block_blame_attribution(
@@ -42,9 +52,10 @@ fn attach_block_blame_attribution(
     path: &str,
     block: DiffBlockOutput,
     filter: &FilterMatcher,
+    merge_text_cache: &mut merge_trace::MergeTraceTextCache,
 ) -> Result<DiffBlockOutput, AppError> {
     attach_block_blame_attribution_with_resolver(block, |block| {
-        related_commits_from_blame(context, head, path, block, filter)
+        related_commits_from_blame(context, head, path, block, filter, merge_text_cache)
     })
 }
 
@@ -64,7 +75,10 @@ where
     }
 
     match resolve_blame(&block)? {
-        BlameResolution::Resolved(related_commits) => {
+        BlameResolution::Resolved {
+            related_commits,
+            has_ambiguous_merge_trace,
+        } => {
             if related_commits.is_empty() {
                 block.attribution = Some(inferred_attribution(
                     BLAME_UNAVAILABLE_CODE,
@@ -73,7 +87,11 @@ where
             } else {
                 block.related_commits = related_commits;
                 block.authors = authors_from_related_commits(&block.related_commits);
-                block.attribution = Some(precise_attribution());
+                block.attribution = Some(if has_ambiguous_merge_trace {
+                    merge_trace::partial_attribution()
+                } else {
+                    precise_attribution()
+                });
             }
         }
         BlameResolution::Unavailable => {
@@ -93,18 +111,38 @@ fn related_commits_from_blame(
     path: &str,
     block: &DiffBlockOutput,
     filter: &FilterMatcher,
+    merge_text_cache: &mut merge_trace::MergeTraceTextCache,
 ) -> Result<BlameResolution, AppError> {
+    let previous_related_commits = block.related_commits.clone();
     let blame_lines =
         crate::git::blame::blame_range(context.repo, head, path, block.new_start, block.new_end);
 
-    resolve_blame_range_result(block, blame_lines, filter, |hash| {
+    let resolution = resolve_blame_range_result(block, blame_lines, filter, |hash| {
         commit_lookup::get_commit(context, hash)
-    })
+    })?;
+
+    match resolution {
+        BlameResolution::Resolved {
+            related_commits, ..
+        } => apply_merge_trace_to_related_commits(
+            context,
+            path,
+            block,
+            filter,
+            related_commits,
+            &previous_related_commits,
+            merge_text_cache,
+        ),
+        BlameResolution::Unavailable => Ok(BlameResolution::Unavailable),
+    }
 }
 
 #[derive(Debug)]
 enum BlameResolution {
-    Resolved(Vec<RelatedCommitOutput>),
+    Resolved {
+        related_commits: Vec<RelatedCommitOutput>,
+        has_ambiguous_merge_trace: bool,
+    },
     Unavailable,
 }
 
@@ -177,7 +215,164 @@ where
     if related_commits.is_empty() {
         Ok(BlameResolution::Unavailable)
     } else {
-        Ok(BlameResolution::Resolved(related_commits))
+        Ok(BlameResolution::Resolved {
+            related_commits,
+            has_ambiguous_merge_trace: false,
+        })
+    }
+}
+
+fn apply_merge_trace_to_related_commits(
+    context: &AttributionContext<'_>,
+    path: &str,
+    block: &DiffBlockOutput,
+    filter: &FilterMatcher,
+    mut related_commits: Vec<RelatedCommitOutput>,
+    previous_related_commits: &[RelatedCommitOutput],
+    merge_text_cache: &mut merge_trace::MergeTraceTextCache,
+) -> Result<BlameResolution, AppError> {
+    let merge_hashes =
+        merge_hashes_for_trace_scan(context, block, &related_commits, previous_related_commits)?;
+    let mut has_ambiguous_merge_trace = false;
+
+    for merge_hash in merge_hashes {
+        let merge_commit = commit_lookup::get_commit(context, &merge_hash)?;
+        let mut attribution_sources = related_commits.clone();
+        attribution_sources.extend(previous_related_commits.iter().cloned());
+        let Some(outcome) = merge_trace::resolve_merge_commit(
+            context,
+            &merge_commit,
+            path,
+            block,
+            filter,
+            &attribution_sources,
+            merge_text_cache,
+        )?
+        else {
+            continue;
+        };
+
+        has_ambiguous_merge_trace |= outcome.ambiguous;
+        for traced_commit in outcome.related_commits {
+            merge_related_commit(&mut related_commits, traced_commit);
+        }
+    }
+
+    Ok(BlameResolution::Resolved {
+        related_commits,
+        has_ambiguous_merge_trace,
+    })
+}
+
+fn merge_hashes_for_trace_scan(
+    context: &AttributionContext<'_>,
+    block: &DiffBlockOutput,
+    related_commits: &[RelatedCommitOutput],
+    previous_related_commits: &[RelatedCommitOutput],
+) -> Result<Vec<String>, AppError> {
+    let mut hashes = Vec::new();
+    let mut seen = HashSet::new();
+
+    for commit in related_commits {
+        let indexed_commit = commit_lookup::get_commit(context, &commit.hash)?;
+        if indexed_commit.is_merge && seen.insert(indexed_commit.hash.clone()) {
+            hashes.push(indexed_commit.hash);
+        }
+    }
+
+    for commit in previous_related_commits {
+        if !related_commit_touches_block(block, commit) {
+            continue;
+        }
+        let indexed_commit = commit_lookup::get_commit(context, &commit.hash)?;
+        if indexed_commit.is_merge && seen.insert(indexed_commit.hash.clone()) {
+            hashes.push(indexed_commit.hash);
+        }
+    }
+
+    Ok(hashes)
+}
+
+fn related_commit_touches_block(block: &DiffBlockOutput, commit: &RelatedCommitOutput) -> bool {
+    commit
+        .touched_ranges
+        .iter()
+        .any(|touched| block_intersects_touched(block, touched))
+}
+
+fn block_intersects_touched(
+    block: &DiffBlockOutput,
+    touched: &crate::json::TouchedRangeOutput,
+) -> bool {
+    ranges_intersect(
+        block.old_start,
+        block.old_end,
+        touched.old_start,
+        touched.old_end,
+    ) || ranges_intersect(
+        block.new_start,
+        block.new_end,
+        touched.new_start,
+        touched.new_end,
+    )
+}
+
+fn ranges_intersect(
+    block_start: usize,
+    block_end: usize,
+    touched_start: Option<usize>,
+    touched_end: Option<usize>,
+) -> bool {
+    let Some(touched_start) = touched_start else {
+        return false;
+    };
+    let Some(touched_end) = touched_end else {
+        return false;
+    };
+    block_start > 0 && block_end > 0 && block_start <= touched_end && touched_start <= block_end
+}
+
+fn merge_related_commit(
+    related_commits: &mut Vec<RelatedCommitOutput>,
+    traced_commit: RelatedCommitOutput,
+) {
+    let Some(existing) = related_commits
+        .iter_mut()
+        .find(|commit| commit.hash == traced_commit.hash)
+    else {
+        related_commits.push(traced_commit);
+        return;
+    };
+
+    if existing.touched_ranges.is_empty() {
+        existing.touched_ranges = traced_commit.touched_ranges;
+    }
+
+    merge_related_attribution(existing, traced_commit.attribution);
+}
+
+fn merge_related_attribution(
+    existing: &mut RelatedCommitOutput,
+    traced_attribution: Option<RelatedCommitAttributionOutput>,
+) {
+    let Some(traced_attribution) = traced_attribution else {
+        return;
+    };
+
+    let Some(existing_attribution) = existing.attribution.as_mut() else {
+        existing.attribution = Some(traced_attribution);
+        return;
+    };
+
+    if existing_attribution.method != MERGE_TRACE_METHOD {
+        existing.attribution = Some(traced_attribution);
+        return;
+    }
+
+    for merge_hash in traced_attribution.via_merge_hashes {
+        if !existing_attribution.via_merge_hashes.contains(&merge_hash) {
+            existing_attribution.via_merge_hashes.push(merge_hash);
+        }
     }
 }
 
