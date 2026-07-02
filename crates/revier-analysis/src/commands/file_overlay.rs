@@ -1,8 +1,9 @@
 use crate::cli::FileOverlayArgs;
 use crate::error::AppError;
 
-pub fn run(_args: FileOverlayArgs) -> Result<String, AppError> {
-    Err(AppError::Analysis(
-        "file-overlay 命令契约已注册，overlay 构建尚未接入".to_string(),
-    ))
+pub fn run(args: FileOverlayArgs) -> Result<String, AppError> {
+    let pretty = args.common.pretty;
+    let repo = crate::git::repository::open_repository(&args.common.repo)?;
+    let output = crate::overlay::file_overlay::build_file_overlay(&repo, args)?;
+    crate::serialize_json(&output, pretty)
 }
