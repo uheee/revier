@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use chrono::{DateTime, Utc};
 use gix::bstr::ByteSlice;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
 pub struct IndexedCommit {
@@ -36,6 +37,67 @@ pub fn list_reachable_commits(
         commits.push(indexed_commit_from_gix(&commit)?);
     }
     Ok(commits)
+}
+
+pub fn get_commit(repo: &gix::Repository, commit_hash: &str) -> Result<IndexedCommit, AppError> {
+    let object = repo
+        .rev_parse_single(commit_hash)
+        .map_err(|error| AppError::Repository(format!("无法解析提交 {commit_hash}：{error}")))?;
+    let commit = object
+        .object()
+        .map_err(|error| AppError::Repository(error.to_string()))?
+        .try_into_commit()
+        .map_err(|_| AppError::Repository(format!("对象不是提交：{commit_hash}")))?;
+
+    indexed_commit_from_gix(&commit)
+}
+
+pub fn range_commit_hashes(
+    repo: &gix::Repository,
+    base_commit: &str,
+    head_commit: &str,
+) -> Result<Vec<String>, AppError> {
+    let base = repo
+        .rev_parse_single(base_commit)
+        .map_err(|error| {
+            AppError::Repository(format!("无法解析 base 提交 {base_commit}：{error}"))
+        })?
+        .detach();
+    let head = repo
+        .rev_parse_single(head_commit)
+        .map_err(|error| {
+            AppError::Repository(format!("无法解析 head 提交 {head_commit}：{error}"))
+        })?
+        .detach();
+
+    if base == head {
+        return Ok(Vec::new());
+    }
+
+    let base_walk = repo
+        .rev_walk([base])
+        .all()
+        .map_err(|error| AppError::Repository(error.to_string()))?;
+    let mut base_reachable = HashSet::new();
+    for item in base_walk {
+        let info = item.map_err(|error| AppError::Repository(error.to_string()))?;
+        base_reachable.insert(info.id);
+    }
+
+    let head_walk = repo
+        .rev_walk([head])
+        .all()
+        .map_err(|error| AppError::Repository(error.to_string()))?;
+    let mut hashes = Vec::new();
+    for item in head_walk {
+        let info = item.map_err(|error| AppError::Repository(error.to_string()))?;
+        if !base_reachable.contains(&info.id) {
+            hashes.push(info.id.to_string());
+        }
+    }
+
+    hashes.reverse();
+    Ok(hashes)
 }
 
 pub fn indexed_commit_from_gix(commit: &gix::Commit<'_>) -> Result<IndexedCommit, AppError> {

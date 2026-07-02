@@ -87,6 +87,28 @@ fn query_files_returns_exit_code_four_when_index_is_missing() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("索引不可用"));
 }
 
+#[test]
+fn commit_metadata_preserves_git_rfc3339_committed_at() {
+    let fixture = fixtures::linear_with_authors();
+    let dir = tempfile::tempdir().expect("创建临时目录");
+    let db_path = dir.path().join("index.duckdb");
+    run_index_build(&fixture, &db_path);
+    let repo =
+        revier_analysis::git::repository::open_repository(fixture.repo.path()).expect("打开仓库");
+    let range_hashes =
+        revier_analysis::git::commits::range_commit_hashes(&repo, &fixture.base, &fixture.head)
+            .expect("读取范围提交");
+    let hash = range_hashes.first().expect("范围内应有提交");
+
+    let conn = revier_analysis::index::connection::open_database(&db_path).expect("打开索引数据库");
+    let indexed = revier_analysis::index::queries::commit_metadata(&conn, hash)
+        .expect("读取索引提交")
+        .expect("索引提交应存在");
+    let git = revier_analysis::git::commits::get_commit(&repo, hash).expect("读取 Git 提交");
+
+    assert_eq!(indexed.committed_at, git.committed_at);
+}
+
 fn run_index_build(fixture: &fixtures::FixtureRepo, db_path: &std::path::Path) {
     let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
         .args([

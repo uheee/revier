@@ -11,6 +11,9 @@ pub fn build_file_overlay(
     repo: &gix::Repository,
     args: FileOverlayArgs,
 ) -> Result<FileOverlayCommandOutput, AppError> {
+    let context = crate::attribution::context::AttributionContext::open(repo, &args.common)?;
+    let warnings = context.warnings.clone();
+
     let change = crate::git::diff::changed_file_between(
         repo,
         &args.common.base,
@@ -52,9 +55,9 @@ pub fn build_file_overlay(
             },
             rows: diff.rows,
             blocks: diff.blocks,
-            warnings: Vec::new(),
+            warnings: warnings.clone(),
         },
-        warnings: Vec::new(),
+        warnings,
     })
 }
 

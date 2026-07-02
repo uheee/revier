@@ -1,5 +1,7 @@
 use crate::error::AppError;
+use crate::git::commits::IndexedCommit;
 use crate::json::ChangedFileOutput;
+use duckdb::params;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 pub struct IndexStatusRecord {
@@ -32,6 +34,75 @@ pub fn status_record(conn: &duckdb::Connection) -> Result<IndexStatusRecord, App
         indexed_file_count,
         updated_at,
     })
+}
+
+pub fn commit_exists(conn: &duckdb::Connection, hash: &str) -> Result<bool, AppError> {
+    conn.query_row(
+        "select count(*) > 0 from commits where hash = ?",
+        params![hash],
+        |row| row.get(0),
+    )
+    .map_err(|error| AppError::DuckDb(error.to_string()))
+}
+
+pub fn parent_hashes(conn: &duckdb::Connection, hash: &str) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn
+        .prepare(
+            "select parent_hash
+             from commit_parents
+             where commit_hash = ?
+             order by parent_index",
+        )
+        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+    let rows = stmt
+        .query_map(params![hash], |row| row.get::<_, String>(0))
+        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| AppError::DuckDb(error.to_string()))
+}
+
+pub fn commit_metadata(
+    conn: &duckdb::Connection,
+    hash: &str,
+) -> Result<Option<IndexedCommit>, AppError> {
+    let row = conn.query_row(
+        "select hash, short_hash, author_name, author_email, author_key, strftime(committed_at, '%Y-%m-%dT%H:%M:%S+00:00'), subject, is_merge
+         from commits
+         where hash = ?",
+        params![hash],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, bool>(7)?,
+            ))
+        },
+    );
+
+    let (hash, short_hash, author_name, author_email, author_key, committed_at, subject, is_merge) =
+        match row {
+            Ok(row) => row,
+            Err(duckdb::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(error) => return Err(AppError::DuckDb(error.to_string())),
+        };
+
+    Ok(Some(IndexedCommit {
+        parents: parent_hashes(conn, &hash)?,
+        hash,
+        short_hash,
+        author_name,
+        author_email,
+        author_key,
+        committed_at,
+        subject,
+        is_merge,
+    }))
 }
 
 pub struct QueryFilesFilter {
