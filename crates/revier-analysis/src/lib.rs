@@ -28,6 +28,8 @@ where
             IndexSubcommand::Build(args) => commands::index_build::run(args),
             IndexSubcommand::QueryFiles(args) => commands::query_files::run(args),
         },
+        Command::FileOverlay(args) => commands::file_overlay::run(args),
+        Command::TraceBlock(args) => commands::trace_block::run(args),
     }
 }
 

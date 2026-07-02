@@ -8,8 +8,14 @@ pub enum AppError {
     #[error("仓库读取失败：{0}")]
     Repository(String),
 
+    #[error("文件不可分析：{0}")]
+    FileNotAnalyzable(String),
+
     #[error("索引不可用：{0}")]
     IndexUnavailable(String),
+
+    #[error("索引不可用且命令要求必须使用索引：{0}")]
+    RequiredIndexUnavailable(String),
 
     #[error("索引 schema 不兼容：{0}")]
     SchemaIncompatible(String),
@@ -20,6 +26,9 @@ pub enum AppError {
     #[error("gix 能力验证失败：{0}")]
     Spike(String),
 
+    #[error("分析内部错误：{0}")]
+    Analysis(String),
+
     #[error("JSON 输出失败：{0}")]
     Json(#[from] serde_json::Error),
 }
@@ -29,10 +38,10 @@ impl AppError {
         match self {
             Self::InvalidArgument(_) => 2,
             Self::Repository(_) => 3,
-            Self::IndexUnavailable(_) => 4,
-            Self::SchemaIncompatible(_) => 5,
+            Self::FileNotAnalyzable(_) | Self::IndexUnavailable(_) => 4,
+            Self::RequiredIndexUnavailable(_) | Self::SchemaIncompatible(_) => 5,
             Self::DuckDb(_) => 6,
-            Self::Spike(_) | Self::Json(_) => 10,
+            Self::Spike(_) | Self::Analysis(_) | Self::Json(_) => 10,
         }
     }
 }

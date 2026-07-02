@@ -117,3 +117,132 @@ pub struct QueryFilesOutput {
     pub files: Vec<ChangedFileOutput>,
     pub warnings: Vec<String>,
 }
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisRangeOutput {
+    pub branch: String,
+    pub base_commit: String,
+    pub head_commit: String,
+    pub start_at: Option<String>,
+    pub end_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorOutput {
+    pub name: String,
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AttributionWarningOutput {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockAttributionOutput {
+    pub confidence: String,
+    pub warnings: Vec<AttributionWarningOutput>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RelatedCommitAttributionOutput {
+    pub method: String,
+    pub via_merge_hashes: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TouchedRangeOutput {
+    pub old_start: Option<usize>,
+    pub old_end: Option<usize>,
+    pub new_start: Option<usize>,
+    pub new_end: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RelatedCommitOutput {
+    pub hash: String,
+    pub short_hash: String,
+    pub author_name: String,
+    pub author_email: Option<String>,
+    pub committed_at: String,
+    pub subject: String,
+    pub matched_by_filter: bool,
+    pub touched_ranges: Vec<TouchedRangeOutput>,
+    pub attribution: Option<RelatedCommitAttributionOutput>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WordChangeOutput {
+    pub value: String,
+    pub added: Option<bool>,
+    pub removed: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SideBySideDiffRowOutput {
+    pub old_line_number: Option<usize>,
+    pub new_line_number: Option<usize>,
+    pub old_text: Option<String>,
+    pub new_text: Option<String>,
+    pub r#type: String,
+    pub word_changes: Option<Vec<WordChangeOutput>>,
+    pub block_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffBlockOutput {
+    pub id: String,
+    pub old_start: usize,
+    pub old_end: usize,
+    pub new_start: usize,
+    pub new_end: usize,
+    pub row_start_index: Option<usize>,
+    pub row_end_index: Option<usize>,
+    pub change_type: String,
+    pub authors: Vec<AuthorOutput>,
+    pub rows: Vec<SideBySideDiffRowOutput>,
+    pub related_commits: Vec<RelatedCommitOutput>,
+    pub attribution: Option<BlockAttributionOutput>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileOverlayOutput {
+    pub mode: String,
+    pub file: ChangedFileOutput,
+    pub range: AnalysisRangeOutput,
+    pub rows: Vec<SideBySideDiffRowOutput>,
+    pub blocks: Vec<DiffBlockOutput>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileOverlayCommandOutput {
+    pub version: u8,
+    pub overlay: FileOverlayOutput,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceBlockOutput {
+    pub version: u8,
+    pub file: String,
+    pub block_id: String,
+    pub attribution: Option<BlockAttributionOutput>,
+    pub authors: Vec<AuthorOutput>,
+    pub related_commits: Vec<RelatedCommitOutput>,
+    pub warnings: Vec<String>,
+}

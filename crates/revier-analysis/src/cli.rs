@@ -13,6 +13,8 @@ pub struct Cli {
 pub enum Command {
     Spike(SpikeCommand),
     Index(IndexCommand),
+    FileOverlay(FileOverlayArgs),
+    TraceBlock(TraceBlockArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -100,6 +102,78 @@ pub struct QueryFilesArgs {
 
     #[arg(long = "glob")]
     pub globs: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct OverlayCommonArgs {
+    #[arg(long)]
+    pub repo: PathBuf,
+
+    #[arg(long)]
+    pub db: Option<PathBuf>,
+
+    #[arg(long)]
+    pub base: String,
+
+    #[arg(long)]
+    pub head: String,
+
+    #[arg(long)]
+    pub branch: String,
+
+    #[arg(long = "glob")]
+    pub globs: Vec<String>,
+
+    #[arg(long = "author")]
+    pub authors: Vec<String>,
+
+    #[arg(long = "author-query")]
+    pub author_query: Option<String>,
+
+    #[arg(long = "message")]
+    pub message: Option<String>,
+
+    #[arg(long = "require-index")]
+    pub require_index: bool,
+
+    #[arg(long, default_value = "json")]
+    pub format: OutputFormat,
+
+    #[arg(long)]
+    pub pretty: bool,
+}
+
+#[derive(Debug, Parser)]
+pub struct FileOverlayArgs {
+    #[command(flatten)]
+    pub common: OverlayCommonArgs,
+
+    #[arg(long)]
+    pub file: String,
+}
+
+#[derive(Debug, Parser)]
+pub struct TraceBlockArgs {
+    #[command(flatten)]
+    pub common: OverlayCommonArgs,
+
+    #[arg(long)]
+    pub file: String,
+
+    #[arg(long = "block-id")]
+    pub block_id: Option<String>,
+
+    #[arg(long = "old-start")]
+    pub old_start: Option<usize>,
+
+    #[arg(long = "old-end")]
+    pub old_end: Option<usize>,
+
+    #[arg(long = "new-start")]
+    pub new_start: Option<usize>,
+
+    #[arg(long = "new-end")]
+    pub new_end: Option<usize>,
 }
 
 #[derive(Debug, Parser)]

@@ -91,3 +91,52 @@ fn spike_run_reports_checks_for_linear_fixture() {
         "expected blame and parent checks"
     );
 }
+
+#[test]
+fn top_level_help_lists_file_overlay_and_trace_block_commands() {
+    let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
+        .arg("--help")
+        .output()
+        .expect("运行 revier-analysis --help");
+
+    assert!(
+        output.status.success(),
+        "--help 应成功，stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("file-overlay"));
+    assert!(stdout.contains("trace-block"));
+}
+
+#[test]
+fn file_overlay_help_lists_required_arguments() {
+    let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
+        .args(["file-overlay", "--help"])
+        .output()
+        .expect("运行 revier-analysis file-overlay --help");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--repo"));
+    assert!(stdout.contains("--base"));
+    assert!(stdout.contains("--head"));
+    assert!(stdout.contains("--branch"));
+    assert!(stdout.contains("--file"));
+    assert!(stdout.contains("--require-index"));
+}
+
+#[test]
+fn trace_block_help_lists_block_and_line_arguments() {
+    let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
+        .args(["trace-block", "--help"])
+        .output()
+        .expect("运行 revier-analysis trace-block --help");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--block-id"));
+    assert!(stdout.contains("--old-start"));
+    assert!(stdout.contains("--new-start"));
+}
