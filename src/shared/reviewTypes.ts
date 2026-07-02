@@ -68,7 +68,7 @@ export interface AuthorFilterOption extends AuthorSummary {
 
 export type AttributionConfidence = 'precise' | 'inferred' | 'partial';
 
-export type AttributionMethod = 'blame' | 'merge-trace' | 'patch-inference';
+export type AttributionMethod = 'blame' | 'merge-trace' | 'patch-inference' | 'deletion-trace';
 
 export type AttributionWarningCode =
   | 'BLAME_UNAVAILABLE'
