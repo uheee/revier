@@ -7,13 +7,15 @@ vi.mock('electron', () => ({
   }
 }));
 
-import {
+import * as reviewIpc from '../../src/main/ipc/reviewIpc';
+import type { ReviewProject } from '../../src/shared/projectTypes';
+import type { AnalysisRange, ChangedFile, FileOverlay, ReviewFilters } from '../../src/shared/reviewTypes';
+
+const {
   buildCommitOverlayForTask,
   buildFileOverlayForTask,
   resolveAnalysisScope
-} from '../../src/main/ipc/reviewIpc';
-import type { ReviewProject } from '../../src/shared/projectTypes';
-import type { AnalysisRange, ChangedFile, ReviewFilters } from '../../src/shared/reviewTypes';
+} = reviewIpc;
 
 const project: ReviewProject = {
   id: 'project-1',
@@ -230,6 +232,186 @@ describe('reviewIpc', () => {
     expect(overlay.blocks[0].relatedCommits[0].matchedByFilter).toBe(true);
   });
 
+  it('prefers Rust file overlay when a Rust client is provided and passes range and filter parameters', async () => {
+    const range = analysisRange();
+    const rustOverlay = rustFileOverlay(range);
+    const getFileOverlay = vi.fn(async () => rustOverlay);
+    const input = {
+      project,
+      file: modifiedFile,
+      range,
+      filters: {
+        projectId: project.id,
+        branch: 'main',
+        startAt: '2026-05-01T00:00:00.000Z',
+        endAt: '2026-05-31T00:00:00.000Z',
+        authorKeys: ['a@example.com'],
+        authorQuery: 'alice',
+        messageQuery: 'feature',
+        globRules: ['src/**/*.ts']
+      },
+      rangeCommits: [commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app')],
+      git: overlayGit(),
+      rust: { getFileOverlay }
+    };
+
+    const overlay = await buildFileOverlayForTask(input);
+
+    expect(getFileOverlay).toHaveBeenCalledWith({
+      repoPath: project.repoPath,
+      baseCommit: 'base',
+      headCommit: 'head',
+      branch: 'main',
+      filePath: modifiedFile.path,
+      globRules: ['src/**/*.ts'],
+      authorKeys: ['a@example.com'],
+      authorQuery: 'alice',
+      messageQuery: 'feature'
+    });
+    expect(overlay).toBe(rustOverlay);
+  });
+
+  it('applies display commit filters to successful Rust overlay blocks and rows', async () => {
+    const range = analysisRange();
+    const rustOverlay = rustFileOverlay(range, {
+      rows: [
+        diffRow('visible-block', 1),
+        diffRow('hidden-block', 2)
+      ],
+      blocks: [
+        diffBlock('visible-block', true, 'Alice', 'feature: update app'),
+        diffBlock('hidden-block', false, 'Bob', 'chore: update app')
+      ]
+    });
+    const getFileOverlay = vi.fn(async () => rustOverlay);
+    const input = {
+      project,
+      file: modifiedFile,
+      range,
+      filters: {
+        projectId: project.id,
+        branch: 'main',
+        authorQuery: 'alice',
+        messageQuery: 'feature',
+        globRules: []
+      },
+      rangeCommits: [
+        commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app'),
+        commit('bob', '2026-05-11T00:00:00.000Z', 'Bob', 'chore: update app')
+      ],
+      git: overlayGit(),
+      rust: { getFileOverlay }
+    };
+
+    const overlay = await buildFileOverlayForTask(input);
+
+    expect(getFileOverlay).toHaveBeenCalledTimes(1);
+    expect(overlay.blocks.map((block) => block.id)).toEqual(['visible-block']);
+    expect(overlay.rows?.map((row) => row.blockId)).toEqual(['visible-block', undefined]);
+  });
+
+  it('falls back to TypeScript file overlay when Rust overlay returns a recoverable error', async () => {
+    const range = analysisRange();
+    const rustError = Object.assign(new Error('索引不可用'), { recoverable: true });
+    const getFileOverlay = vi.fn(async () => {
+      throw rustError;
+    });
+    const input = {
+      project,
+      file: modifiedFile,
+      range,
+      filters: {
+        projectId: project.id,
+        branch: 'main',
+        globRules: []
+      },
+      rangeCommits: [commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app')],
+      git: overlayGit(),
+      rust: { getFileOverlay }
+    };
+
+    const overlay = await buildFileOverlayForTask(input);
+
+    expect(getFileOverlay).toHaveBeenCalledTimes(1);
+    expect(overlay.mode).toBe('range');
+    expect(overlay.blocks).toHaveLength(1);
+    expect(overlay.rows?.map((row) => row.type)).toEqual(['modified']);
+  });
+
+  it('throws non-recoverable Rust overlay errors without TypeScript fallback', async () => {
+    const range = analysisRange();
+    const rustError = Object.assign(new Error('Rust 内部错误'), { recoverable: false });
+    const getFileOverlay = vi.fn(async () => {
+      throw rustError;
+    });
+    const input = {
+      project,
+      file: modifiedFile,
+      range,
+      filters: {
+        projectId: project.id,
+        branch: 'main',
+        globRules: []
+      },
+      rangeCommits: [commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app')],
+      git: overlayGit(),
+      rust: { getFileOverlay }
+    };
+
+    await expect(buildFileOverlayForTask(input)).rejects.toThrow('Rust 内部错误');
+    expect(getFileOverlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call Rust overlay for binary or non-previewable files', async () => {
+    const getFileOverlay = vi.fn(async () => rustFileOverlay(analysisRange()));
+    const input = {
+      project,
+      file: {
+        ...modifiedFile,
+        status: 'binary' as const,
+        isBinary: true,
+        isPreviewable: false
+      },
+      range: analysisRange(),
+      filters: {
+        projectId: project.id,
+        branch: 'main',
+        globRules: []
+      },
+      rangeCommits: [],
+      git: overlayGit(),
+      rust: { getFileOverlay }
+    };
+
+    const overlay = await buildFileOverlayForTask(input);
+
+    expect(getFileOverlay).not.toHaveBeenCalled();
+    expect(overlay.warnings[0].code).toBe('BINARY_FILE');
+  });
+
+  it('enables Rust overlay only when REVIER_USE_RUST_OVERLAY is 1', () => {
+    const isRustOverlayEnabled = (
+      reviewIpc as typeof reviewIpc & { isRustOverlayEnabled?: () => boolean }
+    ).isRustOverlayEnabled;
+    const original = process.env.REVIER_USE_RUST_OVERLAY;
+    try {
+      delete process.env.REVIER_USE_RUST_OVERLAY;
+      expect(isRustOverlayEnabled?.()).toBe(false);
+
+      process.env.REVIER_USE_RUST_OVERLAY = '0';
+      expect(isRustOverlayEnabled?.()).toBe(false);
+
+      process.env.REVIER_USE_RUST_OVERLAY = '1';
+      expect(isRustOverlayEnabled?.()).toBe(true);
+    } finally {
+      if (original === undefined) {
+        delete process.env.REVIER_USE_RUST_OVERLAY;
+      } else {
+        process.env.REVIER_USE_RUST_OVERLAY = original;
+      }
+    }
+  });
+
   it('builds a commit overlay from the commit first parent to the commit', async () => {
     const range: AnalysisRange = {
       branch: 'main',
@@ -260,6 +442,83 @@ describe('reviewIpc', () => {
     expect(overlay.blocks).toHaveLength(1);
   });
 });
+
+function analysisRange(): AnalysisRange {
+  return {
+    branch: 'main',
+    baseCommit: 'base',
+    headCommit: 'head'
+  };
+}
+
+function overlayGit() {
+  return {
+    listCommits: vi.fn(),
+    listChangedFiles: vi.fn(),
+    readFileAtCommit: vi.fn(async (_repoPath: string, commitHash: string) =>
+      commitHash === 'base' ? 'const name = "old";\n' : 'const name = "new";\n'
+    ),
+    showFilePatch: vi.fn(async () => '@@ -1 +1 @@\n-old\n+new\n')
+  };
+}
+
+function rustFileOverlay(
+  range: AnalysisRange,
+  options: Partial<Pick<FileOverlay, 'rows' | 'blocks'>> = {}
+): FileOverlay {
+  const rows = options.rows ?? [diffRow('visible-block', 1)];
+  return {
+    mode: 'range',
+    file: modifiedFile,
+    range,
+    rows,
+    blocks: options.blocks ?? [diffBlock('visible-block', true, 'Alice', 'feature: update app')],
+    warnings: []
+  };
+}
+
+function diffRow(blockId: string, lineNumber: number) {
+  return {
+    oldLineNumber: lineNumber,
+    newLineNumber: lineNumber,
+    oldText: 'old',
+    newText: 'new',
+    type: 'modified' as const,
+    blockId
+  };
+}
+
+function diffBlock(
+  id: string,
+  matchedByFilter: boolean,
+  authorName: string,
+  subject: string
+) {
+  return {
+    id,
+    oldStart: 1,
+    oldEnd: 1,
+    newStart: 1,
+    newEnd: 1,
+    rowStartIndex: id === 'visible-block' ? 0 : 1,
+    rowEndIndex: id === 'visible-block' ? 0 : 1,
+    changeType: 'modified' as const,
+    authors: [{ name: authorName, email: `${authorName.toLowerCase()}@example.com` }],
+    rows: [diffRow(id, id === 'visible-block' ? 1 : 2)],
+    relatedCommits: [
+      {
+        hash: authorName.toLowerCase(),
+        shortHash: authorName.toLowerCase(),
+        authorName,
+        authorEmail: `${authorName.toLowerCase()}@example.com`,
+        committedAt: '2026-05-10T00:00:00.000Z',
+        subject,
+        matchedByFilter,
+        touchedRanges: [{ oldStart: 1, oldEnd: 1, newStart: 1, newEnd: 1 }]
+      }
+    ]
+  };
+}
 
 function commit(hash: string, committedAt: string, authorName = 'A', subject = hash) {
   return {

@@ -15,7 +15,7 @@ import { createGlobMatcher } from '../analysis/globRules';
 import { buildFileOverlayDiff } from '../analysis/overlayEngine';
 import { parsePatchTouchedRanges } from '../analysis/patchRanges';
 import { selectRangeCommits, type ResolvedCommitRange } from '../analysis/rangeResolver';
-import { RustAnalysisClient, type QueryFilesResult } from '../analysis/rustAnalysisClient';
+import { RustAnalysisClient, type QueryFilesResult, type RustFileOverlayRequest } from '../analysis/rustAnalysisClient';
 import { GitService } from '../git/gitService';
 import type { GitCommitSummary } from '../git/gitTypes';
 import type { JsonProjectStore } from '../projects/projectStore';
@@ -53,6 +53,10 @@ interface RustAnalysisQueryClient {
   }): Promise<QueryFilesResult>;
 }
 
+interface RustAnalysisOverlayClient {
+  getFileOverlay(request: RustFileOverlayRequest): Promise<FileOverlay>;
+}
+
 interface ResolveAnalysisScopeInput {
   project: ReviewProject;
   filters: ReviewFilters;
@@ -73,6 +77,7 @@ interface BuildFileOverlayInput {
   rangeCommits: GitCommitSummary[];
   filters: ReviewFilters;
   git: AnalysisGitClient;
+  rust?: RustAnalysisOverlayClient;
 }
 
 interface BuildCommitOverlayInput {
@@ -134,7 +139,8 @@ export async function buildFileOverlayForTask({
   range,
   rangeCommits,
   filters,
-  git
+  git,
+  rust
 }: BuildFileOverlayInput): Promise<FileOverlay> {
   if (file.isBinary || !file.isPreviewable) {
     return {
@@ -149,7 +155,47 @@ export async function buildFileOverlayForTask({
     };
   }
 
-  const overlay = await buildFileOverlay({
+  if (rust) {
+    try {
+      const overlay = await rust.getFileOverlay({
+        repoPath: project.repoPath,
+        baseCommit: range.baseCommit,
+        headCommit: range.headCommit,
+        branch: range.branch,
+        filePath: file.path,
+        globRules: filters.globRules,
+        authorKeys: filters.authorKeys,
+        authorQuery: filters.authorQuery,
+        messageQuery: filters.messageQuery
+      });
+      return applyDisplayCommitFilters(overlay, filters);
+    } catch (error) {
+      if (!isRecoverableRustError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  const overlay = await buildTypescriptFileOverlay({
+    project,
+    file,
+    range,
+    rangeCommits,
+    filters,
+    git
+  });
+  return applyDisplayCommitFilters(overlay, filters);
+}
+
+async function buildTypescriptFileOverlay({
+  project,
+  file,
+  range,
+  rangeCommits,
+  filters,
+  git
+}: Omit<BuildFileOverlayInput, 'rust'>): Promise<FileOverlay> {
+  return buildFileOverlay({
     repoPath: project.repoPath,
     file,
     range,
@@ -162,14 +208,23 @@ export async function buildFileOverlayForTask({
       getCommit: git.getCommit?.bind(git) ?? (async () => undefined)
     }
   });
+}
 
+function applyDisplayCommitFilters(overlay: FileOverlay, filters: ReviewFilters): FileOverlay {
   const visibleBlocks = hasDisplayCommitFilters(filters)
     ? overlay.blocks.filter((block) => block.relatedCommits.some((commit) => commit.matchedByFilter))
     : overlay.blocks;
+  const maskedRows = maskFilteredRows(overlay.rows ?? [], visibleBlocks);
+  const rowsUnchanged = Boolean(overlay.rows) && maskedRows.every((row, index) => row === overlay.rows?.[index]);
+  const blocksUnchanged = visibleBlocks.length === overlay.blocks.length;
+
+  if (rowsUnchanged && blocksUnchanged) {
+    return overlay;
+  }
 
   return {
     ...overlay,
-    rows: maskFilteredRows(overlay.rows ?? [], visibleBlocks),
+    rows: maskedRows,
     blocks: visibleBlocks
   };
 }
@@ -297,7 +352,8 @@ export function registerReviewIpc(projectStore: JsonProjectStore): void {
       range,
       rangeCommits,
       filters,
-      git
+      git,
+      rust: isRustOverlayEnabled() ? rust : undefined
     });
   });
   ipcMain.handle(ipcChannels.reviewGetCommitOverlay, async (_event, request): Promise<FileOverlay> => {
@@ -435,6 +491,10 @@ async function showPatchForAnyFilePath(
 
 function hasDisplayCommitFilters(filters: ReviewFilters): boolean {
   return Boolean((filters.authorKeys?.length ?? 0) > 0 || filters.authorQuery?.trim() || filters.messageQuery?.trim());
+}
+
+export function isRustOverlayEnabled(): boolean {
+  return process.env.REVIER_USE_RUST_OVERLAY === '1';
 }
 
 function isRecoverableRustError(error: unknown): boolean {
