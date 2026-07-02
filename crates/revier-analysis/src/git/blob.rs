@@ -71,8 +71,9 @@ pub fn read_text_at_commit(
             "文件包含二进制内容：{path}"
         )));
     }
-    String::from_utf8(bytes)
-        .map_err(|error| AppError::FileNotAnalyzable(format!("文件不是 UTF-8 文本：{path}，{error}")))
+    String::from_utf8(bytes).map_err(|error| {
+        AppError::FileNotAnalyzable(format!("文件不是 UTF-8 文本：{path}，{error}"))
+    })
 }
 
 pub fn is_binary_at_commit(

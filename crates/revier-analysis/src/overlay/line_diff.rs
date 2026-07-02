@@ -140,7 +140,10 @@ fn parts_from_matches(
         );
     }
     if new_index < new_lines.len() {
-        push_part(&mut parts, LineDiffPart::Added(new_lines[new_index..].to_vec()));
+        push_part(
+            &mut parts,
+            LineDiffPart::Added(new_lines[new_index..].to_vec()),
+        );
     }
 
     parts

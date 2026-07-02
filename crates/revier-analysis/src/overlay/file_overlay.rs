@@ -40,6 +40,15 @@ pub fn build_file_overlay(
         None => String::new(),
     };
     let diff = build_overlay_diff(&old_text, &new_text);
+    let blocks = crate::attribution::patch_inference::attach_patch_inference(
+        &context,
+        diff.blocks,
+        &change.path,
+        change.old_path.as_deref(),
+        &args.common.authors,
+        args.common.author_query.as_deref(),
+        args.common.message.as_deref(),
+    )?;
 
     Ok(FileOverlayCommandOutput {
         version: 1,
@@ -54,7 +63,7 @@ pub fn build_file_overlay(
                 end_at: None,
             },
             rows: diff.rows,
-            blocks: diff.blocks,
+            blocks,
             warnings: warnings.clone(),
         },
         warnings,

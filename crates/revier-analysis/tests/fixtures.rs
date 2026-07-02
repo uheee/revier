@@ -139,6 +139,66 @@ pub fn rename_merge() -> FixtureRepo {
     }
 }
 
+pub fn rename_then_unrelated() -> FixtureRepo {
+    let repo = init_repo("rename-unrelated");
+    write_file(repo.path(), "src/old.txt", "alpha\nbeta\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: add old file"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["mv", "src/old.txt", "src/new.txt"]);
+    write_file(repo.path(), "src/new.txt", "alpha\nbeta\nfeature\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: rename and edit"]);
+
+    write_file(repo.path(), "docs/notes.txt", "unrelated\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "chore: unrelated docs"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "rename-unrelated",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn rename_then_reused_old_path() -> FixtureRepo {
+    let repo = init_repo("rename-reused-old-path");
+    write_file(repo.path(), "src/old.txt", "alpha\nbeta\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: add old file"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["mv", "src/old.txt", "src/new.txt"]);
+    write_file(repo.path(), "src/new.txt", "alpha\nbeta\nfeature\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: rename and edit"]);
+
+    write_file(repo.path(), "src/old.txt", "one\ntwo\nunrelated\n");
+    git(repo.path(), ["add", "."]);
+    git(
+        repo.path(),
+        ["commit", "-m", "chore: edit recreated old path same line"],
+    );
+
+    fs::remove_file(repo.path().join("src/old.txt")).expect("删除复用旧路径文件");
+    git(repo.path(), ["add", "."]);
+    git(
+        repo.path(),
+        ["commit", "-m", "chore: remove recreated old path"],
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "rename-reused-old-path",
+        repo,
+        base,
+        head,
+    }
+}
+
 pub fn binary_change() -> FixtureRepo {
     let repo = init_repo("binary-change");
     write_file(repo.path(), "README.md", "base\n");
