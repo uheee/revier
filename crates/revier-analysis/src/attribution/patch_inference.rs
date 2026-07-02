@@ -239,14 +239,18 @@ impl RelatedCommitCandidate {
     }
 }
 
-struct FilterMatcher {
+pub(crate) struct FilterMatcher {
     authors: Vec<String>,
     author_query: Option<String>,
     message: Option<String>,
 }
 
 impl FilterMatcher {
-    fn new(authors: &[String], author_query: Option<&str>, message: Option<&str>) -> Self {
+    pub(crate) fn new(
+        authors: &[String],
+        author_query: Option<&str>,
+        message: Option<&str>,
+    ) -> Self {
         Self {
             authors: authors
                 .iter()
@@ -258,7 +262,7 @@ impl FilterMatcher {
         }
     }
 
-    fn matches(&self, commit: &IndexedCommit) -> bool {
+    pub(crate) fn matches(&self, commit: &IndexedCommit) -> bool {
         if !self.is_active() {
             return true;
         }

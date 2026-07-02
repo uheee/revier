@@ -78,7 +78,14 @@ fn file_overlay_outputs_file_overlay_compatible_json_for_linear_change() {
     assert_eq!(blocks.len(), 1);
     assert_eq!(blocks[0]["id"], "block-1");
     assert_eq!(blocks[0]["changeType"], "added");
-    assert_eq!(blocks[0]["attribution"], Value::Null);
+    assert_eq!(blocks[0]["attribution"]["confidence"], "precise");
+    assert!(
+        blocks[0]["attribution"]["warnings"]
+            .as_array()
+            .expect("attribution warnings 数组")
+            .is_empty(),
+        "precise attribution 不应包含 warning"
+    );
     assert!(!blocks[0]["authors"]
         .as_array()
         .expect("authors 数组")
@@ -88,10 +95,7 @@ fn file_overlay_outputs_file_overlay_compatible_json_for_linear_change() {
         .expect("relatedCommits 数组");
     assert!(!related_commits.is_empty());
     assert_eq!(related_commits[0]["matchedByFilter"], true);
-    assert_eq!(
-        related_commits[0]["attribution"]["method"],
-        "patch-inference"
-    );
+    assert_eq!(related_commits[0]["attribution"]["method"], "blame");
 }
 
 #[test]

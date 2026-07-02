@@ -49,6 +49,15 @@ pub fn build_file_overlay(
         args.common.author_query.as_deref(),
         args.common.message.as_deref(),
     )?;
+    let blocks = crate::attribution::blame::attach_blame_attribution(
+        &context,
+        &args.common.head,
+        &change.path,
+        blocks,
+        &args.common.authors,
+        args.common.author_query.as_deref(),
+        args.common.message.as_deref(),
+    )?;
 
     Ok(FileOverlayCommandOutput {
         version: 1,
