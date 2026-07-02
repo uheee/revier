@@ -27,11 +27,13 @@
     "dist:mac": "pnpm build && pnpm dlx --allow-build=electron-winstaller electron-builder@26.15.1 --mac dmg zip --x64 --arm64 --publish=never",
     "build:cli": "tsc -p tsconfig.cli.json",
     "revier-analysis": "pnpm build:cli && node dist/cli/cli/revier-analysis.js",
-    "rust:test": "cargo test --workspace",
-    "rust:spike": "cargo run -p revier-analysis -- spike run",
-    "rust:index:status": "cargo run -p revier-analysis -- index status",
-    "rust:index:build": "cargo run -p revier-analysis -- index build",
-    "rust:index:query-files": "cargo run -p revier-analysis -- index query-files"
+    "rust:test": "node scripts/cargo-duckdb-download.mjs test --workspace",
+    "rust:spike": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- spike run",
+    "rust:index:status": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- index status",
+    "rust:index:build": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- index build",
+    "rust:index:query-files": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- index query-files",
+    "rust:file-overlay": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- file-overlay",
+    "rust:trace-block": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- trace-block"
   },
   "dependencies": {
     "@vueuse/components": "^10.11.0",
