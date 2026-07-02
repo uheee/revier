@@ -4,6 +4,7 @@ pub mod error;
 pub mod git;
 pub mod index;
 pub mod json;
+pub mod overlay;
 pub mod spike;
 
 use clap::Parser;
