@@ -84,6 +84,17 @@ function expectRule(styles: string, selector: string, declarations: string[]): v
   }
 }
 
+function expectRuleDoesNotDeclare(styles: string, selector: string, property: string): void {
+  const rules = parseRules(styles).filter((candidate) => candidate.selectors.includes(selector));
+
+  for (const rule of rules) {
+    expect(
+      rule.declarations.has(property),
+      `${selector} 不应声明 ${property}`
+    ).toBe(false);
+  }
+}
+
 describe('diff 选中态红绿侧样式', () => {
   it.each([
     {
@@ -124,5 +135,14 @@ describe('diff 选中态红绿侧样式', () => {
     }
   ])('要求 $selector 包含指定声明', ({ selector, declarations }) => {
     expectRule(readStyles(), selector, declarations);
+  });
+
+  it('仅未选中可点击行 hover 显示左侧提示', () => {
+    const styles = readStyles();
+
+    expectRuleDoesNotDeclare(styles, '.diff-row.is-clickable:hover', 'box-shadow');
+    expectRule(styles, '.diff-row.is-clickable:not(.is-selected):hover', [
+      'box-shadow: inset 3px 0 0 var(--rv-faint);'
+    ]);
   });
 });

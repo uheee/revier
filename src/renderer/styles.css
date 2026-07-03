@@ -583,7 +583,7 @@ textarea {
   cursor: pointer;
 }
 
-.diff-row.is-clickable:hover {
+.diff-row.is-clickable:not(.is-selected):hover {
   box-shadow: inset 3px 0 0 var(--rv-faint);
 }
 
