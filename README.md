@@ -64,6 +64,13 @@ cargo run -p revier-analysis -- index status --repo E:/repo/app --format json
 
 直接运行已构建的 `target/debug/revier-analysis.exe` 时，如遇到 DuckDB 动态库加载失败，请将 `target/debug/deps` 加入当前终端的 `PATH`，或改用上面的 `cargo run` / `pnpm rust:*` 脚本。
 
+Electron 主进程默认优先使用 Rust overlay；如需临时回退到 TypeScript overlay，可在启动前设置：
+
+```powershell
+$env:REVIER_USE_RUST_OVERLAY = '0'
+pnpm dev
+```
+
 ## 快速开始
 
 ```bash

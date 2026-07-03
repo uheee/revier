@@ -495,7 +495,7 @@ function hasDisplayCommitFilters(filters: ReviewFilters): boolean {
 }
 
 export function isRustOverlayEnabled(): boolean {
-  return process.env.REVIER_USE_RUST_OVERLAY === '1';
+  return process.env.REVIER_USE_RUST_OVERLAY !== '0';
 }
 
 function isRecoverableRustError(error: unknown): boolean {

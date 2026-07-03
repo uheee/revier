@@ -417,14 +417,14 @@ describe('reviewIpc', () => {
     expect(overlay.warnings[0].code).toBe('BINARY_FILE');
   });
 
-  it('enables Rust overlay only when REVIER_USE_RUST_OVERLAY is 1', () => {
+  it('enables Rust overlay by default unless REVIER_USE_RUST_OVERLAY is 0', () => {
     const isRustOverlayEnabled = (
       reviewIpc as typeof reviewIpc & { isRustOverlayEnabled?: () => boolean }
     ).isRustOverlayEnabled;
     const original = process.env.REVIER_USE_RUST_OVERLAY;
     try {
       delete process.env.REVIER_USE_RUST_OVERLAY;
-      expect(isRustOverlayEnabled?.()).toBe(false);
+      expect(isRustOverlayEnabled?.()).toBe(true);
 
       process.env.REVIER_USE_RUST_OVERLAY = '0';
       expect(isRustOverlayEnabled?.()).toBe(false);
