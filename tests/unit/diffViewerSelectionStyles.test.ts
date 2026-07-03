@@ -65,13 +65,20 @@ function parseDeclaration(declaration: string): [string, string] {
 }
 
 function expectRule(styles: string, selector: string, declarations: string[]): void {
-  const rule = parseRules(styles).find((candidate) => candidate.selectors.includes(selector));
-  expect(rule, `缺少 ${selector} 样式规则`).toBeDefined();
+  const rules = parseRules(styles).filter((candidate) => candidate.selectors.includes(selector));
+  expect(rules.length, `缺少 ${selector} 样式规则`).toBeGreaterThan(0);
+
+  const mergedDeclarations = new Map<string, string>();
+  for (const rule of rules) {
+    for (const [property, value] of rule.declarations) {
+      mergedDeclarations.set(property, value);
+    }
+  }
 
   for (const declaration of declarations) {
     const [property, value] = parseDeclaration(declaration);
     expect(
-      rule?.declarations.get(property),
+      mergedDeclarations.get(property),
       `${selector} 缺少声明 ${declaration}`
     ).toBe(value);
   }
