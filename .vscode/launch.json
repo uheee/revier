@@ -22,7 +22,8 @@
       "command": "pwsh -NoLogo -ExecutionPolicy Bypass -Command \"fnm use 24; pnpm exec electron-vite dev --outDir=dist --inspect=5858 --remoteDebuggingPort=9222 --sourcemap\"",
       "cwd": "${workspaceFolder}",
       "env": {
-        "ELECTRON_ENABLE_LOGGING": "1"
+        "ELECTRON_ENABLE_LOGGING": "1",
+        "Path": "${workspaceFolder}\\target\\debug\\deps;${env:Path}"
       }
     },
     {
