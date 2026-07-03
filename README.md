@@ -23,6 +23,7 @@ Revier 是一款基于 **Electron + Vue 3 + TypeScript** 的本地 Git 代码 Re
 | UI | Naive UI、lucide-vue-next、CSS | 表单、按钮、布局和图标 |
 | Git 访问 | simple-git + Git CLI | 仓库校验、分支、提交、文件内容和 Patch 读取 |
 | Diff/筛选 | diff、minimatch | 行级/词级 Diff、Glob 规则匹配 |
+| Rust 分析 | Rust、gix、DuckDB | 本地索引、文件列表查询、Rust overlay 与块级归因实验接入 |
 | 测试 | Vitest、Vue Test Utils、Playwright | 单元、集成、性能和端到端测试 |
 
 ## 运行环境
@@ -32,6 +33,7 @@ Revier 是一款基于 **Electron + Vue 3 + TypeScript** 的本地 Git 代码 Re
 - **Node.js 24.x**：项目声明的引擎范围为 `>=24 <25`。
 - **pnpm 10.28.1**：仓库通过 `packageManager` 固定 pnpm 版本。
 - **Git CLI**：Revier 通过本机 Git 读取仓库历史。
+- **Rust stable**：`crates/revier-analysis` 提供本地索引、Rust overlay 和归因 CLI。
 
 建议使用 Corepack 管理 pnpm：
 
@@ -39,6 +41,28 @@ Revier 是一款基于 **Electron + Vue 3 + TypeScript** 的本地 Git 代码 Re
 corepack enable
 corepack prepare pnpm@10.28.1 --activate
 ```
+
+### Windows DuckDB 处理
+
+Rust 侧使用 `duckdb` crate，但不启用 `bundled` 特性。Windows 开发和验证采用 DuckDB 上游支持的替代路径：设置 `DUCKDB_DOWNLOAD_LIB=1`，由构建脚本下载官方预编译动态库并完成链接，避免依赖本机系统级 DuckDB 安装。
+
+仓库中的 Rust 相关 pnpm 脚本统一通过 `scripts/cargo-duckdb-download.mjs` 调用 Cargo。该包装脚本会自动注入 `DUCKDB_DOWNLOAD_LIB=1`：
+
+```bash
+pnpm rust:test
+pnpm rust:index:build -- --repo E:/repo/app --branch main --format json
+pnpm rust:file-overlay -- --repo E:/repo/app --base <base> --head <head> --branch main --file src/app.ts --format json
+```
+
+如果绕过 pnpm 脚本直接运行 Cargo，需要手动设置环境变量：
+
+```powershell
+$env:DUCKDB_DOWNLOAD_LIB = '1'
+cargo test --workspace
+cargo run -p revier-analysis -- index status --repo E:/repo/app --format json
+```
+
+直接运行已构建的 `target/debug/revier-analysis.exe` 时，如遇到 DuckDB 动态库加载失败，请将 `target/debug/deps` 加入当前终端的 `PATH`，或改用上面的 `cargo run` / `pnpm rust:*` 脚本。
 
 ## 快速开始
 
@@ -65,6 +89,12 @@ pnpm dev
 | `pnpm test:e2e` | 构建后运行 Playwright 端到端测试 |
 | `pnpm test:perf` | 运行性能测试配置 |
 | `pnpm lint` | 使用 ESLint 检查代码 |
+| `pnpm rust:test` | 设置 `DUCKDB_DOWNLOAD_LIB=1` 后运行 Rust workspace 测试 |
+| `pnpm rust:index:status` | 调用 Rust CLI 查看 DuckDB 索引状态 |
+| `pnpm rust:index:build` | 调用 Rust CLI 构建 DuckDB 索引 |
+| `pnpm rust:index:query-files` | 调用 Rust CLI 查询索引中的变更文件 |
+| `pnpm rust:file-overlay` | 调用 Rust CLI 输出文件级 overlay JSON |
+| `pnpm rust:trace-block` | 调用 Rust CLI 输出单个变更块归因 JSON |
 
 ## 使用流程
 
@@ -194,6 +224,7 @@ FileOverlay、ChangedFile、RelatedCommit 等共享类型
 ```bash
 pnpm typecheck
 pnpm test
+pnpm rust:test
 ```
 
 涉及完整 Electron 流程时再运行：
