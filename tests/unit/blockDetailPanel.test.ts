@@ -34,6 +34,7 @@ describe('BlockDetailPanel', () => {
       props: { block, selectedCommitHash: undefined },
       global: {
         stubs: {
+          'n-alert': true,
           'n-empty': true,
           'n-tag': { template: '<span><slot /></span>' },
           'n-tooltip': { template: '<span><slot /></span>' }
@@ -43,5 +44,28 @@ describe('BlockDetailPanel', () => {
 
     await wrapper.get('[data-commit-hash="abc123"]').trigger('click');
     expect(wrapper.emitted('commitSelected')?.[0]?.[0]).toEqual(block.relatedCommits[0]);
+  });
+
+  it('在提交下钻加载中显示行内取消按钮并移除下方取消按钮', async () => {
+    const wrapper = mount(BlockDetailPanel, {
+      props: { block, selectedCommitHash: 'abc123', activeCommitHash: 'abc123' },
+      global: {
+        stubs: {
+          'n-alert': true,
+          'n-empty': true,
+          'n-tag': { template: '<span><slot /></span>' },
+          'n-tooltip': { template: '<span><slot /></span>' }
+        }
+      }
+    });
+
+    const row = wrapper.get('[data-commit-hash="abc123"]');
+    expect(row.classes()).toContain('is-selected');
+    expect(wrapper.find('.commit-row__cancel').exists()).toBe(true);
+    expect(wrapper.find('.commit-list__cancel').exists()).toBe(false);
+
+    await wrapper.get('.commit-row__cancel').trigger('click');
+    expect(wrapper.emitted('cancelCommit')).toHaveLength(1);
+    expect(wrapper.emitted('commitSelected')).toBeUndefined();
   });
 });

@@ -754,9 +754,11 @@ textarea {
 }
 
 .commit-row {
+  position: relative;
   display: grid;
   gap: 5px;
   width: 100%;
+  overflow: hidden;
   padding: 10px 8px;
   color: inherit;
   background: transparent;
@@ -772,11 +774,72 @@ textarea {
   background: var(--rv-accent-soft);
 }
 
+.commit-row.is-selected::before,
+.commit-row.is-selected::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 6px;
+  background: #155f34;
+  pointer-events: none;
+  content: "";
+}
+
+.commit-row.is-selected::before {
+  left: 0;
+}
+
+.commit-row.is-selected::after {
+  right: 0;
+}
+
 .commit-row__top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.commit-row__top-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.commit-row__cancel {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--rv-accent);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.commit-row__cancel:hover,
+.commit-row__cancel:focus-visible {
+  background: rgb(15 118 110 / 12%);
+  outline: none;
+}
+
+.commit-row__cancel-close {
+  display: none;
+}
+
+.commit-row__cancel:hover .commit-row__cancel-spinner,
+.commit-row__cancel:focus-visible .commit-row__cancel-spinner {
+  display: none;
+}
+
+.commit-row__cancel:hover .commit-row__cancel-close,
+.commit-row__cancel:focus-visible .commit-row__cancel-close {
+  display: block;
 }
 
 .commit-row code {
@@ -944,11 +1007,6 @@ textarea {
   width: 100%;
   margin-top: 8px;
   background: var(--rv-surface);
-}
-
-.commit-list__cancel {
-  width: 100%;
-  margin-top: 6px;
 }
 
 @keyframes rv-spin {

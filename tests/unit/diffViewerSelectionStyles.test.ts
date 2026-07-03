@@ -149,4 +149,20 @@ describe('diff 选中态红绿侧样式', () => {
       'box-shadow: inset 3px 0 0 var(--rv-faint);'
     ]);
   });
+
+  it('相关提交选中态使用深绿色左右条', () => {
+    const styles = readStyles();
+
+    expectRule(styles, '.commit-row', ['position: relative;', 'overflow: hidden;']);
+    expectRule(styles, '.commit-row.is-selected::before', [
+      'background: #155f34;',
+      'left: 0;',
+      'width: 6px;'
+    ]);
+    expectRule(styles, '.commit-row.is-selected::after', [
+      'background: #155f34;',
+      'right: 0;',
+      'width: 6px;'
+    ]);
+  });
 });
