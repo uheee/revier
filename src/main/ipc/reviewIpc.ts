@@ -202,7 +202,8 @@ async function buildTypescriptFileOverlay({
     rangeCommits,
     filters,
     git: {
-      ...git,
+      readFileAtCommit: git.readFileAtCommit.bind(git),
+      showFilePatch: git.showFilePatch.bind(git),
       blameFileRange: git.blameFileRange?.bind(git) ?? (async () => []),
       listParents: git.listParents?.bind(git) ?? (async () => []),
       getCommit: git.getCommit?.bind(git) ?? (async () => undefined)

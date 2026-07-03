@@ -338,6 +338,34 @@ describe('reviewIpc', () => {
     expect(overlay.rows?.map((row) => row.type)).toEqual(['modified']);
   });
 
+  it('falls back to TypeScript file overlay when Git client methods are prototype methods', async () => {
+    const range = analysisRange();
+    const rustError = Object.assign(new Error('索引不可用'), { recoverable: true });
+    const getFileOverlay = vi.fn(async () => {
+      throw rustError;
+    });
+    const input = {
+      project,
+      file: modifiedFile,
+      range,
+      filters: {
+        projectId: project.id,
+        branch: 'main',
+        globRules: []
+      },
+      rangeCommits: [commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app')],
+      git: new PrototypeOverlayGit(),
+      rust: { getFileOverlay }
+    };
+
+    const overlay = await buildFileOverlayForTask(input);
+
+    expect(getFileOverlay).toHaveBeenCalledTimes(1);
+    expect(overlay.mode).toBe('range');
+    expect(overlay.blocks).toHaveLength(1);
+    expect(overlay.rows?.map((row) => row.type)).toEqual(['modified']);
+  });
+
   it('throws non-recoverable Rust overlay errors without TypeScript fallback', async () => {
     const range = analysisRange();
     const rustError = Object.assign(new Error('Rust 内部错误'), { recoverable: false });
@@ -460,6 +488,24 @@ function overlayGit() {
     ),
     showFilePatch: vi.fn(async () => '@@ -1 +1 @@\n-old\n+new\n')
   };
+}
+
+class PrototypeOverlayGit {
+  async listCommits() {
+    return [];
+  }
+
+  async listChangedFiles() {
+    return [];
+  }
+
+  async readFileAtCommit(_repoPath: string, commitHash: string) {
+    return commitHash === 'base' ? 'const name = "old";\n' : 'const name = "new";\n';
+  }
+
+  async showFilePatch() {
+    return '@@ -1 +1 @@\n-old\n+new\n';
+  }
 }
 
 function rustFileOverlay(
