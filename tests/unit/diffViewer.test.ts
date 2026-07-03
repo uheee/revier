@@ -76,7 +76,13 @@ const overlay: FileOverlay = {
   warnings: []
 };
 
-function mountDiffViewer(props: InstanceType<typeof DiffViewer>['$props']) {
+type DiffViewerTestProps = {
+  overlay: FileOverlay;
+  selectedBlockId?: string;
+  loading?: boolean;
+};
+
+function mountDiffViewer(props: DiffViewerTestProps) {
   return mount(DiffViewer, {
     props,
     global: {
