@@ -598,8 +598,9 @@ textarea {
   position: relative;
 }
 
-.diff-row.is-selected.diff-row--modified .code-cell--old::before,
-.diff-row.is-selected.diff-row--deleted .code-cell--old::before,
+.diff-row.is-selected.diff-row--modified::before,
+.diff-row.is-selected.diff-row--deleted::before,
+.diff-row.is-selected.diff-row--added::before,
 .diff-row.is-selected.diff-row--modified .code-cell--new::after,
 .diff-row.is-selected.diff-row--added .code-cell--new::after {
   position: absolute;
@@ -611,10 +612,15 @@ textarea {
   content: "";
 }
 
-.diff-row.is-selected.diff-row--modified .code-cell--old::before,
-.diff-row.is-selected.diff-row--deleted .code-cell--old::before {
+.diff-row.is-selected.diff-row--modified::before,
+.diff-row.is-selected.diff-row--deleted::before {
   left: 0;
   background: #9f1d18;
+}
+
+.diff-row.is-selected.diff-row--added::before {
+  left: 0;
+  background: #155f34;
 }
 
 .diff-row.is-selected.diff-row--modified .code-cell--new::after,
@@ -623,16 +629,18 @@ textarea {
   background: #155f34;
 }
 
-.diff-row.is-selected.is-block-start.diff-row--modified .code-cell--old::before,
-.diff-row.is-selected.is-block-start.diff-row--deleted .code-cell--old::before,
+.diff-row.is-selected.is-block-start.diff-row--modified::before,
+.diff-row.is-selected.is-block-start.diff-row--deleted::before,
+.diff-row.is-selected.is-block-start.diff-row--added::before,
 .diff-row.is-selected.is-block-start.diff-row--modified .code-cell--new::after,
 .diff-row.is-selected.is-block-start.diff-row--added .code-cell--new::after {
   border-top-left-radius: 4px;
   border-top-right-radius: 4px;
 }
 
-.diff-row.is-selected.is-block-end.diff-row--modified .code-cell--old::before,
-.diff-row.is-selected.is-block-end.diff-row--deleted .code-cell--old::before,
+.diff-row.is-selected.is-block-end.diff-row--modified::before,
+.diff-row.is-selected.is-block-end.diff-row--deleted::before,
+.diff-row.is-selected.is-block-end.diff-row--added::before,
 .diff-row.is-selected.is-block-end.diff-row--modified .code-cell--new::after,
 .diff-row.is-selected.is-block-end.diff-row--added .code-cell--new::after {
   border-bottom-left-radius: 4px;

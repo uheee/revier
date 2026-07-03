@@ -110,12 +110,16 @@ describe('diff 选中态红绿侧样式', () => {
       declarations: ['position: relative;']
     },
     {
-      selector: '.diff-row.is-selected.diff-row--modified .code-cell--old::before',
+      selector: '.diff-row.is-selected.diff-row--modified::before',
       declarations: ['background: #9f1d18;', 'left: 0;', 'width: 6px;']
     },
     {
-      selector: '.diff-row.is-selected.diff-row--deleted .code-cell--old::before',
+      selector: '.diff-row.is-selected.diff-row--deleted::before',
       declarations: ['background: #9f1d18;', 'left: 0;', 'width: 6px;']
+    },
+    {
+      selector: '.diff-row.is-selected.diff-row--added::before',
+      declarations: ['background: #155f34;', 'left: 0;', 'width: 6px;']
     },
     {
       selector: '.diff-row.is-selected.diff-row--modified .code-cell--new::after',
@@ -126,7 +130,7 @@ describe('diff 选中态红绿侧样式', () => {
       declarations: ['background: #155f34;', 'right: 0;', 'width: 6px;']
     },
     {
-      selector: '.diff-row.is-selected.is-block-start.diff-row--modified .code-cell--old::before',
+      selector: '.diff-row.is-selected.is-block-start.diff-row--modified::before',
       declarations: ['border-top-left-radius: 4px;', 'border-top-right-radius: 4px;']
     },
     {
