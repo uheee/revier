@@ -40,6 +40,11 @@ function isBlockStart(row: SideBySideDiffRow, index: number): boolean {
   return Boolean(block && block.rowStartIndex === index);
 }
 
+function isBlockEnd(row: SideBySideDiffRow, index: number): boolean {
+  const block = blockForRow(row);
+  return Boolean(block && block.rowEndIndex === index);
+}
+
 function visibleWordChanges(row: SideBySideDiffRow, side: 'old' | 'new'): WordChange[] {
   if (!row.wordChanges) {
     return [{ value: side === 'old' ? (row.oldText ?? '') : (row.newText ?? '') }];
@@ -77,7 +82,9 @@ function visibleWordChanges(row: SideBySideDiffRow, side: 'old' | 'new'): WordCh
               lineClass(row),
               {
                 'is-clickable': row.blockId,
-                'is-selected': row.blockId === selectedBlockId
+                'is-selected': row.blockId === selectedBlockId,
+                'is-block-start': row.blockId === selectedBlockId && isBlockStart(row, index),
+                'is-block-end': row.blockId === selectedBlockId && isBlockEnd(row, index)
               }
             ]"
             :data-block-id="row.blockId"
