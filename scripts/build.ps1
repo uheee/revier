@@ -296,27 +296,19 @@ function Clear-StagingDirectory {
   New-Item -ItemType Directory -Force -Path $DirectoryPath | Out-Null
 }
 
-function Find-DuckDbLibrary {
+function Get-ReleaseDuckDbLibraryPath {
   param(
+    [string]$TargetDirectory,
     [string]$TargetTriple
   )
 
-  $targetDirectory = Get-CargoTargetDirectory
-  $downloadRoot = Join-Path $targetDirectory "duckdb-download/$TargetTriple"
+  $libraryPath = Join-Path $TargetDirectory "$TargetTriple/release/deps/duckdb.dll"
 
-  if (-not (Test-Path -LiteralPath $downloadRoot)) {
-    throw "未找到 DuckDB 下载目录：$downloadRoot"
+  if (-not (Test-Path -LiteralPath $libraryPath)) {
+    throw "未找到本次 release deps DuckDB 动态库：$libraryPath"
   }
 
-  $library = Get-ChildItem -LiteralPath $downloadRoot -Recurse -File -Filter "duckdb.dll" |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
-
-  if ($null -eq $library) {
-    throw "未找到 DuckDB 动态库：$downloadRoot/**/duckdb.dll"
-  }
-
-  return $library.FullName
+  return $libraryPath
 }
 
 function Build-WindowsRustResources {
@@ -334,7 +326,7 @@ function Build-WindowsRustResources {
     throw "未找到 Rust CLI 产物：$binaryPath"
   }
 
-  $duckDbLibraryPath = Find-DuckDbLibrary -TargetTriple $targetTriple
+  $duckDbLibraryPath = Get-ReleaseDuckDbLibraryPath -TargetDirectory $targetDirectory -TargetTriple $targetTriple
 
   Clear-StagingDirectory -DirectoryPath $stagingDirectory
   Copy-Item -LiteralPath $binaryPath -Destination (Join-Path $stagingDirectory "revier-analysis.exe")

@@ -208,21 +208,14 @@ rustup_target_add() {
   rustup target add "$target_triple"
 }
 
-find_duckdb_library() {
+release_duckdb_library_path() {
   local target_triple="$1"
   local library_name="$2"
-  local download_root
-  download_root="$(cargo_target_dir)/duckdb-download/$target_triple"
-
-  if [[ ! -d "$download_root" ]]; then
-    echo "未找到 DuckDB 下载目录：$download_root" >&2
-    exit 1
-  fi
-
   local library_path
-  library_path="$(find "$download_root" -type f -name "$library_name" -print -quit)"
-  if [[ -z "$library_path" ]]; then
-    echo "未找到 DuckDB 动态库：$download_root/**/$library_name" >&2
+  library_path="$(cargo_target_dir)/$target_triple/release/deps/$library_name"
+
+  if [[ ! -f "$library_path" ]]; then
+    echo "未找到本次 release deps DuckDB 动态库：$library_path" >&2
     exit 1
   fi
 
@@ -247,7 +240,7 @@ build_linux_rust_resources() {
   fi
 
   local duckdb_library_path
-  duckdb_library_path="$(find_duckdb_library "$target_triple" "libduckdb.so")"
+  duckdb_library_path="$(release_duckdb_library_path "$target_triple" "libduckdb.so")"
 
   clear_staging_dir
   cp "$binary_path" "$staging_dir/revier-analysis"
@@ -319,7 +312,7 @@ fix_macos_duckdb_install_name() {
   install_name_tool -id "$desired_ref" "$library_path"
 
   local refs
-  refs="$(otool -L "$binary_path" | awk 'NR > 1 && $1 ~ /libduckdb\.dylib$/ { print $1 }')"
+  refs="$(otool -L "$binary_path" | awk 'NR > 1 && $1 ~ /libduckdb\.dylib$/ { print $1 }' | sort -u)"
   if [[ -z "$refs" ]]; then
     echo "未在 macOS Rust CLI 中找到 libduckdb.dylib 动态库引用。" >&2
     exit 1
@@ -371,8 +364,8 @@ build_mac_rust_resources() {
 
   local x64_duckdb
   local arm64_duckdb
-  x64_duckdb="$(find_duckdb_library "$x64_target" "libduckdb.dylib")"
-  arm64_duckdb="$(find_duckdb_library "$arm64_target" "libduckdb.dylib")"
+  x64_duckdb="$(release_duckdb_library_path "$x64_target" "libduckdb.dylib")"
+  arm64_duckdb="$(release_duckdb_library_path "$arm64_target" "libduckdb.dylib")"
 
   clear_staging_dir
   lipo -create "$x64_binary" "$arm64_binary" -output "$staging_dir/revier-analysis"
