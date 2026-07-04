@@ -42,19 +42,29 @@ corepack enable
 corepack prepare pnpm@10.28.1 --activate
 ```
 
-### Windows DuckDB 处理
+### Rust 与 DuckDB 构建
 
-Rust 侧使用 `duckdb` crate，但不启用 `bundled` 特性。Windows 开发和验证采用 DuckDB 上游支持的替代路径：设置 `DUCKDB_DOWNLOAD_LIB=1`，由构建脚本下载官方预编译动态库并完成链接，避免依赖本机系统级 DuckDB 安装。
+Rust 侧使用 `duckdb` crate，但不启用 `bundled` 特性。平台构建脚本会设置 `DUCKDB_DOWNLOAD_LIB=1`，由 `libduckdb-sys` 下载 DuckDB 官方预编译动态库并完成链接，避免依赖本机系统级 DuckDB 安装。
 
-仓库中的 Rust 相关 pnpm 脚本统一通过 `scripts/cargo-duckdb-download.mjs` 调用 Cargo。该包装脚本会自动注入 `DUCKDB_DOWNLOAD_LIB=1`：
+Windows：
 
-```bash
-pnpm rust:test
-pnpm rust:index:build -- --repo E:/repo/app --branch main --format json
-pnpm rust:file-overlay -- --repo E:/repo/app --base <base> --head <head> --branch main --file src/app.ts --format json
+```powershell
+pwsh -NoLogo -ExecutionPolicy Bypass -File scripts/build.ps1 -Platform win -Arch x64
 ```
 
-如果绕过 pnpm 脚本直接运行 Cargo，需要手动设置环境变量：
+Linux：
+
+```bash
+bash scripts/build.sh --platform linux --arch x64
+```
+
+macOS universal：
+
+```bash
+bash scripts/build.sh --platform mac --universal
+```
+
+如果绕过构建脚本直接运行 Cargo，需要手动设置环境变量：
 
 ```powershell
 $env:DUCKDB_DOWNLOAD_LIB = '1'
@@ -96,12 +106,8 @@ pnpm dev
 | `pnpm test:e2e` | 构建后运行 Playwright 端到端测试 |
 | `pnpm test:perf` | 运行性能测试配置 |
 | `pnpm lint` | 使用 ESLint 检查代码 |
-| `pnpm rust:test` | 设置 `DUCKDB_DOWNLOAD_LIB=1` 后运行 Rust workspace 测试 |
-| `pnpm rust:index:status` | 调用 Rust CLI 查看 DuckDB 索引状态 |
-| `pnpm rust:index:build` | 调用 Rust CLI 构建 DuckDB 索引 |
-| `pnpm rust:index:query-files` | 调用 Rust CLI 查询索引中的变更文件 |
-| `pnpm rust:file-overlay` | 调用 Rust CLI 输出文件级 overlay JSON |
-| `pnpm rust:trace-block` | 调用 Rust CLI 输出单个变更块归因 JSON |
+| `pnpm rust:test:win` | 通过 Windows 构建脚本设置 `DUCKDB_DOWNLOAD_LIB=1` 后运行 Rust workspace 测试 |
+| `pnpm rust:test:unix` | 通过 Linux/macOS 构建脚本设置 `DUCKDB_DOWNLOAD_LIB=1` 后运行 Rust workspace 测试 |
 
 ## 使用流程
 
@@ -231,7 +237,7 @@ FileOverlay、ChangedFile、RelatedCommit 等共享类型
 ```bash
 pnpm typecheck
 pnpm test
-pnpm rust:test
+pnpm rust:test:win
 ```
 
 涉及完整 Electron 流程时再运行：

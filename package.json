@@ -26,13 +26,8 @@
     "dist:mac": "bash scripts/build.sh --platform mac --universal --prepare-icons-only && pnpm build && pnpm dlx --allow-build=electron-winstaller electron-builder@26.15.1 --mac dmg zip --x64 --arm64 --publish=never",
     "build:cli": "tsc -p tsconfig.cli.json",
     "revier-analysis": "pnpm build:cli && node dist/cli/cli/revier-analysis.js",
-    "rust:test": "node scripts/cargo-duckdb-download.mjs test --workspace",
-    "rust:spike": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- spike run",
-    "rust:index:status": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- index status",
-    "rust:index:build": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- index build",
-    "rust:index:query-files": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- index query-files",
-    "rust:file-overlay": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- file-overlay",
-    "rust:trace-block": "node scripts/cargo-duckdb-download.mjs run -p revier-analysis -- trace-block"
+    "rust:test:win": "pwsh -NoLogo -ExecutionPolicy Bypass -File scripts/build.ps1 -RustTest",
+    "rust:test:unix": "bash scripts/build.sh --platform linux --arch x64 --rust-test"
   },
   "dependencies": {
     "@vueuse/components": "^10.11.0",

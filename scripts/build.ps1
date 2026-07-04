@@ -207,8 +207,121 @@ function Prepare-WindowsIcons {
   }
 }
 
+function Get-WindowsRustTarget {
+  param(
+    [string]$Architecture
+  )
+
+  switch ($Architecture) {
+    "x64" { return "x86_64-pc-windows-msvc" }
+    "arm64" { return "aarch64-pc-windows-msvc" }
+    default { throw "不支持的 Windows 架构：$Architecture" }
+  }
+}
+
+function Invoke-CargoWithDuckDbDownload {
+  param(
+    [string[]]$CargoArguments
+  )
+
+  $repositoryRoot = Get-RepositoryRoot
+  $previousDuckDbDownloadLib = $env:DUCKDB_DOWNLOAD_LIB
+
+  Push-Location $repositoryRoot
+  try {
+    $env:DUCKDB_DOWNLOAD_LIB = "1"
+    Write-Host "正在执行 Cargo：cargo $($CargoArguments -join ' ')"
+    & cargo @CargoArguments
+    if ($LASTEXITCODE -ne 0) {
+      throw "Cargo 命令执行失败，退出码：$LASTEXITCODE"
+    }
+  }
+  finally {
+    if ($null -eq $previousDuckDbDownloadLib) {
+      Remove-Item Env:DUCKDB_DOWNLOAD_LIB -ErrorAction SilentlyContinue
+    }
+    else {
+      $env:DUCKDB_DOWNLOAD_LIB = $previousDuckDbDownloadLib
+    }
+    Pop-Location
+  }
+}
+
+function Clear-StagingDirectory {
+  param(
+    [string]$DirectoryPath
+  )
+
+  $repositoryRoot = Get-RepositoryRoot
+  $buildRoot = (Resolve-Path (Join-Path $repositoryRoot "build")).Path
+
+  if (Test-Path -LiteralPath $DirectoryPath) {
+    $resolvedDirectory = (Resolve-Path $DirectoryPath).Path
+    $expectedPrefix = $buildRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $resolvedDirectory.StartsWith($expectedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "拒绝清空非 build 目录：$resolvedDirectory"
+    }
+
+    Remove-Item -LiteralPath $resolvedDirectory -Recurse -Force
+  }
+
+  New-Item -ItemType Directory -Force -Path $DirectoryPath | Out-Null
+}
+
+function Find-DuckDbLibrary {
+  param(
+    [string]$TargetTriple
+  )
+
+  $repositoryRoot = Get-RepositoryRoot
+  $downloadRoot = Join-Path $repositoryRoot "target/duckdb-download/$TargetTriple"
+
+  if (-not (Test-Path -LiteralPath $downloadRoot)) {
+    throw "未找到 DuckDB 下载目录：$downloadRoot"
+  }
+
+  $library = Get-ChildItem -LiteralPath $downloadRoot -Recurse -File -Filter "duckdb.dll" |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+
+  if ($null -eq $library) {
+    throw "未找到 DuckDB 动态库：$downloadRoot/**/duckdb.dll"
+  }
+
+  return $library.FullName
+}
+
+function Build-WindowsRustResources {
+  $repositoryRoot = Get-RepositoryRoot
+  $targetTriple = Get-WindowsRustTarget -Architecture $Arch
+  $binaryPath = Join-Path $repositoryRoot "target/$targetTriple/release/revier-analysis.exe"
+  $stagingDirectory = Join-Path $repositoryRoot "build/revier-analysis/current"
+
+  Write-Host "正在构建 Windows Rust 分析资源，目标：$targetTriple"
+  Invoke-CargoWithDuckDbDownload -CargoArguments @("build", "-p", "revier-analysis", "--release", "--target", $targetTriple)
+
+  if (-not (Test-Path -LiteralPath $binaryPath)) {
+    throw "未找到 Rust CLI 产物：$binaryPath"
+  }
+
+  $duckDbLibraryPath = Find-DuckDbLibrary -TargetTriple $targetTriple
+
+  Clear-StagingDirectory -DirectoryPath $stagingDirectory
+  Copy-Item -LiteralPath $binaryPath -Destination (Join-Path $stagingDirectory "revier-analysis.exe")
+  Copy-Item -LiteralPath $duckDbLibraryPath -Destination (Join-Path $stagingDirectory "duckdb.dll")
+
+  Write-Host "已暂存 Rust 分析资源到：$stagingDirectory"
+}
+
 if ($Platform -ne "win") {
-  throw "当前 PowerShell 脚本仅支持 Windows 平台图标准备。"
+  throw "当前 PowerShell 脚本仅支持 Windows 平台。"
+}
+
+if ($RustTest) {
+  Write-Host "正在运行 Rust workspace 测试。"
+  Invoke-CargoWithDuckDbDownload -CargoArguments @("test", "--workspace")
+  Write-Host "Rust workspace 测试已完成。"
+  exit 0
 }
 
 Prepare-WindowsIcons
@@ -216,4 +329,10 @@ Prepare-WindowsIcons
 if ($PrepareIconsOnly) {
   Write-Host "仅准备图标模式已完成。"
   exit 0
+}
+
+Build-WindowsRustResources
+
+if ($Package) {
+  Write-Host "已保留 -Package 参数；Electron 打包接入将在任务 3 实现。"
 }
