@@ -14,13 +14,25 @@ usage() {
   echo "用法：scripts/build.sh --platform linux|mac --arch x64|arm64 [--package] [--universal] [--rust-test] [--prepare-icons-only]"
 }
 
+require_value() {
+  local option="$1"
+  local value="${2:-}"
+
+  if [[ -z "$value" || "$value" == --* ]]; then
+    echo "${option} 缺少参数值" >&2
+    exit 2
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --platform)
+      require_value "$1" "${2:-}"
       platform="${2:-}"
       shift 2
       ;;
     --arch)
+      require_value "$1" "${2:-}"
       arch="${2:-}"
       shift 2
       ;;
