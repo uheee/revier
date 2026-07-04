@@ -23,6 +23,7 @@ msi:
   artifactName: ${productName}-${version}-win-${arch}.${ext}
 
 linux:
+  icon: build/icon.png
   category: Development
   maintainer: Revier Maintainers <noreply@example.com>
   target:
@@ -34,6 +35,7 @@ linux:
         - x64
 
 mac:
+  icon: build/icon.icns
   category: public.app-category.developer-tools
   target:
     - target: dmg

@@ -12,3 +12,7 @@ release/
 target/
 
 build/icon.ico
+build/icon.icns
+build/icon.png
+build/icon.iconset/
+build/icon-source.png
