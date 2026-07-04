@@ -58,6 +58,8 @@ Linux：
 bash scripts/build.sh --platform linux --arch x64
 ```
 
+Linux 构建/打包需要安装 `patchelf`。构建脚本会用它把暂存后的 Rust CLI rpath 设置为 `$ORIGIN`，确保可与同目录的 `libduckdb.so` 一起加载。
+
 macOS universal：
 
 ```bash
