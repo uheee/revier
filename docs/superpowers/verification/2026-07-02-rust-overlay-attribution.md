@@ -110,3 +110,7 @@ Rust overlay 与 `trace-block` 的 Rust 测试、CLI 契约、fixture 归因验�
 Node 侧验证已补充完成：通过沙盒外完整路径 `fnm.exe` 进入 Node 24 / pnpm 10.28.1 环境后，`pnpm typecheck`、`pnpm test -- tests/unit/reviewIpc.test.ts` 和 `pnpm test` 均通过。
 
 Electron dev runtime smoke 已完成到应用启动阶段：清理 `ELECTRON_RUN_AS_NODE` 后，`REVIER_USE_RUST_OVERLAY=1` 不再阻塞 Electron dev 启动。人工 UI 交互对照仍待单独执行。
+
+## 后续构建脚本调整
+
+2026-07-04 后，`scripts/cargo-duckdb-download.mjs` 已由平台构建脚本替代。本文中的历史命令表示当时验证方式；后续验证优先使用 `scripts/build.ps1` 或 `scripts/build.sh`，由平台脚本负责设置 `DUCKDB_DOWNLOAD_LIB=1`、构建 Rust CLI，并暂存 DuckDB 动态库。

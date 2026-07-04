@@ -46,6 +46,8 @@ corepack prepare pnpm@10.28.1 --activate
 
 Rust 侧使用 `duckdb` crate，但不启用 `bundled` 特性。平台构建脚本会设置 `DUCKDB_DOWNLOAD_LIB=1`，由 `libduckdb-sys` 下载 DuckDB 官方预编译动态库并完成链接，避免依赖本机系统级 DuckDB 安装。
 
+平台构建脚本会完成图标资源准备、Rust CLI 构建、DuckDB 动态库暂存和 `pnpm build`。只有传入 `-Package` 或 `--package` 时才会继续调用 electron-builder 生成安装包；不传打包参数时，脚本只执行本地构建和资源暂存。
+
 Windows：
 
 ```powershell
@@ -66,15 +68,17 @@ macOS universal：
 bash scripts/build.sh --platform mac --universal
 ```
 
+macOS universal 构建会分别构建 x64 与 arm64 Rust CLI，合并为 universal 二进制，并验证 Rust CLI 与 DuckDB `libduckdb.dylib` 都包含双架构。
+
 如果绕过构建脚本直接运行 Cargo，需要手动设置环境变量：
 
 ```powershell
 $env:DUCKDB_DOWNLOAD_LIB = '1'
 cargo test --workspace
-cargo run -p revier-analysis -- index status --repo E:/repo/app --format json
+cargo run -p revier-analysis -- index status --repo C:/path/to/repo --format json
 ```
 
-直接运行开发态 `target/debug/revier-analysis.exe` 时，如遇到 DuckDB 动态库加载失败，请将 `target/debug/deps` 加入当前终端的 `PATH`。VS Code 的 `Revier: 启动开发调试` 配置会自动处理调试 PATH；需要重新构建 Rust CLI 时请使用 `scripts/build.ps1` 或 `scripts/build.sh`。
+开发态 Rust CLI 仍位于 `target/debug`。打包态 Rust CLI 和 DuckDB 动态库会由 electron-builder 放入 Electron resources 下的 `revier-analysis` 目录，例如 `process.resourcesPath/revier-analysis`。直接运行开发态 Windows CLI `target/debug/revier-analysis.exe` 时，如遇到 DuckDB 动态库加载失败，请将 `target/debug/deps` 加入当前终端的 `PATH`。VS Code 的 `Revier: 启动开发调试` 配置会自动处理调试 PATH；需要重新构建 Rust CLI 时请使用 `scripts/build.ps1` 或 `scripts/build.sh`。
 
 Electron 主进程默认优先使用 Rust overlay；如需临时回退到 TypeScript overlay，可在启动前设置：
 
@@ -108,6 +112,9 @@ pnpm dev
 | `pnpm test:e2e` | 构建后运行 Playwright 端到端测试 |
 | `pnpm test:perf` | 运行性能测试配置 |
 | `pnpm lint` | 使用 ESLint 检查代码 |
+| `pnpm dist:win` | 通过 Windows 平台脚本构建 Rust 资源、执行 `pnpm build` 并打包 MSI |
+| `pnpm dist:linux` | 通过 Linux 平台脚本构建 Rust 资源、执行 `pnpm build` 并打包 deb/rpm |
+| `pnpm dist:mac` | 通过 macOS 平台脚本构建 universal Rust 资源、执行 `pnpm build` 并打包 dmg/zip |
 | `pnpm rust:test:win` | 通过 Windows 构建脚本设置 `DUCKDB_DOWNLOAD_LIB=1` 后运行 Rust workspace 测试 |
 | `pnpm rust:test:unix` | 通过 Linux/macOS 构建脚本设置 `DUCKDB_DOWNLOAD_LIB=1` 后运行 Rust workspace 测试 |
 
@@ -239,7 +246,11 @@ FileOverlay、ChangedFile、RelatedCommit 等共享类型
 ```bash
 pnpm typecheck
 pnpm test
+# Windows
 pnpm rust:test:win
+
+# Linux/macOS
+pnpm rust:test:unix
 ```
 
 涉及完整 Electron 流程时再运行：
