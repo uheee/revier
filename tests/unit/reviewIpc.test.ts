@@ -162,7 +162,7 @@ describe('reviewIpc', () => {
     expect(result.files).toEqual([modifiedFile]);
   });
 
-  it('falls back to TypeScript filtering when Rust query-files is recoverable', async () => {
+  it('falls back to TypeScript filtering and warns when Rust query-files is recoverable', async () => {
     const filters: ReviewFilters = {
       projectId: project.id,
       branch: 'main',
@@ -172,28 +172,37 @@ describe('reviewIpc', () => {
       globRules: ['src/**/*.ts']
     };
     const rustError = Object.assign(new Error('索引不可用'), { recoverable: true });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const result = await resolveAnalysisScope({
-      project,
-      filters,
-      git: {
-        listCommits: vi.fn(async () => [
-          commit('head', '2026-05-20T00:00:00.000Z', 'Bob', 'fix bug'),
-          commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app'),
-          commit('base', '2026-05-01T00:00:00.000Z', 'Base', 'base')
-        ]),
-        listChangedFiles: vi.fn(async () => [modifiedFile]),
-        readFileAtCommit: vi.fn(),
-        showFilePatch: vi.fn(async () => '@@ -1 +1 @@\n-old\n+new\n')
-      },
-      rust: {
-        queryFiles: vi.fn(async () => {
-          throw rustError;
-        })
-      }
-    });
+    try {
+      const result = await resolveAnalysisScope({
+        project,
+        filters,
+        git: {
+          listCommits: vi.fn(async () => [
+            commit('head', '2026-05-20T00:00:00.000Z', 'Bob', 'fix bug'),
+            commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app'),
+            commit('base', '2026-05-01T00:00:00.000Z', 'Base', 'base')
+          ]),
+          listChangedFiles: vi.fn(async () => [modifiedFile]),
+          readFileAtCommit: vi.fn(),
+          showFilePatch: vi.fn(async () => '@@ -1 +1 @@\n-old\n+new\n')
+        },
+        rust: {
+          queryFiles: vi.fn(async () => {
+            throw rustError;
+          })
+        }
+      });
 
-    expect(result.files).toEqual([modifiedFile]);
+      expect(result.files).toEqual([modifiedFile]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Rust 文件列表查询不可用，已使用 TypeScript 路径继续分析。',
+        rustError
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('builds file overlay from real base and head content with related authors', async () => {
@@ -310,12 +319,16 @@ describe('reviewIpc', () => {
     expect(overlay.rows?.map((row) => row.blockId)).toEqual(['visible-block', undefined]);
   });
 
-  it('falls back to TypeScript file overlay when Rust overlay returns a recoverable error', async () => {
+  it('throws recoverable Rust overlay errors without TypeScript fallback', async () => {
     const range = analysisRange();
-    const rustError = Object.assign(new Error('索引不可用'), { recoverable: true });
+    const rustError = Object.assign(new Error('索引不可用'), {
+      recoverable: true,
+      code: 'RUST_INDEX_UNAVAILABLE'
+    });
     const getFileOverlay = vi.fn(async () => {
       throw rustError;
     });
+    const git = overlayGit();
     const input = {
       project,
       file: modifiedFile,
@@ -326,24 +339,21 @@ describe('reviewIpc', () => {
         globRules: []
       },
       rangeCommits: [commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app')],
-      git: overlayGit(),
+      git,
       rust: { getFileOverlay }
     };
 
-    const overlay = await buildFileOverlayForTask(input);
+    await expect(buildFileOverlayForTask(input)).rejects.toMatchObject({
+      recoverable: true,
+      code: 'RUST_INDEX_UNAVAILABLE'
+    });
 
     expect(getFileOverlay).toHaveBeenCalledTimes(1);
-    expect(overlay.mode).toBe('range');
-    expect(overlay.blocks).toHaveLength(1);
-    expect(overlay.rows?.map((row) => row.type)).toEqual(['modified']);
+    expect(git.readFileAtCommit).not.toHaveBeenCalled();
   });
 
-  it('falls back to TypeScript file overlay when Git client methods are prototype methods', async () => {
+  it('builds TypeScript file overlay when no Rust client is provided and Git methods are prototype methods', async () => {
     const range = analysisRange();
-    const rustError = Object.assign(new Error('索引不可用'), { recoverable: true });
-    const getFileOverlay = vi.fn(async () => {
-      throw rustError;
-    });
     const input = {
       project,
       file: modifiedFile,
@@ -354,13 +364,11 @@ describe('reviewIpc', () => {
         globRules: []
       },
       rangeCommits: [commit('alice', '2026-05-10T00:00:00.000Z', 'Alice', 'feature: update app')],
-      git: new PrototypeOverlayGit(),
-      rust: { getFileOverlay }
+      git: new PrototypeOverlayGit()
     };
 
     const overlay = await buildFileOverlayForTask(input);
 
-    expect(getFileOverlay).toHaveBeenCalledTimes(1);
     expect(overlay.mode).toBe('range');
     expect(overlay.blocks).toHaveLength(1);
     expect(overlay.rows?.map((row) => row.type)).toEqual(['modified']);

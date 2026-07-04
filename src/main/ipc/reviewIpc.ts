@@ -119,6 +119,7 @@ export async function resolveAnalysisScope({
       if (!isRecoverableRustError(error)) {
         throw error;
       }
+      console.warn('Rust 文件列表查询不可用，已使用 TypeScript 路径继续分析。', error);
     }
   }
 
@@ -156,24 +157,18 @@ export async function buildFileOverlayForTask({
   }
 
   if (rust) {
-    try {
-      const overlay = await rust.getFileOverlay({
-        repoPath: project.repoPath,
-        baseCommit: range.baseCommit,
-        headCommit: range.headCommit,
-        branch: range.branch,
-        filePath: file.path,
-        globRules: filters.globRules,
-        authorKeys: filters.authorKeys,
-        authorQuery: filters.authorQuery,
-        messageQuery: filters.messageQuery
-      });
-      return applyDisplayCommitFilters(overlay, filters);
-    } catch (error) {
-      if (!isRecoverableRustError(error)) {
-        throw error;
-      }
-    }
+    const overlay = await rust.getFileOverlay({
+      repoPath: project.repoPath,
+      baseCommit: range.baseCommit,
+      headCommit: range.headCommit,
+      branch: range.branch,
+      filePath: file.path,
+      globRules: filters.globRules,
+      authorKeys: filters.authorKeys,
+      authorQuery: filters.authorQuery,
+      messageQuery: filters.messageQuery
+    });
+    return applyDisplayCommitFilters(overlay, filters);
   }
 
   const overlay = await buildTypescriptFileOverlay({
