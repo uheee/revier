@@ -1,6 +1,6 @@
 # Revier Rust 打包与 Fallback 策略设计
 
-> 状态：已按计划实施。本文记录 Rust 分析 CLI、DuckDB 动态库、应用图标、平台构建脚本和 fallback 策略的设计与最终行为；历史计划中的“后续应”事项已经落地，仍需长期观察的内容在文末单独列出。
+> 状态：已实施。本文记录 Rust 分析 CLI、DuckDB 动态库、应用图标、平台构建脚本和 fallback 策略的设计与最终行为；仍需观察或后续调整的事项见文末。
 
 ## 背景
 
@@ -88,12 +88,11 @@ Rust CLI 启动时从自身所在目录或平台 loader/rpath 规则加载 DuckD
 
 ### Windows
 
-`scripts/build.ps1` 当前支持：
+`scripts/build.ps1` 普通构建/打包命令：
 
 ```powershell
-pwsh -NoLogo -ExecutionPolicy Bypass -File scripts/build.ps1 -Platform win -Arch x64
-pwsh -NoLogo -ExecutionPolicy Bypass -File scripts/build.ps1 -Platform win -Arch x64 -Package
-pwsh -NoLogo -ExecutionPolicy Bypass -File scripts/build.ps1 -RustTest
+scripts/build.ps1 -Platform win -Arch x64
+scripts/build.ps1 -Platform win -Arch x64 -Package
 ```
 
 主要行为：
@@ -107,12 +106,11 @@ pwsh -NoLogo -ExecutionPolicy Bypass -File scripts/build.ps1 -RustTest
 
 ### Linux
 
-`scripts/build.sh` 当前支持：
+`scripts/build.sh` Linux 普通构建/打包命令：
 
 ```bash
-bash scripts/build.sh --platform linux --arch x64
-bash scripts/build.sh --platform linux --arch x64 --package
-bash scripts/build.sh --platform linux --arch x64 --rust-test
+scripts/build.sh --platform linux --arch x64
+scripts/build.sh --platform linux --arch x64 --package
 ```
 
 主要行为：
@@ -132,8 +130,8 @@ Linux 构建和打包必须安装 `patchelf`；CI 中 Linux release job 已安�
 `scripts/build.sh` 当前要求 macOS 使用 universal 构建：
 
 ```bash
-bash scripts/build.sh --platform mac --universal
-bash scripts/build.sh --platform mac --universal --package
+scripts/build.sh --platform mac --universal
+scripts/build.sh --platform mac --universal --package
 ```
 
 主要行为：
@@ -148,6 +146,22 @@ bash scripts/build.sh --platform mac --universal --package
 8. 仅在传入 `--package` 时执行 electron-builder，生成 macOS dmg/zip。
 
 GitHub Actions macOS release job 还会执行 `lipo -verify_arch x86_64 arm64`，确保 `build/revier-analysis/current/revier-analysis` 和 `build/revier-analysis/current/libduckdb.dylib` 都包含双架构。
+
+### Rust 测试模式
+
+Windows：
+
+```powershell
+scripts/build.ps1 -RustTest
+```
+
+Unix：
+
+```bash
+scripts/build.sh --platform linux --arch x64 --rust-test
+```
+
+Rust 测试模式只设置 `DUCKDB_DOWNLOAD_LIB=1` 后运行 `cargo test --workspace`，不会准备 staging，不会运行 `pnpm build`，也不会执行 electron-builder 打包。Linux 测试模式不设置 staged Rust CLI rpath，因此不要求安装 `patchelf`。
 
 ## electron-builder 配置
 
