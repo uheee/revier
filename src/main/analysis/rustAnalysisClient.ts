@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { posix, win32 } from 'node:path';
 import { app } from 'electron';
 import { createAppError, type AppError } from '../../shared/errors';
 import type {
@@ -300,6 +300,7 @@ function defaultBinaryPath(): string {
 
 export function resolveRustAnalysisBinaryPath(context: RustBinaryPathContext): string {
   const binaryName = context.platform === 'win32' ? 'revier-analysis.exe' : 'revier-analysis';
+  const joinPath = context.platform === 'win32' ? win32.join : posix.join;
   if (context.env.REVIER_ANALYSIS_BIN !== undefined) {
     return context.env.REVIER_ANALYSIS_BIN;
   }
@@ -312,10 +313,10 @@ export function resolveRustAnalysisBinaryPath(context: RustBinaryPathContext): s
         false
       );
     }
-    return join(context.resourcesPath, 'revier-analysis', binaryName);
+    return joinPath(context.resourcesPath, 'revier-analysis', binaryName);
   }
 
-  return join(context.cwd, 'target', 'debug', binaryName);
+  return joinPath(context.cwd, 'target', 'debug', binaryName);
 }
 
 type RawChangedFile = Omit<ChangedFile, 'oldPath'> & {

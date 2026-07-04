@@ -1,26 +1,12 @@
-import { join } from 'node:path';
-import * as rustAnalysisClientModule from '../../src/main/analysis/rustAnalysisClient';
-import type { RustAnalysisExecutor } from '../../src/main/analysis/rustAnalysisClient';
+import { posix, win32 } from 'node:path';
+import {
+  RustAnalysisClient,
+  RustAnalysisError,
+  resolveRustAnalysisBinaryPath,
+  type RustAnalysisExecutor,
+  type RustBinaryPathContext
+} from '../../src/main/analysis/rustAnalysisClient';
 import type { AttributionMethod } from '../../src/shared/reviewTypes';
-
-const { RustAnalysisClient, RustAnalysisError } = rustAnalysisClientModule;
-
-interface TestRustBinaryPathContext {
-  env: NodeJS.ProcessEnv;
-  cwd: string;
-  platform: NodeJS.Platform;
-  isPackaged: boolean;
-  resourcesPath?: string;
-}
-
-type ResolveRustAnalysisBinaryPath = (context: TestRustBinaryPathContext) => string;
-
-function resolveRustAnalysisBinaryPath(context: TestRustBinaryPathContext): string | undefined {
-  const moduleWithResolver = rustAnalysisClientModule as typeof rustAnalysisClientModule & {
-    resolveRustAnalysisBinaryPath?: ResolveRustAnalysisBinaryPath;
-  };
-  return moduleWithResolver.resolveRustAnalysisBinaryPath?.(context);
-}
 
 describe('resolveRustAnalysisBinaryPath', () => {
   it('优先使用 REVIER_ANALYSIS_BIN 覆盖打包态和开发态默认路径', () => {
@@ -55,7 +41,7 @@ describe('resolveRustAnalysisBinaryPath', () => {
         resourcesPath: 'C:\\Program Files\\Revier\\resources'
       })
     ).toBe(
-      join(
+      win32.join(
         'C:\\Program Files\\Revier\\resources',
         'revier-analysis',
         'revier-analysis.exe'
@@ -71,7 +57,21 @@ describe('resolveRustAnalysisBinaryPath', () => {
         platform: 'win32',
         isPackaged: false
       })
-    ).toBe(join('E:\\Projects\\revier', 'target', 'debug', 'revier-analysis.exe'));
+    ).toBe(win32.join('E:\\Projects\\revier', 'target', 'debug', 'revier-analysis.exe'));
+  });
+
+  it('非 Windows context 使用 POSIX path 拼接打包态 Rust CLI', () => {
+    const context: RustBinaryPathContext = {
+      env: {},
+      cwd: '/home/alice/revier',
+      platform: 'linux',
+      isPackaged: true,
+      resourcesPath: '/opt/Revier/resources'
+    };
+
+    expect(resolveRustAnalysisBinaryPath(context)).toBe(
+      posix.join('/opt/Revier/resources', 'revier-analysis', 'revier-analysis')
+    );
   });
 
   it('打包态缺少 resourcesPath 时抛出不可恢复错误', () => {
