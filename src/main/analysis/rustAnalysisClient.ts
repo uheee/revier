@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
+import { app } from 'electron';
 import { createAppError, type AppError } from '../../shared/errors';
 import type {
   AnalysisRange,
@@ -23,6 +24,14 @@ export type RustAnalysisExecutor = (
   binaryPath: string,
   args: string[]
 ) => Promise<RustAnalysisExecutorResult>;
+
+export interface RustBinaryPathContext {
+  env: NodeJS.ProcessEnv;
+  cwd: string;
+  platform: NodeJS.Platform;
+  isPackaged: boolean;
+  resourcesPath?: string;
+}
 
 export interface QueryFilesRequest {
   repoPath: string;
@@ -280,15 +289,33 @@ function mapRustError(
 }
 
 function defaultBinaryPath(): string {
-  return (
-    process.env.REVIER_ANALYSIS_BIN ??
-    join(
-      process.cwd(),
-      'target',
-      'debug',
-      process.platform === 'win32' ? 'revier-analysis.exe' : 'revier-analysis'
-    )
-  );
+  return resolveRustAnalysisBinaryPath({
+    env: process.env,
+    cwd: process.cwd(),
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath
+  });
+}
+
+export function resolveRustAnalysisBinaryPath(context: RustBinaryPathContext): string {
+  const binaryName = context.platform === 'win32' ? 'revier-analysis.exe' : 'revier-analysis';
+  if (context.env.REVIER_ANALYSIS_BIN !== undefined) {
+    return context.env.REVIER_ANALYSIS_BIN;
+  }
+
+  if (context.isPackaged) {
+    if (!context.resourcesPath) {
+      throw new RustAnalysisError(
+        'RUST_BINARY_UNAVAILABLE',
+        '打包态缺少 Electron resourcesPath',
+        false
+      );
+    }
+    return join(context.resourcesPath, 'revier-analysis', binaryName);
+  }
+
+  return join(context.cwd, 'target', 'debug', binaryName);
 }
 
 type RawChangedFile = Omit<ChangedFile, 'oldPath'> & {

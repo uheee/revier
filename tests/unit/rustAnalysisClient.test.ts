@@ -1,8 +1,100 @@
-import {
-  RustAnalysisClient,
-  type RustAnalysisExecutor
-} from '../../src/main/analysis/rustAnalysisClient';
+import { join } from 'node:path';
+import * as rustAnalysisClientModule from '../../src/main/analysis/rustAnalysisClient';
+import type { RustAnalysisExecutor } from '../../src/main/analysis/rustAnalysisClient';
 import type { AttributionMethod } from '../../src/shared/reviewTypes';
+
+const { RustAnalysisClient, RustAnalysisError } = rustAnalysisClientModule;
+
+interface TestRustBinaryPathContext {
+  env: NodeJS.ProcessEnv;
+  cwd: string;
+  platform: NodeJS.Platform;
+  isPackaged: boolean;
+  resourcesPath?: string;
+}
+
+type ResolveRustAnalysisBinaryPath = (context: TestRustBinaryPathContext) => string;
+
+function resolveRustAnalysisBinaryPath(context: TestRustBinaryPathContext): string | undefined {
+  const moduleWithResolver = rustAnalysisClientModule as typeof rustAnalysisClientModule & {
+    resolveRustAnalysisBinaryPath?: ResolveRustAnalysisBinaryPath;
+  };
+  return moduleWithResolver.resolveRustAnalysisBinaryPath?.(context);
+}
+
+describe('resolveRustAnalysisBinaryPath', () => {
+  it('优先使用 REVIER_ANALYSIS_BIN 覆盖打包态和开发态默认路径', () => {
+    const env = { REVIER_ANALYSIS_BIN: 'D:\\tools\\custom-revier-analysis.exe' };
+
+    expect(
+      resolveRustAnalysisBinaryPath({
+        env,
+        cwd: 'E:\\Projects\\revier',
+        platform: 'win32',
+        isPackaged: true,
+        resourcesPath: 'C:\\Program Files\\Revier\\resources'
+      })
+    ).toBe(env.REVIER_ANALYSIS_BIN);
+    expect(
+      resolveRustAnalysisBinaryPath({
+        env,
+        cwd: 'E:\\Projects\\revier',
+        platform: 'win32',
+        isPackaged: false
+      })
+    ).toBe(env.REVIER_ANALYSIS_BIN);
+  });
+
+  it('打包态 Windows 使用 resourcesPath 下的 Rust CLI', () => {
+    expect(
+      resolveRustAnalysisBinaryPath({
+        env: {},
+        cwd: 'E:\\Projects\\revier',
+        platform: 'win32',
+        isPackaged: true,
+        resourcesPath: 'C:\\Program Files\\Revier\\resources'
+      })
+    ).toBe(
+      join(
+        'C:\\Program Files\\Revier\\resources',
+        'revier-analysis',
+        'revier-analysis.exe'
+      )
+    );
+  });
+
+  it('非打包态 Windows 使用 cwd 下的 target debug Rust CLI', () => {
+    expect(
+      resolveRustAnalysisBinaryPath({
+        env: {},
+        cwd: 'E:\\Projects\\revier',
+        platform: 'win32',
+        isPackaged: false
+      })
+    ).toBe(join('E:\\Projects\\revier', 'target', 'debug', 'revier-analysis.exe'));
+  });
+
+  it('打包态缺少 resourcesPath 时抛出不可恢复错误', () => {
+    const action = () =>
+      resolveRustAnalysisBinaryPath({
+        env: {},
+        cwd: 'E:\\Projects\\revier',
+        platform: 'win32',
+        isPackaged: true
+      });
+
+    expect(action).toThrow(RustAnalysisError);
+    expect(action).toThrow('打包态缺少');
+    try {
+      action();
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'RUST_BINARY_UNAVAILABLE',
+        recoverable: false
+      });
+    }
+  });
+});
 
 describe('RustAnalysisClient', () => {
   it('assembles query-files arguments and parses changed files', async () => {
