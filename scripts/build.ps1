@@ -219,6 +219,32 @@ function Get-WindowsRustTarget {
   }
 }
 
+function Get-CargoTargetDirectory {
+  $repositoryRoot = Get-RepositoryRoot
+
+  if (-not [string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+    if ([System.IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
+      return $env:CARGO_TARGET_DIR
+    }
+
+    return (Join-Path $repositoryRoot $env:CARGO_TARGET_DIR)
+  }
+
+  return (Join-Path $repositoryRoot "target")
+}
+
+function Invoke-RustupTargetAdd {
+  param(
+    [string]$TargetTriple
+  )
+
+  Write-Host "正在确认 Rust target：$TargetTriple"
+  & rustup target add $TargetTriple
+  if ($LASTEXITCODE -ne 0) {
+    throw "rustup target add 失败，目标：$TargetTriple，退出码：$LASTEXITCODE"
+  }
+}
+
 function Invoke-CargoWithDuckDbDownload {
   param(
     [string[]]$CargoArguments
@@ -253,7 +279,9 @@ function Clear-StagingDirectory {
   )
 
   $repositoryRoot = Get-RepositoryRoot
-  $buildRoot = (Resolve-Path (Join-Path $repositoryRoot "build")).Path
+  $buildRootPath = Join-Path $repositoryRoot "build"
+  New-Item -ItemType Directory -Force -Path $buildRootPath | Out-Null
+  $buildRoot = (Resolve-Path $buildRootPath).Path
 
   if (Test-Path -LiteralPath $DirectoryPath) {
     $resolvedDirectory = (Resolve-Path $DirectoryPath).Path
@@ -273,8 +301,8 @@ function Find-DuckDbLibrary {
     [string]$TargetTriple
   )
 
-  $repositoryRoot = Get-RepositoryRoot
-  $downloadRoot = Join-Path $repositoryRoot "target/duckdb-download/$TargetTriple"
+  $targetDirectory = Get-CargoTargetDirectory
+  $downloadRoot = Join-Path $targetDirectory "duckdb-download/$TargetTriple"
 
   if (-not (Test-Path -LiteralPath $downloadRoot)) {
     throw "未找到 DuckDB 下载目录：$downloadRoot"
@@ -293,11 +321,13 @@ function Find-DuckDbLibrary {
 
 function Build-WindowsRustResources {
   $repositoryRoot = Get-RepositoryRoot
+  $targetDirectory = Get-CargoTargetDirectory
   $targetTriple = Get-WindowsRustTarget -Architecture $Arch
-  $binaryPath = Join-Path $repositoryRoot "target/$targetTriple/release/revier-analysis.exe"
+  $binaryPath = Join-Path $targetDirectory "$targetTriple/release/revier-analysis.exe"
   $stagingDirectory = Join-Path $repositoryRoot "build/revier-analysis/current"
 
   Write-Host "正在构建 Windows Rust 分析资源，目标：$targetTriple"
+  Invoke-RustupTargetAdd -TargetTriple $targetTriple
   Invoke-CargoWithDuckDbDownload -CargoArguments @("build", "-p", "revier-analysis", "--release", "--target", $targetTriple)
 
   if (-not (Test-Path -LiteralPath $binaryPath)) {
