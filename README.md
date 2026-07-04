@@ -72,7 +72,7 @@ cargo test --workspace
 cargo run -p revier-analysis -- index status --repo E:/repo/app --format json
 ```
 
-直接运行已构建的 `target/debug/revier-analysis.exe` 时，如遇到 DuckDB 动态库加载失败，请将 `target/debug/deps` 加入当前终端的 `PATH`，或改用上面的 `cargo run` / `pnpm rust:*` 脚本。
+直接运行开发态 `target/debug/revier-analysis.exe` 时，如遇到 DuckDB 动态库加载失败，请将 `target/debug/deps` 加入当前终端的 `PATH`。VS Code 的 `Revier: 启动开发调试` 配置会自动处理调试 PATH；需要重新构建 Rust CLI 时请使用 `scripts/build.ps1` 或 `scripts/build.sh`。
 
 Electron 主进程默认优先使用 Rust overlay；如需临时回退到 TypeScript overlay，可在启动前设置：
 
