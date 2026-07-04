@@ -217,5 +217,3 @@ if ($PrepareIconsOnly) {
   Write-Host "仅准备图标模式已完成。"
   exit 0
 }
-
-Write-Host "Rust 构建流程将在后续任务中补充。当前参数：Platform=$Platform，Arch=$Arch，Package=$Package，RustTest=$RustTest"

@@ -147,5 +147,3 @@ if [[ "$prepare_icons_only" == true ]]; then
   echo "仅准备图标模式已完成。"
   exit 0
 fi
-
-echo "Rust 构建流程将在后续任务中补充。当前参数：platform=$platform，arch=$arch，package=$package，universal=$universal，rust_test=$rust_test"
