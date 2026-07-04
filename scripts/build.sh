@@ -87,6 +87,7 @@ prepare_linux_icon() {
   fi
 
   mkdir -p "$build_dir"
+  rm -f "$output_path"
   cp "$source_path" "$output_path"
   echo "已生成 Linux 图标：$output_path"
 }
@@ -112,6 +113,8 @@ prepare_mac_icon() {
     exit 1
   fi
 
+  rm -rf "$iconset_dir"
+  rm -f "$output_path" "$build_dir/icon-source.png"
   mkdir -p "$iconset_dir"
   sips -z 16 16 "$source_path" --out "$iconset_dir/icon_16x16.png" >/dev/null
   sips -z 32 32 "$source_path" --out "$iconset_dir/icon_16x16@2x.png" >/dev/null
