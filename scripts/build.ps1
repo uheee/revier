@@ -273,6 +273,26 @@ function Invoke-CargoWithDuckDbDownload {
   }
 }
 
+function Invoke-PnpmCommand {
+  param(
+    [string[]]$PnpmArguments
+  )
+
+  $repositoryRoot = Get-RepositoryRoot
+
+  Push-Location $repositoryRoot
+  try {
+    Write-Host "正在执行 pnpm：pnpm $($PnpmArguments -join ' ')"
+    & pnpm @PnpmArguments
+    if ($LASTEXITCODE -ne 0) {
+      throw "pnpm 命令执行失败，退出码：$LASTEXITCODE"
+    }
+  }
+  finally {
+    Pop-Location
+  }
+}
+
 function Clear-StagingDirectory {
   param(
     [string]$DirectoryPath
@@ -355,6 +375,16 @@ if ($PrepareIconsOnly) {
 
 Build-WindowsRustResources
 
+Invoke-PnpmCommand -PnpmArguments @("build")
+
 if ($Package) {
-  Write-Host "已保留 -Package 参数；Electron 打包接入将在任务 3 实现。"
+  Invoke-PnpmCommand -PnpmArguments @(
+    "dlx",
+    "--allow-build=electron-winstaller",
+    "electron-builder@26.15.1",
+    "--win",
+    "msi",
+    "--x64",
+    "--publish=never"
+  )
 }

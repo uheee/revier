@@ -202,6 +202,14 @@ cargo_with_duckdb_download() {
   )
 }
 
+run_pnpm() {
+  echo "正在执行 pnpm：pnpm $*"
+  (
+    cd "$repo_root"
+    pnpm "$@"
+  )
+}
+
 rustup_target_add() {
   local target_triple="$1"
   echo "正在确认 Rust target：$target_triple"
@@ -407,6 +415,15 @@ case "$platform" in
     ;;
 esac
 
+run_pnpm build
+
 if [[ "$package" == true ]]; then
-  echo "已保留 --package 参数；Electron 打包接入将在任务 3 实现。"
+  case "$platform" in
+    linux)
+      run_pnpm dlx --allow-build=electron-winstaller electron-builder@26.15.1 --linux deb rpm --x64 --publish=never
+      ;;
+    mac)
+      run_pnpm dlx --allow-build=electron-winstaller electron-builder@26.15.1 --mac dmg zip --x64 --arm64 --publish=never
+      ;;
+  esac
 fi

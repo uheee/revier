@@ -10,6 +10,12 @@ files:
   - dist/**
   - package.json
 
+extraResources:
+  - from: build/revier-analysis/current
+    to: revier-analysis
+    filter:
+      - "**/*"
+
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
 win:

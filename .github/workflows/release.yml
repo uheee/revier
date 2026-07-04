@@ -121,7 +121,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Windows installer
-        run: pnpm dist:win
+        shell: pwsh
+        run: ./scripts/build.ps1 -Platform win -Arch x64 -Package
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v6
@@ -157,13 +158,14 @@ jobs:
       - name: Install Linux packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm
+          sudo apt-get install -y rpm patchelf
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build Linux packages
-        run: pnpm dist:linux
+        shell: bash
+        run: ./scripts/build.sh --platform linux --arch x64 --package
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v6
@@ -203,7 +205,14 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build macOS x64/arm64 packages
-        run: pnpm dist:mac
+        shell: bash
+        run: ./scripts/build.sh --platform mac --universal --package
+
+      - name: Verify macOS Rust universal binary
+        shell: bash
+        run: |
+          lipo -info build/revier-analysis/current/revier-analysis
+          lipo -info build/revier-analysis/current/libduckdb.dylib
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v6
