@@ -58,8 +58,11 @@ Rust Git / 分析 / 项目存储 / DuckDB
 - 新增 `src/renderer/api/revierClient.ts`，封装 Tauri `invoke` 和事件监听，替代当前 `window.revier`。
 - `revierClient` 只做参数传递、类型约束、错误转换和事件订阅，不做 fallback、不做业务分支。
 - 新增 `src-tauri` 作为桌面入口，负责窗口、权限、命令注册、事件发送、应用配置和打包。
+- 根 `Cargo.toml` 使用同一个 Cargo workspace，成员为 `crates/revier-analysis` 与 `src-tauri`。
+- `src-tauri` 是 Tauri 桌面壳的独立 workspace member，依赖并调用分析库。
+- `crates/revier-analysis` 是可复用 Rust 分析库的独立 workspace member，从 CLI 优先调整为库 API 优先，CLI 可保留用于测试和调试。
+- 迁移不执行 `src/analysis` 或 `src/view` 目录重命名，也不重命名 `crates/revier-analysis` 或 `src-tauri`。
 - Rust 侧新增应用服务模块，承接当前 `src/main/ipc`、`src/main/projects`、`src/main/git`、`src/main/analysis` 的生产职责。
-- `crates/revier-analysis` 从 CLI 优先调整为库 API 优先，CLI 可保留用于测试和调试。
 - Rust/Tauri 失败时返回结构化错误，Vue 只展示错误和可操作提示，不切换旧实现。
 
 ## 功能模块划分
@@ -75,6 +78,8 @@ Rust Git / 分析 / 项目存储 / DuckDB
 - Tauri command 注册。
 - Tauri event 发送。
 - 打包配置。
+
+`src-tauri` 保持为根 Cargo workspace 成员，不放入 `src/analysis`、`src/view` 或其他重命名目录。它通过 Cargo path dependency 引用 `../crates/revier-analysis`。
 
 替代并删除：
 
@@ -417,7 +422,8 @@ FileOverlay(mode = commit)
 - `src/renderer/**` 保留并改造 API 调用。
 - `src/shared/**` 的核心业务类型迁移到 Rust schema 生成；迁移完成后不再作为权威类型来源。
 - `tests/fixtures/**` 可保留为测试 fixture。
-- `crates/revier-analysis/**` 保留并改造为库 API 优先。
+- `crates/revier-analysis/**` 保留并改造为库 API 优先，作为根 Cargo workspace 的分析库成员。
+- `src-tauri/**` 保留为根 Cargo workspace 的 Tauri 桌面壳成员。
 - `scripts/build.ps1` 与 `scripts/build.sh` 可重写为 Tauri 构建辅助脚本。
 
 ## 开发环境配置
@@ -443,6 +449,14 @@ cargo test --workspace
 ```
 
 Windows 构建脚本继续使用 `pwsh`。Node 相关工具继续使用 `fnm` 和 `pnpm`。Rust 相关依赖通过 Cargo 管理。Python 相关工具若后续需要，使用 `uv`。
+
+根 Cargo workspace 配置保持：
+
+```toml
+[workspace]
+members = ["crates/revier-analysis", "src-tauri"]
+resolver = "2"
+```
 
 ## 测试策略
 
@@ -577,4 +591,3 @@ Release 阶段：
 7. 删除 Electron、preload、Electron IPC 和生产 TypeScript/Node fallback。
 8. 重写构建脚本和 release CI。
 9. 更新 README、测试和验证文档。
-

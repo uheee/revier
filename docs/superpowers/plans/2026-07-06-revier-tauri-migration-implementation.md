@@ -8,6 +8,8 @@
 
 **技术栈：** Tauri 2、Vue 3、Pinia、Naive UI、Vite、TypeScript、Rust stable、gix、DuckDB、specta、tauri-specta、Vitest、Cargo test、pnpm、fnm、pwsh。
 
+**已确认布局：** 根 `Cargo.toml` 的 workspace 成员为 `crates/revier-analysis` 和 `src-tauri`。`crates/revier-analysis` 是复用 Rust 分析库，`src-tauri` 是 Tauri 桌面壳；两者是同一 Cargo workspace 的独立成员。本迁移不做 `src/analysis` 或 `src/view` 重命名，也不重命名 `crates/revier-analysis` 或 `src-tauri`。
+
 ---
 
 ## 范围检查
@@ -18,6 +20,7 @@
 
 新增或重写的主要文件：
 
+- `Cargo.toml`：根 Cargo workspace，包含 `crates/revier-analysis` 与 `src-tauri` 两个独立成员。
 - `src-tauri/Cargo.toml`：Tauri 应用 crate 依赖和 build 配置。
 - `src-tauri/build.rs`：Tauri 构建脚本。
 - `src-tauri/tauri.conf.json`：Tauri 窗口、构建、权限和打包配置。
@@ -56,6 +59,23 @@
 - Create: `vite.config.ts`
 - Modify: `package.json`
 - Modify: `tsconfig.web.json`
+- Modify: `Cargo.toml`
+- Modify: `docs/superpowers/specs/2026-07-06-revier-tauri-migration-design.md`
+- Modify: `docs/superpowers/plans/2026-07-06-revier-tauri-migration-implementation.md`
+
+Task 1 只建立最小运行时入口和构建入口，不执行目录重命名，不进入 schema、command 迁移或 Electron 删除任务。
+
+- [ ] **Step 0: 更新 Cargo workspace 和已确认文档布局**
+
+Modify root `Cargo.toml`:
+
+```toml
+[workspace]
+members = ["crates/revier-analysis", "src-tauri"]
+resolver = "2"
+```
+
+Update the design and implementation docs to state that `crates/revier-analysis` is the reusable Rust analysis library and `src-tauri` is the Tauri desktop shell. Both are independent members of the same Cargo workspace, and there is no `src/analysis` or `src/view` directory rename.
 
 - [ ] **Step 1: 写最小 Tauri command smoke 测试**
 
@@ -213,7 +233,7 @@ Modify `package.json` scripts to this shape:
 ```json
 {
   "dev": "pnpm tauri dev",
-  "build": "pnpm typecheck && pnpm generate:bindings:check && pnpm tauri build",
+  "build": "pnpm typecheck && pnpm tauri build",
   "preview": "vite preview",
   "vite:dev": "vite",
   "vite:build": "vite build",
@@ -226,6 +246,10 @@ Modify `package.json` scripts to this shape:
   "generate:bindings:check": "pnpm generate:bindings && git diff --exit-code -- src/renderer/generated/bindings.ts"
 }
 ```
+
+Task 1 只要求 `build` 覆盖当前已实现的前端类型检查和 Tauri 构建。`generate:bindings` 与
+`generate:bindings:check` 可在 Task 2 实现 `export-bindings` 后引入；Task 2 完成 bindings
+生成链路后，再将 `generate:bindings:check` 接回 `build` 或全量验证流程。
 
 - [ ] **Step 7: 添加 Node 依赖命令**
 
@@ -254,7 +278,7 @@ Expected: Tauri CLI prints version, Cargo checks `revier-tauri`, Vite builds `di
 - [ ] **Step 9: 提交**
 
 ```powershell
-git add package.json pnpm-lock.yaml vite.config.ts src-tauri
+git add Cargo.toml package.json pnpm-lock.yaml vite.config.ts src-tauri docs/superpowers/specs/2026-07-06-revier-tauri-migration-design.md docs/superpowers/plans/2026-07-06-revier-tauri-migration-implementation.md
 git commit -m "chore: 初始化 Tauri 运行时"
 ```
 
