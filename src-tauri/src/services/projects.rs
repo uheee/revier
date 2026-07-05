@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use revier_analysis::contracts::{ProjectPreferences, ReviewProject};
 use serde::{Deserialize, Serialize};
@@ -14,16 +15,30 @@ struct ProjectStoreFile {
 
 pub struct ProjectService {
     file_path: PathBuf,
+    store_lock: Mutex<()>,
 }
 
 #[allow(dead_code)]
 impl ProjectService {
     pub fn new(file_path: PathBuf) -> Self {
-        Self { file_path }
+        Self {
+            file_path,
+            store_lock: Mutex::new(()),
+        }
     }
 
     pub fn list_projects(&self) -> CommandResult<Vec<ReviewProject>> {
+        let _guard = self.store_lock.lock().expect("项目存储锁被污染");
         Ok(self.read_store()?.projects)
+    }
+
+    pub fn get_project(&self, project_id: &str) -> CommandResult<ReviewProject> {
+        let _guard = self.store_lock.lock().expect("项目存储锁被污染");
+        self.read_store()?
+            .projects
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .ok_or_else(|| command_error("PROJECT_NOT_FOUND", format!("未找到项目：{project_id}")))
     }
 
     pub fn add_project(
@@ -31,6 +46,7 @@ impl ProjectService {
         repo_path: impl Into<String>,
         name: Option<String>,
     ) -> CommandResult<ReviewProject> {
+        let _guard = self.store_lock.lock().expect("项目存储锁被污染");
         let mut store = self.read_store()?;
         let repo_path = normalize_path(repo_path.into());
         if store

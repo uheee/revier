@@ -1524,6 +1524,10 @@ pub fn review_list_changed_files(
 
 具体实现只能调用 Rust library API，不能调用 `src/main`、`src/analysis-core`、`simple-git`、Node 或 Electron 代码。DuckDB 索引缺失时保留 Rust `query_files` 错误并通过 command 错误映射向上返回；Task 5 中 `ReviewService` 不自动构建索引。
 
+TODO(Task 6/AnalysisService): 当前 Task 5 按已确认范围保持 `review_start_analysis` 同步执行真实分析并返回最终 snapshot；后续如果要让前端获得 running/failed 过程事件，需要单独确认并迁移为后台任务模型。
+
+TODO(Task 6): 当前 `ReviewService` 需要把 `ReviewFilters` 临时适配为 Rust CLI 使用的 `QueryFilesArgs`。后续当 `revier-analysis` 暴露面向应用层的非 CLI 查询参数后，删除这层兼容适配。
+
 - [ ] **Step 5: 注册 Review commands**
 
 Modify `src-tauri/src/lib.rs` invoke handler:
