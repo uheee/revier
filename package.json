@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A local Git code review assistant built with Electron, Vue, and TypeScript.",
   "author": "uheee",
+  "homepage": "https://github.com/uheee/revier",
   "private": true,
   "type": "module",
   "main": "dist/main/index.js",

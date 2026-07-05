@@ -202,6 +202,14 @@ cargo_with_duckdb_download() {
   )
 }
 
+prewarm_duckdb() {
+  echo "正在预热 DuckDB 动态库缓存，目标：$*"
+  (
+    cd "$repo_root"
+    node scripts/prewarm-duckdb.mjs "$@"
+  )
+}
+
 run_pnpm() {
   echo "正在执行 pnpm：pnpm $*"
   (
@@ -240,6 +248,7 @@ build_linux_rust_resources() {
 
   echo "正在构建 Linux Rust 分析资源，目标：$target_triple"
   rustup_target_add "$target_triple"
+  prewarm_duckdb "$target_triple"
   cargo_with_duckdb_download build -p revier-analysis --release --target "$target_triple"
 
   if [[ ! -f "$binary_path" ]]; then
@@ -360,9 +369,10 @@ build_mac_rust_resources() {
 
   echo "正在构建 macOS Rust 分析资源，目标：$x64_target"
   rustup_target_add "$x64_target"
-  cargo_with_duckdb_download build -p revier-analysis --release --target "$x64_target"
   echo "正在构建 macOS Rust 分析资源，目标：$arm64_target"
   rustup_target_add "$arm64_target"
+  prewarm_duckdb "$x64_target" "$arm64_target"
+  cargo_with_duckdb_download build -p revier-analysis --release --target "$x64_target"
   cargo_with_duckdb_download build -p revier-analysis --release --target "$arm64_target"
 
   if [[ ! -f "$x64_binary" || ! -f "$arm64_binary" ]]; then

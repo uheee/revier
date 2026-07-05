@@ -93,7 +93,7 @@ jobs:
         run: pnpm build
 
   build-windows:
-    name: Build Windows x64 MSI
+    name: Build for Windows
     runs-on: windows-2025-vs2026
     needs:
       - prepare-release
@@ -125,7 +125,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Windows installer
+      - name: Build for Windows
         shell: pwsh
         run: ./scripts/build.ps1 -Platform win -Arch x64 -Package
 
@@ -149,7 +149,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    name: Build Linux x64 packages
+    name: Build for Linux
     runs-on: ubuntu-latest
     needs:
       - prepare-release
@@ -179,12 +179,12 @@ jobs:
       - name: Install Linux packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm patchelf
+          sudo apt-get install -y rpm patchelf unzip
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Linux packages
+      - name: Build for Linux
         shell: bash
         run: ./scripts/build.sh --platform linux --arch x64 --package
 
@@ -220,7 +220,7 @@ jobs:
           if-no-files-found: error
 
   build-macos:
-    name: Build macOS x64/arm64 packages
+    name: Build for macOS
     runs-on: macos-latest
     needs:
       - prepare-release
@@ -252,7 +252,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build macOS x64/arm64 packages
+      - name: Build for macOS
         shell: bash
         run: ./scripts/build.sh --platform mac --universal --package
 
@@ -261,8 +261,8 @@ jobs:
         run: |
           lipo -info build/revier-analysis/current/revier-analysis
           lipo -info build/revier-analysis/current/libduckdb.dylib
-          lipo -verify_arch x86_64 arm64 build/revier-analysis/current/revier-analysis
-          lipo -verify_arch x86_64 arm64 build/revier-analysis/current/libduckdb.dylib
+          lipo build/revier-analysis/current/revier-analysis -verify_arch x86_64 arm64
+          lipo build/revier-analysis/current/libduckdb.dylib -verify_arch x86_64 arm64
 
       - name: Verify macOS packaged Rust resources
         shell: bash
@@ -278,8 +278,8 @@ jobs:
           while IFS= read -r resource_dir; do
             test -x "$resource_dir/revier-analysis"
             test -f "$resource_dir/libduckdb.dylib"
-            lipo -verify_arch x86_64 arm64 "$resource_dir/revier-analysis"
-            lipo -verify_arch x86_64 arm64 "$resource_dir/libduckdb.dylib"
+            lipo "$resource_dir/revier-analysis" -verify_arch x86_64 arm64
+            lipo "$resource_dir/libduckdb.dylib" -verify_arch x86_64 arm64
           done <<< "$resource_dirs"
 
           zip_files="$(find release -maxdepth 1 -name '*.zip' | sort)"

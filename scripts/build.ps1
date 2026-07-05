@@ -273,6 +273,27 @@ function Invoke-CargoWithDuckDbDownload {
   }
 }
 
+function Invoke-DuckDbPrewarm {
+  param(
+    [string[]]$TargetTriples
+  )
+
+  $repositoryRoot = Get-RepositoryRoot
+  $scriptPath = Join-Path $repositoryRoot "scripts/prewarm-duckdb.mjs"
+
+  Push-Location $repositoryRoot
+  try {
+    Write-Host "正在预热 DuckDB 动态库缓存，目标：$($TargetTriples -join ', ')"
+    & node $scriptPath @TargetTriples
+    if ($LASTEXITCODE -ne 0) {
+      throw "DuckDB 动态库缓存预热失败，退出码：$LASTEXITCODE"
+    }
+  }
+  finally {
+    Pop-Location
+  }
+}
+
 function Invoke-PnpmCommand {
   param(
     [string[]]$PnpmArguments
@@ -340,6 +361,7 @@ function Build-WindowsRustResources {
 
   Write-Host "正在构建 Windows Rust 分析资源，目标：$targetTriple"
   Invoke-RustupTargetAdd -TargetTriple $targetTriple
+  Invoke-DuckDbPrewarm -TargetTriples @($targetTriple)
   Invoke-CargoWithDuckDbDownload -CargoArguments @("build", "-p", "revier-analysis", "--release", "--target", $targetTriple)
 
   if (-not (Test-Path -LiteralPath $binaryPath)) {
