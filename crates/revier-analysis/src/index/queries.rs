@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use crate::git::commits::IndexedCommit;
 use crate::json::ChangedFileOutput;
+use chrono::{DateTime, Utc};
 use duckdb::params;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
@@ -200,7 +201,7 @@ fn matching_commits(
 ) -> Result<Vec<String>, AppError> {
     let mut stmt = conn
         .prepare(
-            "select hash, author_key, author_name, coalesce(author_email, ''), subject, cast(committed_at as varchar)
+            "select hash, author_key, author_name, coalesce(author_email, ''), subject, strftime(committed_at, '%Y-%m-%dT%H:%M:%S+00:00')
              from commits",
         )
         .map_err(|error| AppError::DuckDb(error.to_string()))?;
@@ -225,11 +226,14 @@ fn matching_commits(
         .collect::<Vec<_>>();
     let author_query = normalized_query(filter.author_query.as_deref());
     let message_query = normalized_query(filter.message.as_deref());
+    let since = parse_optional_filter_time(filter.since.as_deref(), "since")?;
+    let until = parse_optional_filter_time(filter.until.as_deref(), "until")?;
 
     let mut hashes = Vec::new();
     for row in rows {
         let (hash, author_key, author_name, author_email, subject, committed_at) =
             row.map_err(|error| AppError::DuckDb(error.to_string()))?;
+        let committed_at = parse_filter_time(&committed_at, "committed_at")?;
         if !normalized_authors.is_empty() && !normalized_authors.contains(&author_key) {
             continue;
         }
@@ -244,13 +248,13 @@ fn matching_commits(
                 continue;
             }
         }
-        if let Some(since) = &filter.since {
-            if committed_at < *since {
+        if let Some(since) = since {
+            if committed_at < since {
                 continue;
             }
         }
-        if let Some(until) = &filter.until {
-            if committed_at > *until {
+        if let Some(until) = until {
+            if committed_at > until {
                 continue;
             }
         }
@@ -264,6 +268,21 @@ fn normalized_query(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.to_lowercase())
+}
+
+fn parse_optional_filter_time(
+    value: Option<&str>,
+    field: &str,
+) -> Result<Option<DateTime<Utc>>, AppError> {
+    value
+        .map(|value| parse_filter_time(value, field))
+        .transpose()
+}
+
+fn parse_filter_time(value: &str, field: &str) -> Result<DateTime<Utc>, AppError> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|time| time.with_timezone(&Utc))
+        .map_err(|error| AppError::InvalidArgument(format!("{field} 时间格式无效：{error}")))
 }
 
 struct GlobMatcher {

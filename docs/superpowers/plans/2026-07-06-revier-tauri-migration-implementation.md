@@ -1261,6 +1261,75 @@ git add crates/revier-analysis
 git commit -m "feat: 暴露 Rust 分析库 API"
 ```
 
+## Task 5 前置修正：补齐 Rust 分析范围解析 API
+
+Task 5 依赖 Rust 侧正式范围解析 API。`ReviewFilters` 只提供 `project_id`、`branch`、`start_at`、`end_at` 和筛选条件，不携带 `base/head`；因此 `src-tauri` 的 `ReviewService` 进入真实分析前，必须先通过 `revier_analysis::api::resolve_analysis_range` 把前端筛选条件解析为 `AnalysisRange`。
+
+**Files:**
+- Modify: `crates/revier-analysis/src/api.rs`
+- Test: `crates/revier-analysis/tests/api_contract.rs`
+- Modify: `docs/superpowers/plans/2026-07-06-revier-tauri-migration-implementation.md`
+
+- [ ] **Step 1: 先写 Rust API 契约测试**
+
+在 `crates/revier-analysis/tests/api_contract.rs` 中使用 `fixtures::linear_with_authors()` 验证：
+
+- `resolve_analysis_range(repo_path, "main", Some(start_at), Some(end_at))` 返回 `AnalysisRange`。
+- `base_commit` 选中开始时间前最后一个提交。
+- `head_commit` 选中结束时间内最后一个提交。
+- `start_at` 和 `end_at` 输出为稳定 RFC3339 字符串，可直接传给后续 `query_files` 的 since/until。
+- 无提交仓库返回中文错误，语义包含“没有可用提交”。
+
+Run:
+
+```powershell
+$env:DUCKDB_DOWNLOAD_LIB = '1'; cargo test -p revier-analysis --test api_contract
+```
+
+Expected: FAIL because `revier_analysis::api::resolve_analysis_range` does not exist yet.
+
+- [ ] **Step 2: 在 `revier-analysis` 中实现正式范围解析 API**
+
+Add to `crates/revier-analysis/src/api.rs`:
+
+```rust
+pub fn resolve_analysis_range(
+    repo_path: &Path,
+    branch: &str,
+    start_at: Option<String>,
+    end_at: Option<String>,
+) -> Result<crate::contracts::AnalysisRange, AppError>
+```
+
+Implementation requirements:
+
+- 使用 `gix::discover(repo_path)` 打开或发现仓库。
+- 调用 `crate::git::commits::list_reachable_commits(&repo, branch)` 读取目标分支可达提交。
+- 复刻旧 TypeScript `selectRangeCommits` 的范围选择规则：`end_at` 为空时使用当前 UTC 时间，`start_at` 为空时使用 `end_at - 30 days`；提交按 `committed_at` 升序排序；`base_commit` 取最后一个 `committed_at < start` 的提交，没有则取最早提交；`head_commit` 取最后一个 `committed_at <= end` 的提交，没有则取最晚提交。
+- 没有任何可用提交时返回 `AppError::Repository` 或 `AppError::InvalidArgument`，错误信息必须是中文并包含“没有可用提交”语义。
+- 返回 `AnalysisRange { branch, base_commit, head_commit, start_at: Some(...), end_at: Some(...) }`，时间使用 `DateTime<Utc>::to_rfc3339()`。
+- 不引入 Node/TS fallback，不调用 `src/main`、`src/analysis-core` 或 `simple-git`。
+
+- [ ] **Step 3: 验证并提交前置修正**
+
+Run:
+
+```powershell
+$env:DUCKDB_DOWNLOAD_LIB = '1'; cargo test -p revier-analysis --test api_contract
+$env:DUCKDB_DOWNLOAD_LIB = '1'; cargo test -p revier-analysis
+```
+
+Expected: all `revier-analysis` tests pass.
+
+Commit:
+
+```powershell
+git add crates/revier-analysis docs/superpowers/plans/2026-07-06-revier-tauri-migration-implementation.md
+git commit -m "feat: 添加 Rust 分析范围解析 API"
+```
+
+Task 5 只有在本前置修正完成后才能继续。`ReviewService` 不允许用假 `completed`、空结果或 TODO 占位冒充真实分析完成；它必须调用 Rust 库 API 解析范围并进入真实 `query_files`。索引缺失暂时返回错误，不在 `ReviewService` 中自动构建索引；后续可由 `AnalysisService` 增强自动构建或缓存策略。
+
 ## Task 5: 实现 Tauri Review 服务和 commands/events
 
 **Files:**
@@ -1397,9 +1466,9 @@ let review_service = services::review::ReviewService::default();
 app.manage(AppState::new(project_service, review_service));
 ```
 
-- [ ] **Step 4: 新增 Review commands 骨架**
+- [ ] **Step 4: 新增 Review commands 并直接接入真实分析**
 
-Create `src-tauri/src/commands/review.rs`:
+创建 `src-tauri/src/commands/review.rs`。本步骤不允许先落空实现；`review_start_analysis` 必须通过 `ReviewService::start_analysis` 直接执行真实 Rust 分析，`review_list_changed_files` 必须读取任务缓存，未找到任务时返回 `TASK_NOT_FOUND` 或等价错误，不能用 `Ok(Vec::new())` 作为占位。
 
 ```rust
 use revier_analysis::contracts::{AnalysisTaskSnapshot, ChangedFile, ReviewFilters};
@@ -1424,11 +1493,7 @@ pub fn review_start_analysis(
     state: State<'_, AppState>,
     filters: ReviewFilters,
 ) -> CommandResult<AnalysisTaskSnapshot> {
-    let task = state.review.create_task(filters.project_id.clone());
-    state
-        .review
-        .mark_running(&task.task_id, revier_analysis::contracts::AnalysisStage::LoadChangedFiles, "读取变更文件");
-    let snapshot = state.review.get_task(&task.task_id)?;
+    let snapshot = state.review.start_analysis(state.projects.as_ref(), filters)?;
     app.emit(TASK_UPDATED_EVENT, &snapshot)
         .map_err(|error| crate::error::command_error("TASK_EVENT_FAILED", error.to_string()))?;
     Ok(snapshot)
@@ -1436,12 +1501,28 @@ pub fn review_start_analysis(
 
 #[tauri::command]
 pub fn review_list_changed_files(
-    _state: State<'_, AppState>,
-    _task_id: String,
+    state: State<'_, AppState>,
+    task_id: String,
 ) -> CommandResult<Vec<ChangedFile>> {
-    Ok(Vec::new())
+    state.review.list_changed_files(&task_id)
 }
 ```
+
+同一步扩展 `ReviewService`，新增 `start_analysis` 和 `list_changed_files`。
+`start_analysis` 必须按顺序执行：
+
+1. 通过 `filters.project_id` 从 `ProjectService` 读取项目。
+2. 调用 `revier_analysis::api::validate_repository(project.repo_path)`。
+3. 仓库校验失败时返回 `REPOSITORY_INVALID`。
+4. 使用 `revier_analysis::api::resolve_analysis_range(project.repo_path, &filters.branch, filters.start_at.clone(), filters.end_at.clone())` 解析选中范围。
+5. 使用解析出的 `base_commit`、`head_commit`、`branch`、`start_at`、`end_at` 和筛选字段调用 `revier_analysis::api::query_files`。
+6. 将返回的文件列表按新建任务 id 写入 `files_by_task`。
+7. 只有 `query_files` 成功后才能把任务标记为 completed。
+8. 返回 completed snapshot；command 层用该 snapshot 发送 `review://task-updated`。
+
+`list_changed_files` 必须按任务 id 读取 `files_by_task` 并返回缓存文件。任务 id 不存在时返回 `TASK_NOT_FOUND`；任务存在但分析未完成时返回任务状态错误，不能用空列表代替。
+
+具体实现只能调用 Rust library API，不能调用 `src/main`、`src/analysis-core`、`simple-git`、Node 或 Electron 代码。DuckDB 索引缺失时保留 Rust `query_files` 错误并通过 command 错误映射向上返回；Task 5 中 `ReviewService` 不自动构建索引。
 
 - [ ] **Step 5: 注册 Review commands**
 
@@ -1456,20 +1537,14 @@ Modify `src-tauri/src/lib.rs` invoke handler:
 ])
 ```
 
-- [ ] **Step 6: 逐步接入真实分析**
+- [ ] **Step 6: 校验禁止占位和索引缺失行为**
 
-Replace `review_start_analysis` internals with a `ReviewService::start_analysis` method that performs these exact operations in order:
+运行测试前检查 Task 5 diff，并确认：
 
-1. Load the project from `ProjectService` by `filters.project_id`.
-2. Call `revier_analysis::api::validate_repository(project.repo_path)`.
-3. Return `REPOSITORY_INVALID` if validation is not valid.
-4. Resolve the selected range through the Rust analysis API.
-5. Call `revier_analysis::api::query_files` with the resolved range and filters.
-6. Store returned files in `files_by_task`.
-7. Mark the task completed.
-8. Emit `review://task-updated` with the completed snapshot.
-
-The concrete implementation must call Rust library API only. It must not call `src/main`, `src/analysis-core`, `simple-git`, Node, or Electron code.
+- `review_start_analysis` 没有假 `completed` 或仅状态切换实现。
+- `review_list_changed_files` 没有返回 `Ok(Vec::new())` 作为默认占位。
+- `ReviewService::start_analysis` 调用了 `resolve_analysis_range` 和 `query_files`。
+- 索引缺失由 Rust `query_files` 错误向上返回，不在 `ReviewService` 中自动构建索引。
 
 - [ ] **Step 7: 运行测试**
 
