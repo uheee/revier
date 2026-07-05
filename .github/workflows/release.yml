@@ -125,6 +125,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Set package version from release tag
+        run: node scripts/set-package-version.mjs "${{ needs.prepare-release.outputs.tag_name }}"
+
       - name: Build for Windows
         shell: pwsh
         run: ./scripts/build.ps1 -Platform win -Arch x64 -Package
@@ -183,6 +186,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Set package version from release tag
+        run: node scripts/set-package-version.mjs "${{ needs.prepare-release.outputs.tag_name }}"
 
       - name: Build for Linux
         shell: bash
@@ -251,6 +257,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Set package version from release tag
+        run: node scripts/set-package-version.mjs "${{ needs.prepare-release.outputs.tag_name }}"
 
       - name: Build for macOS
         shell: bash
