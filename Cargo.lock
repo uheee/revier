@@ -4366,11 +4366,14 @@ dependencies = [
 name = "revier-tauri"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "revier-analysis",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

@@ -1018,15 +1018,15 @@ Create `src-tauri/src/commands/mod.rs`:
 
 ```rust
 pub mod projects;
-pub mod review;
 ```
 
 Create `src-tauri/src/services/mod.rs`:
 
 ```rust
 pub mod projects;
-pub mod review;
 ```
+
+Task 3 不声明 `review` 模块；`commands::review` 和 `services::review` 的模块声明延后到 Task 5，在 `review.rs` 文件创建时同步加入，避免 Task 3 编译引用不存在的模块。
 
 - [ ] **Step 6: 注册 state 和 command**
 
