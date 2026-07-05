@@ -3,7 +3,17 @@ use crate::error::AppError;
 use crate::index::queries::QueryFilesFilter;
 use crate::json::{QueryFilesOutput, QueryFilesRangeOutput};
 
+pub fn query(args: QueryFilesArgs) -> Result<QueryFilesOutput, AppError> {
+    query_files_output(args)
+}
+
 pub fn run(args: QueryFilesArgs) -> Result<String, AppError> {
+    let pretty = args.common.pretty;
+    let output = query(args)?;
+    crate::serialize_json(&output, pretty)
+}
+
+fn query_files_output(args: QueryFilesArgs) -> Result<QueryFilesOutput, AppError> {
     let repo = crate::git::repository::open_repository(&args.common.repo)?;
     let identity = crate::git::repository::repository_identity(&repo)?;
     let db_path =
@@ -36,7 +46,7 @@ pub fn run(args: QueryFilesArgs) -> Result<String, AppError> {
         },
     )?;
 
-    let output = QueryFilesOutput {
+    Ok(QueryFilesOutput {
         version: 1,
         range: QueryFilesRangeOutput {
             base_commit: args.base,
@@ -44,6 +54,5 @@ pub fn run(args: QueryFilesArgs) -> Result<String, AppError> {
         },
         files,
         warnings: Vec::new(),
-    };
-    crate::serialize_json(&output, args.common.pretty)
+    })
 }
