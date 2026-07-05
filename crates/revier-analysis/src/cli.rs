@@ -15,6 +15,13 @@ pub enum Command {
     Index(IndexCommand),
     FileOverlay(FileOverlayArgs),
     TraceBlock(TraceBlockArgs),
+    ExportBindings(ExportBindingsArgs),
+}
+
+#[derive(Debug, Parser)]
+pub struct ExportBindingsArgs {
+    #[arg(long)]
+    pub out: PathBuf,
 }
 
 #[derive(Debug, Parser)]

@@ -31,6 +31,9 @@ pub enum AppError {
 
     #[error("JSON 输出失败：{0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("文件读写失败：{0}")]
+    Io(#[from] std::io::Error),
 }
 
 impl AppError {
@@ -41,7 +44,7 @@ impl AppError {
             Self::FileNotAnalyzable(_) | Self::IndexUnavailable(_) => 4,
             Self::RequiredIndexUnavailable(_) | Self::SchemaIncompatible(_) => 5,
             Self::DuckDb(_) => 6,
-            Self::Spike(_) | Self::Analysis(_) | Self::Json(_) => 10,
+            Self::Spike(_) | Self::Analysis(_) | Self::Json(_) | Self::Io(_) => 10,
         }
     }
 }

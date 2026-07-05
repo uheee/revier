@@ -1,6 +1,8 @@
 pub mod attribution;
+pub mod bindings;
 pub mod cli;
 pub mod commands;
+pub mod contracts;
 pub mod error;
 pub mod git;
 pub mod index;
@@ -32,6 +34,10 @@ where
         },
         Command::FileOverlay(args) => commands::file_overlay::run(args),
         Command::TraceBlock(args) => commands::trace_block::run(args),
+        Command::ExportBindings(args) => {
+            bindings::export_typescript_bindings(&args.out)?;
+            Ok(String::new())
+        }
     }
 }
 

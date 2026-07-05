@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "pnpm tauri dev",
-    "build": "pnpm typecheck && pnpm tauri build",
+    "build": "pnpm typecheck && pnpm generate:bindings:check && pnpm tauri build",
     "preview": "vite preview",
     "vite:dev": "vite",
     "vite:build": "vite build",
