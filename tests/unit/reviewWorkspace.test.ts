@@ -7,8 +7,32 @@ vi.mock('vue-router', () => ({
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import ReviewWorkspace from '../../src/renderer/pages/ReviewWorkspace.vue';
-import type { RevierApi } from '../../src/shared/ipcTypes';
-import type { ReviewProject } from '../../src/shared/projectTypes';
+import { revierClient } from '../../src/renderer/api/revierClient';
+import type { ReviewProject } from '../../src/renderer/generated/bindings';
+
+vi.mock('../../src/renderer/api/revierClient', () => ({
+  revierClient: {
+    projects: {
+      list: vi.fn(),
+      add: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn(),
+      validateRepository: vi.fn(),
+      listBranches: vi.fn(),
+      selectDirectory: vi.fn()
+    },
+    review: {
+      startAnalysis: vi.fn(),
+      cancelAnalysis: vi.fn(),
+      getTask: vi.fn(),
+      onTaskUpdate: vi.fn(),
+      listChangedFiles: vi.fn(),
+      getFileOverlay: vi.fn(),
+      getCommitOverlay: vi.fn(),
+      listAuthors: vi.fn()
+    }
+  }
+}));
 
 const project: ReviewProject = {
   id: 'project-1',
@@ -28,28 +52,27 @@ describe('ReviewWorkspace', () => {
     setActivePinia(createPinia());
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-12T12:00:00.000Z'));
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+    vi.mocked(revierClient.projects.list).mockReset();
+    vi.mocked(revierClient.projects.update).mockReset();
+    vi.mocked(revierClient.projects.listBranches).mockReset();
+    vi.mocked(revierClient.review.listAuthors).mockReset();
+    vi.mocked(revierClient.review.onTaskUpdate).mockReset();
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.unstubAllGlobals();
   });
 
   it('筛选条件变化后防抖异步保存到项目配置', async () => {
-    const api = mockApi({
-      list: vi.fn(async () => [project]),
-      update: vi.fn(async (updatedProject) => updatedProject),
-      listBranches: vi.fn(async () => [
-        { name: 'develop', current: true },
-        { name: 'main', current: false }
-      ])
-    });
-    const testWindow = Object.create(window) as Window & { revier: RevierApi };
-    Object.assign(testWindow, {
-      innerWidth: 1200,
-      revier: api
-    });
-    vi.stubGlobal('window', testWindow);
+    vi.mocked(revierClient.projects.list).mockResolvedValue([project]);
+    vi.mocked(revierClient.projects.update).mockImplementation(async (updatedProject) => updatedProject);
+    vi.mocked(revierClient.projects.listBranches).mockResolvedValue([
+      { name: 'develop', current: true },
+      { name: 'main', current: false }
+    ]);
+    vi.mocked(revierClient.review.listAuthors).mockResolvedValue([]);
+    vi.mocked(revierClient.review.onTaskUpdate).mockResolvedValue(vi.fn());
 
     const wrapper = mount(ReviewWorkspace, {
       global: {
@@ -76,12 +99,12 @@ describe('ReviewWorkspace', () => {
     await flushPromises();
     await wrapper.get('[data-test="change-filter"]').trigger('click');
 
-    expect(api.projects.update).not.toHaveBeenCalled();
+    expect(revierClient.projects.update).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
 
-    expect(api.projects.update).toHaveBeenCalledWith(
+    expect(revierClient.projects.update).toHaveBeenCalledWith(
       expect.objectContaining({
         id: project.id,
         preferences: expect.objectContaining({
@@ -100,28 +123,3 @@ describe('ReviewWorkspace', () => {
     );
   });
 });
-
-function mockApi(projects: Partial<RevierApi['projects']>): RevierApi {
-  return {
-    projects: {
-      list: vi.fn(async () => []),
-      add: vi.fn(),
-      update: vi.fn(),
-      remove: vi.fn(),
-      validateRepository: vi.fn(),
-      listBranches: vi.fn(),
-      selectDirectory: vi.fn(),
-      ...projects
-    },
-    review: {
-      startAnalysis: vi.fn(),
-      cancelAnalysis: vi.fn(),
-      getTask: vi.fn(),
-      onTaskUpdate: vi.fn(() => vi.fn()),
-      listChangedFiles: vi.fn(),
-      getFileOverlay: vi.fn(),
-      listAuthors: vi.fn(async () => []),
-      getCommitOverlay: vi.fn()
-    }
-  } as unknown as RevierApi;
-}

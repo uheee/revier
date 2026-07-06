@@ -9,11 +9,16 @@ import DiffViewer from '../components/review/DiffViewer.vue';
 import FilterPanel from '../components/review/FilterPanel.vue';
 import ReviewLayoutResizer from '../components/review/ReviewLayoutResizer.vue';
 import TaskProgress from '../components/review/TaskProgress.vue';
+import { revierClient } from '../api/revierClient';
 import { useReviewLayoutSizes } from '../composables/useReviewLayoutSizes';
 import { useProjectStore } from '../stores/projectStore';
 import { useReviewStore } from '../stores/reviewStore';
-import type { RelatedCommit, ReviewFilters } from '../../shared/reviewTypes';
-import type { GitBranch, ProjectReviewFilters } from '../../shared/projectTypes';
+import type {
+  GitBranch,
+  ProjectReviewFilters,
+  RelatedCommit,
+  ReviewFilters
+} from '../generated/bindings';
 
 const route = useRoute();
 const router = useRouter();
@@ -49,10 +54,10 @@ let unsubscribe: (() => void) | undefined;
 let pendingReviewFilterSave: number | undefined;
 let latestReviewFilters: ReviewFilters | undefined;
 
-onMounted(() => {
+onMounted(async () => {
   layout.setContainer(workspaceEl.value);
   void initializeProject();
-  unsubscribe = window.revier.review.onTaskUpdate((snapshot) => {
+  unsubscribe = await revierClient.review.onTaskUpdate((snapshot) => {
     if (snapshot.taskId === reviewStore.task?.taskId) {
       reviewStore.task = snapshot;
     }
@@ -82,7 +87,7 @@ async function loadReviewMetadata(): Promise<void> {
     return;
   }
 
-  branches.value = await window.revier.projects.listBranches(projectId.value);
+  branches.value = await revierClient.projects.listBranches(projectId.value);
   await reviewStore.loadAuthors({
     projectId: projectId.value,
     branch: initialAuthorBranch.value

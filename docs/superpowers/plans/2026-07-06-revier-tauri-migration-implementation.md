@@ -1572,12 +1572,32 @@ git commit -m "feat: 添加 Tauri Review 服务"
 
 **Files:**
 - Create: `src/renderer/api/revierClient.ts`
+- Create: `src/renderer/api/errors.ts`
 - Modify: `src/renderer/stores/projectStore.ts`
 - Modify: `src/renderer/stores/reviewStore.ts`
 - Modify: `src/renderer/pages/ReviewWorkspace.vue`
 - Modify: `src/renderer/components/projects/ProjectEditor.vue`
+- Modify: `src-tauri/src/commands/projects.rs`
+- Modify: `src-tauri/src/commands/review.rs`
+- Modify: `src-tauri/src/services/projects.rs`
+- Modify: `src-tauri/src/services/review.rs`
+- Modify: `src-tauri/src/lib.rs`
+- Test: `tests/unit/projectEditor.test.ts`
+- Test: `tests/unit/revierClient.test.ts`
 - Test: `tests/unit/rendererProjectStore.test.ts`
 - Test: `tests/unit/rendererReviewStore.test.ts`
+- Test: `tests/unit/reviewWorkspace.test.ts`
+
+**Task 6 范围修正：**
+
+当前 Vue store 和页面实际调用的项目/评审能力多于 Task 5 已实现命令。Task 6 在切换 `revierClient` 时同步补齐这些 Tauri 命令，避免前端客户端出现已迁移但运行时命令缺失的状态：
+
+- 项目命令：`projects_add`、`projects_update`、`projects_remove`、`projects_validate_repository`、`projects_list_branches`、`projects_select_directory`。
+- 评审命令：`review_cancel_analysis`、`review_list_authors`、`review_get_file_overlay`、`review_get_commit_overlay`。
+- `projects_select_directory` 当前返回 `DIALOG_UNAVAILABLE` 明确错误，前端捕获该错误并允许用户继续手动输入仓库路径。
+- TODO(Task 6 follow-up)：接入 Tauri dialog 插件后删除 `projects_select_directory` 占位并改为真实目录选择。
+- TODO(Task 6 follow-up)：`review_get_commit_overlay` 当前使用 Rust 现有 diff/overlay API 组合实现单提交下钻，后续若 `revier-analysis` 暴露专用应用层 API，应删除服务层兼容适配。
+- TODO(Task 6 follow-up)：`review_start_analysis` 当前仍是同步执行；真正的在途取消需要后台任务 runner、任务启动即时事件和取消令牌，本任务只保留客户端请求序列取消与后端取消命令占位，不伪装为完整异步取消。
 
 - [ ] **Step 1: 写 project store 失败测试**
 
@@ -1724,16 +1744,18 @@ const selection = await revierClient.projects.selectDirectory();
 Run:
 
 ```powershell
-pnpm test -- tests/unit/rendererProjectStore.test.ts tests/unit/rendererReviewStore.test.ts
+pnpm test -- tests/unit/rendererProjectStore.test.ts tests/unit/rendererReviewStore.test.ts tests/unit/projectEditor.test.ts tests/unit/reviewWorkspace.test.ts tests/unit/revierClient.test.ts
 pnpm typecheck
+cargo test -p revier-tauri
+cargo test -p revier-analysis
 ```
 
-Expected: tests pass and typecheck succeeds.
+Expected: frontend tests, typecheck, and Rust tests pass.
 
 - [ ] **Step 7: 提交**
 
 ```powershell
-git add src/renderer tests/unit/rendererProjectStore.test.ts tests/unit/rendererReviewStore.test.ts
+git add src/renderer src-tauri tests/unit/rendererProjectStore.test.ts tests/unit/rendererReviewStore.test.ts tests/unit/projectEditor.test.ts tests/unit/reviewWorkspace.test.ts tests/unit/revierClient.test.ts docs/superpowers/plans/2026-07-06-revier-tauri-migration-implementation.md
 git commit -m "feat: 使用 Tauri 前端客户端"
 ```
 

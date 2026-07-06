@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { useReviewStore } from '../../src/renderer/stores/reviewStore';
-import type { RevierApi } from '../../src/shared/ipcTypes';
+import { revierClient } from '../../src/renderer/api/revierClient';
 import type {
   AnalysisTaskSnapshot,
   ChangedFile,
@@ -8,7 +8,31 @@ import type {
   FileOverlay,
   ReviewAuthorOptionsRequest,
   ReviewFilters
-} from '../../src/shared/reviewTypes';
+} from '../../src/renderer/generated/bindings';
+
+vi.mock('../../src/renderer/api/revierClient', () => ({
+  revierClient: {
+    projects: {
+      list: vi.fn(),
+      add: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn(),
+      validateRepository: vi.fn(),
+      listBranches: vi.fn(),
+      selectDirectory: vi.fn()
+    },
+    review: {
+      startAnalysis: vi.fn(),
+      cancelAnalysis: vi.fn(),
+      getTask: vi.fn(),
+      onTaskUpdate: vi.fn(),
+      listChangedFiles: vi.fn(),
+      getFileOverlay: vi.fn(),
+      getCommitOverlay: vi.fn(),
+      listAuthors: vi.fn()
+    }
+  }
+}));
 
 const filters: ReviewFilters = {
   projectId: 'project-1',
@@ -61,24 +85,23 @@ const overlay: FileOverlay = {
 describe('renderer reviewStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
+    vi.mocked(revierClient.review.startAnalysis).mockReset();
+    vi.mocked(revierClient.review.listChangedFiles).mockReset();
+    vi.mocked(revierClient.review.cancelAnalysis).mockReset();
+    vi.mocked(revierClient.review.getFileOverlay).mockReset();
+    vi.mocked(revierClient.review.getCommitOverlay).mockReset();
+    vi.mocked(revierClient.review.listAuthors).mockReset();
   });
 
   it('starts analysis and loads changed files', async () => {
-    const api = mockApi({
-      startAnalysis: vi.fn(async () => task),
-      listChangedFiles: vi.fn(async () => [file])
-    });
-    vi.stubGlobal('window', { revier: api });
+    vi.mocked(revierClient.review.startAnalysis).mockResolvedValue(task);
+    vi.mocked(revierClient.review.listChangedFiles).mockResolvedValue([file]);
 
     const store = useReviewStore();
     await store.start(filters);
 
-    expect(api.review.startAnalysis).toHaveBeenCalledWith(filters);
-    expect(api.review.listChangedFiles).toHaveBeenCalledWith(task.taskId);
+    expect(revierClient.review.startAnalysis).toHaveBeenCalledWith(filters);
+    expect(revierClient.review.listChangedFiles).toHaveBeenCalledWith(task.taskId);
     expect(store.task).toEqual(task);
     expect(store.files).toEqual([file]);
     expect(store.loading).toBe(false);
@@ -86,22 +109,34 @@ describe('renderer reviewStore', () => {
   });
 
   it('loads overlay and selects a diff block', async () => {
-    const api = mockApi({
-      getFileOverlay: vi.fn(async () => overlay)
-    });
-    vi.stubGlobal('window', { revier: api });
+    vi.mocked(revierClient.review.getFileOverlay).mockResolvedValue(overlay);
 
     const store = useReviewStore();
     store.task = task;
     await store.loadOverlay(file.path);
     store.selectBlock(block);
 
-    expect(api.review.getFileOverlay).toHaveBeenCalledWith({
+    expect(revierClient.review.getFileOverlay).toHaveBeenCalledWith({
       taskId: task.taskId,
       filePath: file.path
     });
     expect(store.overlay).toEqual(overlay);
     expect(store.selectedBlock).toEqual(block);
+  });
+
+  it('stores structured Tauri errors as readable messages', async () => {
+    vi.mocked(revierClient.review.getFileOverlay).mockRejectedValue({
+      code: 'TASK_FILE_NOT_FOUND',
+      message: '任务文件缓存中不存在请求的文件',
+      detail: file.path
+    });
+
+    const store = useReviewStore();
+    store.task = task;
+    await store.loadOverlay(file.path);
+
+    expect(store.error).toBe('任务文件缓存中不存在请求的文件');
+    expect(store.loading).toBe(false);
   });
 
   it('loads author filter options', async () => {
@@ -112,15 +147,12 @@ describe('renderer reviewStore', () => {
     const authors = [
       { key: 'alice@example.com', name: 'Alice', email: 'alice@example.com', commitCount: 2 }
     ];
-    const api = mockApi({
-      listAuthors: vi.fn(async () => authors)
-    });
-    vi.stubGlobal('window', { revier: api });
+    vi.mocked(revierClient.review.listAuthors).mockResolvedValue(authors);
 
     const store = useReviewStore();
     await store.loadAuthors(request);
 
-    expect(api.review.listAuthors).toHaveBeenCalledWith(request);
+    expect(revierClient.review.listAuthors).toHaveBeenCalledWith(request);
     expect(store.authors).toEqual(authors);
     expect(store.authorsLoading).toBe(false);
   });
@@ -141,16 +173,13 @@ describe('renderer reviewStore', () => {
       },
       parentHash: 'parent'
     };
-    const api = mockApi({
-      getCommitOverlay: vi.fn(async () => commitOverlay)
-    });
-    vi.stubGlobal('window', { revier: api });
+    vi.mocked(revierClient.review.getCommitOverlay).mockResolvedValue(commitOverlay);
 
     const store = useReviewStore();
     store.task = task;
     await store.loadCommitOverlay(file.path, 'abc123');
 
-    expect(api.review.getCommitOverlay).toHaveBeenCalledWith({
+    expect(revierClient.review.getCommitOverlay).toHaveBeenCalledWith({
       taskId: task.taskId,
       filePath: file.path,
       commitHash: 'abc123'
@@ -163,27 +192,3 @@ describe('renderer reviewStore', () => {
     expect(store.selectedCommitHash).toBeUndefined();
   });
 });
-
-function mockApi(review: Partial<RevierApi['review']>): RevierApi {
-  return {
-    projects: {
-      list: vi.fn(),
-      add: vi.fn(),
-      update: vi.fn(),
-      remove: vi.fn(),
-      validateRepository: vi.fn(),
-      listBranches: vi.fn()
-    },
-    review: {
-      startAnalysis: vi.fn(),
-      cancelAnalysis: vi.fn(),
-      getTask: vi.fn(),
-      onTaskUpdate: vi.fn(),
-      listChangedFiles: vi.fn(),
-      getFileOverlay: vi.fn(),
-      listAuthors: vi.fn(),
-      getCommitOverlay: vi.fn(),
-      ...review
-    }
-  } as unknown as RevierApi;
-}

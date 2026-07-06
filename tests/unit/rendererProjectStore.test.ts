@@ -1,7 +1,31 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { useProjectStore } from '../../src/renderer/stores/projectStore';
-import type { RevierApi } from '../../src/shared/ipcTypes';
-import type { ReviewProject } from '../../src/shared/projectTypes';
+import { revierClient } from '../../src/renderer/api/revierClient';
+import type { ReviewProject } from '../../src/renderer/generated/bindings';
+
+vi.mock('../../src/renderer/api/revierClient', () => ({
+  revierClient: {
+    projects: {
+      list: vi.fn(),
+      add: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn(),
+      validateRepository: vi.fn(),
+      listBranches: vi.fn(),
+      selectDirectory: vi.fn()
+    },
+    review: {
+      startAnalysis: vi.fn(),
+      cancelAnalysis: vi.fn(),
+      getTask: vi.fn(),
+      onTaskUpdate: vi.fn(),
+      listChangedFiles: vi.fn(),
+      getFileOverlay: vi.fn(),
+      getCommitOverlay: vi.fn(),
+      listAuthors: vi.fn()
+    }
+  }
+}));
 
 const project: ReviewProject = {
   id: 'project-1',
@@ -19,49 +43,42 @@ const project: ReviewProject = {
 describe('renderer projectStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    vi.mocked(revierClient.projects.list).mockReset();
+    vi.mocked(revierClient.projects.add).mockReset();
+    vi.mocked(revierClient.projects.update).mockReset();
+    vi.mocked(revierClient.projects.remove).mockReset();
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('loads projects through preload API', async () => {
-    const api = mockApi({
-      list: vi.fn(async () => [project])
-    });
-    vi.stubGlobal('window', { revier: api });
+  it('loads projects through Tauri client', async () => {
+    vi.mocked(revierClient.projects.list).mockResolvedValue([project]);
 
     const store = useProjectStore();
     await store.loadProjects();
 
-    expect(api.projects.list).toHaveBeenCalledTimes(1);
+    expect(revierClient.projects.list).toHaveBeenCalledTimes(1);
     expect(store.projects).toEqual([project]);
     expect(store.loading).toBe(false);
     expect(store.error).toBeUndefined();
   });
 
   it('adds and removes projects then refreshes the list', async () => {
-    const api = mockApi({
-      list: vi.fn(async () => []),
-      add: vi.fn(async () => project),
-      remove: vi.fn(async () => undefined)
-    });
-    vi.stubGlobal('window', { revier: api });
+    vi.mocked(revierClient.projects.list).mockResolvedValue([]);
+    vi.mocked(revierClient.projects.add).mockResolvedValue(project);
+    vi.mocked(revierClient.projects.remove).mockResolvedValue(undefined);
 
     const store = useProjectStore();
     await store.addProject(project.repoPath, project.name);
     await store.removeProject(project.id);
 
-    expect(api.projects.add).toHaveBeenCalledWith(project.repoPath, { name: project.name });
-    expect(api.projects.remove).toHaveBeenCalledWith(project.id);
-    expect(api.projects.list).toHaveBeenCalledTimes(2);
+    expect(revierClient.projects.add).toHaveBeenCalledWith(project.repoPath, {
+      name: project.name
+    });
+    expect(revierClient.projects.remove).toHaveBeenCalledWith(project.id);
+    expect(revierClient.projects.list).toHaveBeenCalledTimes(2);
   });
 
   it('异步保存项目的分析筛选偏好且不进入全局加载状态', async () => {
-    const api = mockApi({
-      update: vi.fn(async (updatedProject) => updatedProject)
-    });
-    vi.stubGlobal('window', { revier: api });
+    vi.mocked(revierClient.projects.update).mockImplementation(async (updatedProject) => updatedProject);
 
     const store = useProjectStore();
     store.projects = [project];
@@ -90,7 +107,7 @@ describe('renderer projectStore', () => {
 
     await savePromise;
 
-    expect(api.projects.update).toHaveBeenCalledWith(
+    expect(revierClient.projects.update).toHaveBeenCalledWith(
       expect.objectContaining({
         id: project.id,
         preferences: expect.objectContaining({
@@ -103,39 +120,15 @@ describe('renderer projectStore', () => {
   });
 
   it('stores add-project errors from duplicate or invalid repositories', async () => {
-    const api = mockApi({
-      add: vi.fn(async () => {
-        throw new Error('该仓库已在项目列表中');
-      })
-    });
-    vi.stubGlobal('window', { revier: api });
+    vi.mocked(revierClient.projects.add).mockRejectedValue(
+      { code: 'REPOSITORY_INVALID', message: '请选择一个 Git 仓库目录', detail: project.repoPath }
+    );
+    vi.mocked(revierClient.projects.list).mockResolvedValue([]);
 
     const store = useProjectStore();
     await store.addProject(project.repoPath, project.name);
 
-    expect(store.error).toBe('该仓库已在项目列表中');
+    expect(store.error).toBe('请选择一个 Git 仓库目录');
     expect(store.loading).toBe(false);
   });
 });
-
-function mockApi(projects: Partial<RevierApi['projects']>): RevierApi {
-  return {
-    projects: {
-      list: vi.fn(async () => []),
-      add: vi.fn(),
-      update: vi.fn(),
-      remove: vi.fn(),
-      validateRepository: vi.fn(),
-      listBranches: vi.fn(),
-      ...projects
-    },
-    review: {
-      startAnalysis: vi.fn(),
-      cancelAnalysis: vi.fn(),
-      getTask: vi.fn(),
-      onTaskUpdate: vi.fn(),
-      listChangedFiles: vi.fn(),
-      getFileOverlay: vi.fn()
-    }
-  } as unknown as RevierApi;
-}

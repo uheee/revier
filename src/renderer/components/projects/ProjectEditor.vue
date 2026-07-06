@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { FolderOpen } from 'lucide-vue-next';
-import { computed, reactive } from 'vue';
+import { computed, reactive, ref } from 'vue';
+import { toErrorMessage } from '../../api/errors';
+import { revierClient } from '../../api/revierClient';
 
 const props = withDefaults(
   defineProps<{
@@ -22,6 +24,7 @@ const form = reactive({
   repoPath: '',
   name: ''
 });
+const directoryError = ref<string>();
 
 const canSubmit = computed(() => form.repoPath.trim().length > 0 && !props.loading);
 
@@ -39,13 +42,18 @@ function submit(): void {
 }
 
 async function selectDirectory(): Promise<void> {
-  const selection = await window.revier.projects.selectDirectory();
-  if (!selection) {
-    return;
-  }
+  directoryError.value = undefined;
+  try {
+    const selection = await revierClient.projects.selectDirectory();
+    if (!selection) {
+      return;
+    }
 
-  form.repoPath = selection.path;
-  form.name = selection.name;
+    form.repoPath = selection.path;
+    form.name = selection.name;
+  } catch (error) {
+    directoryError.value = toErrorMessage(error);
+  }
 }
 </script>
 
@@ -58,7 +66,12 @@ async function selectDirectory(): Promise<void> {
     <label class="field">
       <span>仓库路径</span>
       <div class="path-picker">
-        <n-input v-model:value="form.repoPath" placeholder="选择或输入本地仓库路径" clearable @click="selectDirectory" />
+        <n-input
+          v-model:value="form.repoPath"
+          placeholder="选择或输入本地仓库路径"
+          clearable
+          @click="selectDirectory"
+        />
         <n-button
           data-test="select-repo-directory"
           aria-label="选择仓库目录"
@@ -67,6 +80,14 @@ async function selectDirectory(): Promise<void> {
           <FolderOpen :size="16" aria-hidden="true" />
         </n-button>
       </div>
+      <n-alert
+        v-if="directoryError"
+        class="project-editor__directory-error"
+        :title="directoryError"
+        type="warning"
+        show-icon
+        :closable="false"
+      />
     </label>
 
     <label class="field">

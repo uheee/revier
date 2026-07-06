@@ -1,4 +1,6 @@
 import { defineStore } from 'pinia';
+import { toErrorMessage } from '../api/errors';
+import { revierClient } from '../api/revierClient';
 import type {
   AnalysisTaskSnapshot,
   AuthorFilterOption,
@@ -7,7 +9,7 @@ import type {
   FileOverlay,
   ReviewAuthorOptionsRequest,
   ReviewFilters
-} from '../../shared/reviewTypes';
+} from '../generated/bindings';
 
 interface ReviewState {
   task?: AnalysisTaskSnapshot;
@@ -58,10 +60,10 @@ export const useReviewStore = defineStore('review', {
       this.cancelOverlay();
       this.closeCommitDrilldown();
       try {
-        const task = await window.revier.review.startAnalysis(filters);
+        const task = await revierClient.review.startAnalysis(filters);
         if (requestId !== this.analysisRequestId) return;
         this.task = task;
-        const files = await window.revier.review.listChangedFiles(task.taskId);
+        const files = await revierClient.review.listChangedFiles(task.taskId);
         if (requestId !== this.analysisRequestId) return;
         this.files = files;
       } catch (error) {
@@ -78,7 +80,7 @@ export const useReviewStore = defineStore('review', {
       this.cancelOverlay();
       this.closeCommitDrilldown();
       if (taskId) {
-        await window.revier.review.cancelAnalysis(taskId);
+        await revierClient.review.cancelAnalysis(taskId);
       }
     },
 
@@ -95,7 +97,7 @@ export const useReviewStore = defineStore('review', {
       this.selectedBlock = undefined;
       this.closeCommitDrilldown();
       try {
-        const overlay = await window.revier.review.getFileOverlay({
+        const overlay = await revierClient.review.getFileOverlay({
           taskId: this.task.taskId,
           filePath
         });
@@ -134,7 +136,7 @@ export const useReviewStore = defineStore('review', {
       this.activeCommitHash = commitHash;
       this.drilldownOverlay = undefined;
       try {
-        const overlay = await window.revier.review.getCommitOverlay({
+        const overlay = await revierClient.review.getCommitOverlay({
           taskId: this.task.taskId,
           filePath,
           commitHash
@@ -163,7 +165,7 @@ export const useReviewStore = defineStore('review', {
       this.authorsLoading = true;
       this.error = undefined;
       try {
-        this.authors = await window.revier.review.listAuthors(request);
+        this.authors = await revierClient.review.listAuthors(request);
       } catch (error) {
         this.error = toErrorMessage(error);
       } finally {
@@ -172,7 +174,3 @@ export const useReviewStore = defineStore('review', {
     }
   }
 });
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}

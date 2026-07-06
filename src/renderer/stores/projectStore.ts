@@ -1,5 +1,11 @@
 import { defineStore } from 'pinia';
-import type { ProjectId, ProjectReviewFilters, ReviewProject } from '../../shared/projectTypes';
+import { toErrorMessage } from '../api/errors';
+import { revierClient } from '../api/revierClient';
+import type {
+  ProjectId,
+  ProjectReviewFilters,
+  ReviewProject
+} from '../generated/bindings';
 
 interface ProjectState {
   projects: ReviewProject[];
@@ -20,7 +26,7 @@ export const useProjectStore = defineStore('projects', {
       this.loading = true;
       this.error = undefined;
       try {
-        this.projects = await window.revier.projects.list();
+        this.projects = await revierClient.projects.list();
       } catch (error) {
         this.error = toErrorMessage(error);
       } finally {
@@ -32,7 +38,7 @@ export const useProjectStore = defineStore('projects', {
       this.loading = true;
       this.error = undefined;
       try {
-        await window.revier.projects.add(repoPath, name ? { name } : undefined);
+        await revierClient.projects.add(repoPath, name ? { name } : undefined);
         await this.loadProjects();
       } catch (error) {
         this.error = toErrorMessage(error);
@@ -44,7 +50,7 @@ export const useProjectStore = defineStore('projects', {
       this.loading = true;
       this.error = undefined;
       try {
-        await window.revier.projects.remove(projectId);
+        await revierClient.projects.remove(projectId);
         await this.loadProjects();
       } catch (error) {
         this.error = toErrorMessage(error);
@@ -64,7 +70,7 @@ export const useProjectStore = defineStore('projects', {
 
       const saveId = ++reviewFilterSaveSequence;
       try {
-        const savedProject = await window.revier.projects.update(updatedProject);
+        const savedProject = await revierClient.projects.update(updatedProject);
         if (saveId !== reviewFilterSaveSequence) {
           return;
         }
@@ -79,10 +85,6 @@ export const useProjectStore = defineStore('projects', {
     }
   }
 });
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function withReviewFilters(
   project: ReviewProject,
