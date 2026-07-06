@@ -12,11 +12,11 @@
 - `src-tauri` 作为 Tauri 桌面壳承接项目和 Review commands，`crates/revier-analysis` 继续作为 Rust 分析库。
 - 构建发布入口切换到 Tauri CLI；Release CI 上传 Tauri bundle 产物。
 - DuckDB 依赖改为启用 `bundled` feature，由 Rust native build 在编译期产出可链接库，不再把平台动态库作为 Tauri resources 单独拷贝。
+- `projects_select_directory` 已接入 `tauri-plugin-dialog`，取消选择返回空结果，选择成功后返回规范化为 `/` 分隔符的本地目录路径和目录名。
 
 仍需跟进的能力差异：
 
 - TODO：旧 Electron `userData/projects.json` 到 Tauri app data 的首次迁移尚未实现；需要先确认各平台旧 `userData` 解析规则和产品名。
-- `projects_select_directory` 当前仍是明确错误占位，接入 Tauri dialog 插件后应替换为真实目录选择。
 - `review_start_analysis` 仍是同步执行路径；真正的在途取消需要后台任务 runner 和取消令牌。
 
 ## 背景

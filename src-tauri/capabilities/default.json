@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "允许主窗口订阅 Review 任务事件。",
+  "description": "允许主窗口订阅 Review 任务事件并打开目录选择对话框。",
   "windows": ["main"],
-  "permissions": ["core:event:default"]
+  "permissions": ["core:event:default", "dialog:allow-open"]
 }

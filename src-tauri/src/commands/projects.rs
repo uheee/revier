@@ -2,7 +2,9 @@ use revier_analysis::contracts::{
     DirectorySelection, GitBranch, RepositoryValidation, ReviewProject,
 };
 use serde::Deserialize;
-use tauri::State;
+use std::path::Path;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::error::{command_error, command_error_with_detail, CommandResult};
 use crate::state::AppState;
@@ -72,9 +74,82 @@ pub fn projects_list_branches(
 }
 
 #[tauri::command]
-pub fn projects_select_directory() -> CommandResult<Option<DirectorySelection>> {
-    Err(command_error(
-        "DIALOG_UNAVAILABLE",
-        "Tauri dialog 插件尚未接入，当前无法选择目录",
-    ))
+pub async fn projects_select_directory(
+    app: AppHandle,
+) -> CommandResult<Option<DirectorySelection>> {
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    app.dialog().file().pick_folder(move |path| {
+        let _ = sender.try_send(path);
+    });
+
+    let Some(path) = receiver.recv().await else {
+        return Err(command_error(
+            "DIALOG_RESULT_UNAVAILABLE",
+            "目录选择结果未返回",
+        ));
+    };
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let path = path.into_path().map_err(|error| {
+        command_error_with_detail(
+            "DIALOG_PATH_INVALID",
+            "目录路径无法转换为本地路径",
+            error.to_string(),
+        )
+    })?;
+    Ok(Some(directory_selection_from_path(&path)))
+}
+
+fn directory_selection_from_path(path: &Path) -> DirectorySelection {
+    DirectorySelection {
+        path: normalize_selected_directory_path(&path.to_string_lossy()),
+        name: path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("未命名仓库")
+            .to_string(),
+    }
+}
+
+fn normalize_selected_directory_path(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    if normalized == "/"
+        || (normalized.len() == 3 && normalized.as_bytes()[1] == b':' && normalized.ends_with('/'))
+    {
+        normalized
+    } else {
+        normalized.trim_end_matches('/').to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{directory_selection_from_path, normalize_selected_directory_path};
+    use std::path::Path;
+
+    #[test]
+    fn normalizes_selected_directory_path_separators_and_trailing_slash() {
+        assert_eq!(
+            normalize_selected_directory_path("E:\\Projects\\revier\\"),
+            "E:/Projects/revier"
+        );
+    }
+
+    #[test]
+    fn keeps_root_directory_paths_readable() {
+        assert_eq!(normalize_selected_directory_path("/"), "/");
+        assert_eq!(normalize_selected_directory_path("E:/"), "E:/");
+    }
+
+    #[test]
+    fn derives_directory_selection_name_or_fallback() {
+        let selection = directory_selection_from_path(Path::new("revier"));
+        assert_eq!(selection.path, "revier");
+        assert_eq!(selection.name, "revier");
+
+        let root = directory_selection_from_path(Path::new("/"));
+        assert_eq!(root.path, "/");
+        assert_eq!(root.name, "未命名仓库");
+    }
 }

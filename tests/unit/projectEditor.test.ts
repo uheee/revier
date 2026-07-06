@@ -52,10 +52,10 @@ describe('ProjectEditor', () => {
     expect((inputs[1].element as HTMLInputElement).value).toBe('revier');
   });
 
-  it('shows a readable error when directory selection is unavailable', async () => {
+  it('shows a readable error when directory selection fails', async () => {
     vi.mocked(revierClient.projects.selectDirectory).mockRejectedValue({
-      code: 'DIALOG_UNAVAILABLE',
-      message: 'Tauri dialog 插件尚未接入，当前无法选择目录'
+      code: 'DIALOG_PATH_INVALID',
+      message: '目录路径无法转换为本地路径'
     });
 
     const wrapper = mount(ProjectEditor, {
@@ -83,7 +83,7 @@ describe('ProjectEditor', () => {
     await flushPromises();
 
     expect(wrapper.get('[data-test="directory-error"]').text()).toBe(
-      'Tauri dialog 插件尚未接入，当前无法选择目录'
+      '目录路径无法转换为本地路径'
     );
   });
 });

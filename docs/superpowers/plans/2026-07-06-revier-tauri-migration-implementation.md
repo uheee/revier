@@ -1623,8 +1623,7 @@ git commit -m "feat: 添加 Tauri Review 服务"
 
 - 项目命令：`projects_add`、`projects_update`、`projects_remove`、`projects_validate_repository`、`projects_list_branches`、`projects_select_directory`。
 - 评审命令：`review_cancel_analysis`、`review_list_authors`、`review_get_file_overlay`、`review_get_commit_overlay`。
-- `projects_select_directory` 当前返回 `DIALOG_UNAVAILABLE` 明确错误，前端捕获该错误并允许用户继续手动输入仓库路径。
-- TODO(Task 6 follow-up)：接入 Tauri dialog 插件后删除 `projects_select_directory` 占位并改为真实目录选择。
+- 已解决(Task 6 follow-up)：`projects_select_directory` 已接入 `tauri-plugin-dialog`。用户取消选择时返回空结果；选择成功后返回本地目录路径和目录名，路径字符串规范化为 `/` 分隔符。
 - TODO(Task 6 follow-up)：`review_get_commit_overlay` 当前使用 Rust 现有 diff/overlay API 组合实现单提交下钻，后续若 `revier-analysis` 暴露专用应用层 API，应删除服务层兼容适配。
 - TODO(Task 6 follow-up)：`review_start_analysis` 当前仍是同步执行；真正的在途取消需要后台任务 runner、任务启动即时事件和取消令牌，本任务只保留客户端请求序列取消与后端取消命令占位，不伪装为完整异步取消。
 
@@ -1696,7 +1695,8 @@ export const revierClient = {
       invoke<ReviewProject>('projects_add', { repoPath, options }),
     update: (project: ReviewProject) => invoke<ReviewProject>('projects_update', { project }),
     remove: (projectId: string) => invoke<void>('projects_remove', { projectId }),
-    selectDirectory: () => invoke<DirectorySelection | undefined>('projects_select_directory'),
+    selectDirectory: async () =>
+      (await invoke<DirectorySelection | null>('projects_select_directory')) ?? undefined,
     validateRepository: (repoPath: string) =>
       invoke('projects_validate_repository', { repoPath }),
     listBranches: (projectId: string) =>
