@@ -2,7 +2,7 @@
 import { mount } from '@vue/test-utils';
 import { defineComponent, nextTick } from 'vue';
 import DiffDrilldownOverlay from '../../src/renderer/components/review/DiffDrilldownOverlay.vue';
-import type { FileOverlay } from '../../src/shared/reviewTypes';
+import type { FileOverlay } from '../../src/renderer/generated/bindings';
 
 const commitOverlay: FileOverlay = {
   mode: 'commit',

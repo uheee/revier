@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { DiffBlock, FileOverlay, SideBySideDiffRow, WordChange } from '../../../shared/reviewTypes';
+import type {
+  DiffBlock,
+  FileOverlay,
+  SideBySideDiffRow,
+  WordChange
+} from '../../generated/bindings';
 import DiffBlockAuthors from './DiffBlockAuthors.vue';
 
 const props = defineProps<{

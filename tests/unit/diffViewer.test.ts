@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils';
 import DiffViewer from '../../src/renderer/components/review/DiffViewer.vue';
-import type { FileOverlay } from '../../src/shared/reviewTypes';
+import type { FileOverlay } from '../../src/renderer/generated/bindings';
 
 const overlay: FileOverlay = {
   mode: 'range',

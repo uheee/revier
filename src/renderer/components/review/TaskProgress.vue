@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AnalysisTaskSnapshot } from '../../../shared/reviewTypes';
+import type { AnalysisTaskSnapshot } from '../../generated/bindings';
 
 const props = defineProps<{
   task?: AnalysisTaskSnapshot;

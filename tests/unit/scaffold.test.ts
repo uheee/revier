@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('project scaffold', () => {
-  it('uses the expected package name and Electron entry', () => {
+  it('uses the expected package name without an Electron entry', () => {
     expect(packageJson.name).toBe('revier');
-    expect(packageJson.main).toBe('dist/main/index.js');
+    expect(packageJson).not.toHaveProperty('main');
   });
 
   it('uses Naive UI as the renderer component framework', () => {
@@ -24,13 +24,14 @@ describe('project scaffold', () => {
     expect(existsSync(resolve(import.meta.dirname, '../../scripts/cargo-duckdb-download.mjs'))).toBe(false);
   });
 
-  it('exposes platform Rust test scripts only', () => {
-    expect(packageJson.scripts['rust:test:win']).toBe(
-      'pwsh -NoLogo -ExecutionPolicy Bypass -File scripts/build.ps1 -RustTest'
-    );
-    expect(packageJson.scripts['rust:test:unix']).toBe(
-      'bash scripts/build.sh --platform linux --arch x64 --rust-test'
-    );
+  it('exposes Tauri scripts without legacy Rust debug shortcuts', () => {
+    const scripts: Record<string, string> = packageJson.scripts;
+
+    expect(scripts.dev).toBe('pnpm tauri dev');
+    expect(scripts.build).toBe('pnpm typecheck && pnpm generate:bindings:check && pnpm tauri build');
+    expect(scripts.tauri).toBe('tauri');
+    expect(scripts).not.toHaveProperty('rust:test:win');
+    expect(scripts).not.toHaveProperty('rust:test:unix');
     expect(packageJson.scripts).not.toHaveProperty('rust:test');
     expect(packageJson.scripts).not.toHaveProperty('rust:spike');
     expect(packageJson.scripts).not.toHaveProperty('rust:index:status');

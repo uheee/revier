@@ -6,7 +6,7 @@
 
 **架构：** Vue 只负责 UI 显示和交互状态，通过 `revierClient` 调用 Tauri commands/events。Tauri/Rust 负责项目管理、Git 访问、Review 任务、分析结果和错误返回。`crates/revier-analysis` 调整为库 API 优先，CLI 仅用于测试和调试。
 
-**技术栈：** Tauri 2、Vue 3、Pinia、Naive UI、Vite、TypeScript、Rust stable、gix、DuckDB、specta、tauri-specta、Vitest、Cargo test、pnpm、fnm、pwsh。
+**技术栈：** Tauri 2、Vue 3、Pinia、Naive UI、Vite、TypeScript、Rust stable、gix、DuckDB、specta、specta-typescript、Vitest、Cargo test、pnpm、fnm、pwsh。
 
 **已确认布局：** 根 `Cargo.toml` 的 workspace 成员为 `crates/revier-analysis` 和 `src-tauri`。`crates/revier-analysis` 是复用 Rust 分析库，`src-tauri` 是 Tauri 桌面壳；两者是同一 Cargo workspace 的独立成员。本迁移不做 `src/analysis` 或 `src/view` 重命名，也不重命名 `crates/revier-analysis` 或 `src-tauri`。
 
@@ -1200,11 +1200,28 @@ Expected: compile errors identify exact gix method adjustments. Replace only the
 Add to `crates/revier-analysis/src/api.rs`:
 
 ```rust
-use crate::cli::{FileOverlayArgs, IndexCommonArgs, OverlayCommonArgs, OutputFormat, QueryFilesArgs};
+use std::path::PathBuf;
+
+use crate::cli::{FileOverlayArgs, IndexCommonArgs, OverlayCommonArgs, OutputFormat};
 use crate::json::{FileOverlayCommandOutput, QueryFilesOutput};
 
-pub fn query_files(args: QueryFilesArgs) -> Result<QueryFilesOutput, AppError> {
-    crate::commands::query_files::query(args)
+#[derive(Debug, Clone)]
+pub struct QueryFilesRequest {
+    pub repo: PathBuf,
+    pub db: Option<PathBuf>,
+    pub base: String,
+    pub head: String,
+    pub branch: String,
+    pub authors: Vec<String>,
+    pub author_query: Option<String>,
+    pub message: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub globs: Vec<String>,
+}
+
+pub fn query_files(request: QueryFilesRequest) -> Result<QueryFilesOutput, AppError> {
+    crate::commands::query_files::query_request(request)
 }
 
 pub fn file_overlay(args: FileOverlayArgs) -> Result<FileOverlayCommandOutput, AppError> {
@@ -1212,11 +1229,23 @@ pub fn file_overlay(args: FileOverlayArgs) -> Result<FileOverlayCommandOutput, A
 }
 ```
 
-Then refactor `commands::query_files::run` and `commands::file_overlay::run` so each has:
+Then refactor `commands::query_files::run` and `commands::file_overlay::run` so CLI args are only adapted at the command boundary:
 
 ```rust
 pub fn query(args: QueryFilesArgs) -> Result<QueryFilesOutput, AppError> {
-    query_files_output(args)
+    query_request(QueryFilesRequest {
+        repo: args.common.repo,
+        db: args.common.db,
+        base: args.base,
+        head: args.head,
+        branch: args.branch,
+        authors: args.authors,
+        author_query: args.author_query,
+        message: args.message,
+        since: args.since,
+        until: args.until,
+        globs: args.globs,
+    })
 }
 
 pub fn run(args: QueryFilesArgs) -> Result<String, AppError> {
@@ -1226,7 +1255,7 @@ pub fn run(args: QueryFilesArgs) -> Result<String, AppError> {
 }
 ```
 
-Create `query_files_output(args)` by moving the current `commands::query_files::run` statements that build `QueryFilesOutput` into a private helper. The helper must return `Result<QueryFilesOutput, AppError>` and must not call `serialize_json`.
+Create `query_request(args)` by moving the current `commands::query_files::run` statements that build `QueryFilesOutput` into a helper. The helper must return `Result<QueryFilesOutput, AppError>` and must not call `serialize_json`.
 
 and:
 
@@ -1283,7 +1312,7 @@ Task 5 依赖 Rust 侧正式范围解析 API。`ReviewFilters` 只提供 `projec
 Run:
 
 ```powershell
-$env:DUCKDB_DOWNLOAD_LIB = '1'; cargo test -p revier-analysis --test api_contract
+cargo test -p revier-analysis --test api_contract
 ```
 
 Expected: FAIL because `revier_analysis::api::resolve_analysis_range` does not exist yet.
@@ -1315,8 +1344,8 @@ Implementation requirements:
 Run:
 
 ```powershell
-$env:DUCKDB_DOWNLOAD_LIB = '1'; cargo test -p revier-analysis --test api_contract
-$env:DUCKDB_DOWNLOAD_LIB = '1'; cargo test -p revier-analysis
+cargo test -p revier-analysis --test api_contract
+cargo test -p revier-analysis
 ```
 
 Expected: all `revier-analysis` tests pass.
@@ -1526,7 +1555,7 @@ pub fn review_list_changed_files(
 
 TODO(Task 6/AnalysisService): 当前 Task 5 按已确认范围保持 `review_start_analysis` 同步执行真实分析并返回最终 snapshot；后续如果要让前端获得 running/failed 过程事件，需要单独确认并迁移为后台任务模型。
 
-TODO(Task 6): 当前 `ReviewService` 需要把 `ReviewFilters` 临时适配为 Rust CLI 使用的 `QueryFilesArgs`。后续当 `revier-analysis` 暴露面向应用层的非 CLI 查询参数后，删除这层兼容适配。
+已解决(Task 6 follow-up)：`revier-analysis` 已暴露面向应用层的 `QueryFilesRequest`，`ReviewService` 不再依赖 CLI `QueryFilesArgs`；CLI 入口现在反向适配到 `QueryFilesRequest`。
 
 - [ ] **Step 5: 注册 Review commands**
 
@@ -2078,6 +2107,10 @@ git commit -m "test: 更新 Tauri 迁移测试矩阵"
 - Modify: `.github/workflows/release.yml`
 - Modify: `README.md`
 - Modify: `docs/superpowers/specs/2026-07-06-revier-tauri-migration-design.md`
+
+**Task 10 范围修正：**
+
+DuckDB 改为在 `crates/revier-analysis` 中启用 `duckdb/bundled`，由 Rust native build 在编译期生成可链接库。平台脚本和 Release CI 不再设置 `DUCKDB_DOWNLOAD_LIB=1`，不再暂存 `duckdb.dll`、`libduckdb.so` 或 `libduckdb.dylib`，也不再把 DuckDB 动态库作为 Tauri resources 拷贝。Windows runner 需使用带 MSVC C++ 工具链的环境；Linux runner 需安装 `build-essential`。
 
 - [ ] **Step 1: 修改 Windows 构建脚本入口**
 

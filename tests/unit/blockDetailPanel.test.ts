@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils';
 import BlockDetailPanel from '../../src/renderer/components/review/BlockDetailPanel.vue';
-import type { DiffBlock } from '../../src/shared/reviewTypes';
+import type { DiffBlock } from '../../src/renderer/generated/bindings';
 
 const block: DiffBlock = {
   id: 'block-1',

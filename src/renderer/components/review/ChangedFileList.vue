@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { LoaderCircle, OctagonX } from 'lucide-vue-next';
-import type { ChangedFile } from '../../../shared/reviewTypes';
+import type { ChangedFile } from '../../generated/bindings';
 
 defineProps<{
   files: ChangedFile[];

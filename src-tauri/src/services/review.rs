@@ -3,9 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
-use revier_analysis::cli::{
-    FileOverlayArgs, IndexCommonArgs, OutputFormat, OverlayCommonArgs, QueryFilesArgs,
-};
+use revier_analysis::api::QueryFilesRequest;
+use revier_analysis::cli::{FileOverlayArgs, OutputFormat, OverlayCommonArgs};
 use revier_analysis::contracts::{
     AnalysisRange, AnalysisStage, AnalysisTaskSnapshot, AnalysisTaskStatus, AttributionConfidence,
     AttributionMethod, AttributionWarning, AttributionWarningCode, AuthorFilterOption,
@@ -341,14 +340,9 @@ impl ReviewService {
         .map_err(map_analysis_error)?;
 
         self.mark_running(task_id, AnalysisStage::LoadChangedFiles, "读取变更文件");
-        // TODO(Task 6): 当 revier-analysis 暴露应用层 query_files 参数后，删除这里对 CLI QueryFilesArgs 的兼容适配。
-        let output = revier_analysis::api::query_files(QueryFilesArgs {
-            common: IndexCommonArgs {
-                repo: repo_path,
-                db: None,
-                format: OutputFormat::Json,
-                pretty: false,
-            },
+        let output = revier_analysis::api::query_files(QueryFilesRequest {
+            repo: repo_path,
+            db: None,
             base: range.base_commit.clone(),
             head: range.head_commit.clone(),
             branch: range.branch.clone(),

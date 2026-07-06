@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowLeft, LoaderCircle, OctagonX } from 'lucide-vue-next';
-import type { FileOverlay } from '../../../shared/reviewTypes';
+import type { FileOverlay } from '../../generated/bindings';
 import DiffViewer from './DiffViewer.vue';
 
 defineProps<{

@@ -1,10 +1,23 @@
+use crate::api::QueryFilesRequest;
 use crate::cli::QueryFilesArgs;
 use crate::error::AppError;
 use crate::index::queries::QueryFilesFilter;
 use crate::json::{QueryFilesOutput, QueryFilesRangeOutput};
 
 pub fn query(args: QueryFilesArgs) -> Result<QueryFilesOutput, AppError> {
-    query_files_output(args)
+    query_request(QueryFilesRequest {
+        repo: args.common.repo,
+        db: args.common.db,
+        base: args.base,
+        head: args.head,
+        branch: args.branch,
+        authors: args.authors,
+        author_query: args.author_query,
+        message: args.message,
+        since: args.since,
+        until: args.until,
+        globs: args.globs,
+    })
 }
 
 pub fn run(args: QueryFilesArgs) -> Result<String, AppError> {
@@ -13,16 +26,15 @@ pub fn run(args: QueryFilesArgs) -> Result<String, AppError> {
     crate::serialize_json(&output, pretty)
 }
 
-fn query_files_output(args: QueryFilesArgs) -> Result<QueryFilesOutput, AppError> {
-    let repo = crate::git::repository::open_repository(&args.common.repo)?;
+pub fn query_request(args: QueryFilesRequest) -> Result<QueryFilesOutput, AppError> {
+    let repo = crate::git::repository::open_repository(&args.repo)?;
     let identity = crate::git::repository::repository_identity(&repo)?;
-    let db_path =
-        args.common
-            .db
-            .clone()
-            .unwrap_or(crate::index::connection::default_database_path(
-                &identity.repo_id,
-            )?);
+    let db_path = args
+        .db
+        .clone()
+        .unwrap_or(crate::index::connection::default_database_path(
+            &identity.repo_id,
+        )?);
     if !db_path.exists() {
         return Err(AppError::IndexUnavailable(format!(
             "索引文件不存在：{}",

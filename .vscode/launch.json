@@ -2,6 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Revier: 启动 Tauri 开发环境",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pwsh -NoLogo -ExecutionPolicy Bypass -Command \"fnm use 24; pnpm dev\"",
+      "cwd": "${workspaceFolder}"
+    },
+    {
       "name": "Revier: 构建",
       "type": "node-terminal",
       "request": "launch",
@@ -14,62 +21,6 @@
       "request": "launch",
       "command": "pwsh -NoLogo -ExecutionPolicy Bypass -Command \"fnm use 24; pnpm preview\"",
       "cwd": "${workspaceFolder}"
-    },
-    {
-      "name": "Revier: 启动开发调试",
-      "type": "node-terminal",
-      "request": "launch",
-      "command": "pwsh -NoLogo -ExecutionPolicy Bypass -Command \"fnm use 24; pnpm exec electron-vite dev --outDir=dist --inspect=5858 --remoteDebuggingPort=9222 --sourcemap\"",
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "ELECTRON_ENABLE_LOGGING": "1",
-        "Path": "${workspaceFolder}\\target\\debug\\deps;${env:Path}"
-      }
-    },
-    {
-      "name": "Revier: 附加主进程",
-      "type": "node",
-      "request": "attach",
-      "port": 5858,
-      "restart": true,
-      "timeout": 30000,
-      "sourceMaps": true,
-      "outFiles": [
-        "${workspaceFolder}/dist/main/**/*.js",
-        "${workspaceFolder}/dist/preload/**/*.js"
-      ],
-      "resolveSourceMapLocations": [
-        "${workspaceFolder}/**",
-        "!**/node_modules/**"
-      ],
-      "skipFiles": [
-        "<node_internals>/**"
-      ]
-    },
-    {
-      "name": "Revier: 附加渲染进程",
-      "type": "chrome",
-      "request": "attach",
-      "port": 9222,
-      "timeout": 30000,
-      "urlFilter": "http://localhost:*",
-      "webRoot": "${workspaceFolder}/src/renderer",
-      "sourceMaps": true,
-      "resolveSourceMapLocations": [
-        "${workspaceFolder}/**",
-        "!**/node_modules/**"
-      ]
-    }
-  ],
-  "compounds": [
-    {
-      "name": "Revier: 开发调试",
-      "configurations": [
-        "Revier: 启动开发调试",
-        "Revier: 附加主进程",
-        "Revier: 附加渲染进程"
-      ],
-      "stopAll": true
     }
   ]
 }

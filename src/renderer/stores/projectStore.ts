@@ -2,10 +2,11 @@ import { defineStore } from 'pinia';
 import { toErrorMessage } from '../api/errors';
 import { revierClient } from '../api/revierClient';
 import type {
-  ProjectId,
   ProjectReviewFilters,
   ReviewProject
 } from '../generated/bindings';
+
+type ProjectId = string;
 
 interface ProjectState {
   projects: ReviewProject[];

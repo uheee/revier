@@ -219,20 +219,6 @@ function Get-WindowsRustTarget {
   }
 }
 
-function Get-CargoTargetDirectory {
-  $repositoryRoot = Get-RepositoryRoot
-
-  if (-not [string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
-    if ([System.IO.Path]::IsPathRooted($env:CARGO_TARGET_DIR)) {
-      return $env:CARGO_TARGET_DIR
-    }
-
-    return (Join-Path $repositoryRoot $env:CARGO_TARGET_DIR)
-  }
-
-  return (Join-Path $repositoryRoot "target")
-}
-
 function Invoke-RustupTargetAdd {
   param(
     [string]$TargetTriple
@@ -245,48 +231,19 @@ function Invoke-RustupTargetAdd {
   }
 }
 
-function Invoke-CargoWithDuckDbDownload {
+function Invoke-Cargo {
   param(
     [string[]]$CargoArguments
   )
 
   $repositoryRoot = Get-RepositoryRoot
-  $previousDuckDbDownloadLib = $env:DUCKDB_DOWNLOAD_LIB
 
   Push-Location $repositoryRoot
   try {
-    $env:DUCKDB_DOWNLOAD_LIB = "1"
     Write-Host "正在执行 Cargo：cargo $($CargoArguments -join ' ')"
     & cargo @CargoArguments
     if ($LASTEXITCODE -ne 0) {
       throw "Cargo 命令执行失败，退出码：$LASTEXITCODE"
-    }
-  }
-  finally {
-    if ($null -eq $previousDuckDbDownloadLib) {
-      Remove-Item Env:DUCKDB_DOWNLOAD_LIB -ErrorAction SilentlyContinue
-    }
-    else {
-      $env:DUCKDB_DOWNLOAD_LIB = $previousDuckDbDownloadLib
-    }
-    Pop-Location
-  }
-}
-
-function Invoke-DuckDbPrewarm {
-  param(
-    [string[]]$TargetTriples
-  )
-
-  $repositoryRoot = Get-RepositoryRoot
-  $scriptPath = Join-Path $repositoryRoot "scripts/prewarm-duckdb.mjs"
-
-  Push-Location $repositoryRoot
-  try {
-    Write-Host "正在预热 DuckDB 动态库缓存，目标：$($TargetTriples -join ', ')"
-    & node $scriptPath @TargetTriples
-    if ($LASTEXITCODE -ne 0) {
-      throw "DuckDB 动态库缓存预热失败，退出码：$LASTEXITCODE"
     }
   }
   finally {
@@ -314,67 +271,22 @@ function Invoke-PnpmCommand {
   }
 }
 
-function Clear-StagingDirectory {
-  param(
-    [string]$DirectoryPath
-  )
-
+function Invoke-TauriBuild {
   $repositoryRoot = Get-RepositoryRoot
-  $buildRootPath = Join-Path $repositoryRoot "build"
-  New-Item -ItemType Directory -Force -Path $buildRootPath | Out-Null
-  $buildRoot = (Resolve-Path $buildRootPath).Path
-
-  if (Test-Path -LiteralPath $DirectoryPath) {
-    $resolvedDirectory = (Resolve-Path $DirectoryPath).Path
-    $expectedPrefix = $buildRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $resolvedDirectory.StartsWith($expectedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-      throw "拒绝清空非 build 目录：$resolvedDirectory"
-    }
-
-    Remove-Item -LiteralPath $resolvedDirectory -Recurse -Force
-  }
-
-  New-Item -ItemType Directory -Force -Path $DirectoryPath | Out-Null
-}
-
-function Get-ReleaseDuckDbLibraryPath {
-  param(
-    [string]$TargetDirectory,
-    [string]$TargetTriple
-  )
-
-  $libraryPath = Join-Path $TargetDirectory "$TargetTriple/release/deps/duckdb.dll"
-
-  if (-not (Test-Path -LiteralPath $libraryPath)) {
-    throw "未找到本次 release deps DuckDB 动态库：$libraryPath"
-  }
-
-  return $libraryPath
-}
-
-function Build-WindowsRustResources {
-  $repositoryRoot = Get-RepositoryRoot
-  $targetDirectory = Get-CargoTargetDirectory
   $targetTriple = Get-WindowsRustTarget -Architecture $Arch
-  $binaryPath = Join-Path $targetDirectory "$targetTriple/release/revier-analysis.exe"
-  $stagingDirectory = Join-Path $repositoryRoot "build/revier-analysis/current"
 
-  Write-Host "正在构建 Windows Rust 分析资源，目标：$targetTriple"
   Invoke-RustupTargetAdd -TargetTriple $targetTriple
-  Invoke-DuckDbPrewarm -TargetTriples @($targetTriple)
-  Invoke-CargoWithDuckDbDownload -CargoArguments @("build", "-p", "revier-analysis", "--release", "--target", $targetTriple)
-
-  if (-not (Test-Path -LiteralPath $binaryPath)) {
-    throw "未找到 Rust CLI 产物：$binaryPath"
+  Push-Location $repositoryRoot
+  try {
+    Write-Host "正在执行 Tauri 构建：pnpm tauri build --target $targetTriple"
+    & pnpm tauri build --target $targetTriple
+    if ($LASTEXITCODE -ne 0) {
+      throw "Tauri 构建失败，退出码：$LASTEXITCODE"
+    }
   }
-
-  $duckDbLibraryPath = Get-ReleaseDuckDbLibraryPath -TargetDirectory $targetDirectory -TargetTriple $targetTriple
-
-  Clear-StagingDirectory -DirectoryPath $stagingDirectory
-  Copy-Item -LiteralPath $binaryPath -Destination (Join-Path $stagingDirectory "revier-analysis.exe")
-  Copy-Item -LiteralPath $duckDbLibraryPath -Destination (Join-Path $stagingDirectory "duckdb.dll")
-
-  Write-Host "已暂存 Rust 分析资源到：$stagingDirectory"
+  finally {
+    Pop-Location
+  }
 }
 
 if ($Platform -ne "win") {
@@ -383,7 +295,7 @@ if ($Platform -ne "win") {
 
 if ($RustTest) {
   Write-Host "正在运行 Rust workspace 测试。"
-  Invoke-CargoWithDuckDbDownload -CargoArguments @("test", "--workspace")
+  Invoke-Cargo -CargoArguments @("test", "--workspace")
   Write-Host "Rust workspace 测试已完成。"
   exit 0
 }
@@ -395,18 +307,9 @@ if ($PrepareIconsOnly) {
   exit 0
 }
 
-Build-WindowsRustResources
-
-Invoke-PnpmCommand -PnpmArguments @("build")
-
 if ($Package) {
-  Invoke-PnpmCommand -PnpmArguments @(
-    "dlx",
-    "--allow-build=electron-winstaller",
-    "electron-builder@26.15.1",
-    "--win",
-    "msi",
-    "--x64",
-    "--publish=never"
-  )
+  Invoke-TauriBuild
+}
+else {
+  Invoke-PnpmCommand -PnpmArguments @("build")
 }

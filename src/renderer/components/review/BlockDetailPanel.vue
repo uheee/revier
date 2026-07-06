@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { LoaderCircle, OctagonX } from 'lucide-vue-next';
-import type { DiffBlock, RelatedCommit } from '../../../shared/reviewTypes';
+import type { DiffBlock, RelatedCommit } from '../../generated/bindings';
 import DiffBlockAuthors from './DiffBlockAuthors.vue';
 
 defineProps<{

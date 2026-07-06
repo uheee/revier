@@ -80,14 +80,80 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install Linux Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Verify no legacy runtime remains
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden_paths=(
+            electron-builder.yml
+            electron.vite.config.ts
+            playwright.config.ts
+            src/main
+            src/preload
+            src/analysis-core
+            src/cli
+            src/shared
+            tsconfig.cli.json
+            tsconfig.node.json
+          )
+
+          for forbidden_path in "${forbidden_paths[@]}"; do
+            if [[ -e "$forbidden_path" ]]; then
+              echo "发现旧运行时路径残留：$forbidden_path" >&2
+              exit 1
+            fi
+          done
+
+          runtime_prefix="elect"
+          runtime_suffix="ron"
+          forbidden_terms=(
+            "${runtime_prefix}${runtime_suffix}-(builder|vite)"
+            "simple-git"
+            "BrowserWindow"
+            "ipcMain"
+            "ipcRenderer"
+            "contextBridge"
+            "REVIER_USE_RUST_OVERLAY"
+            "analysis-core"
+          )
+          scan_targets=(
+            package.json
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+            scripts
+            README.md
+            .vscode
+            src
+          )
+
+          for forbidden_term in "${forbidden_terms[@]}"; do
+            if grep -R -E "$forbidden_term" -n "${scan_targets[@]}"; then
+              echo "发现旧运行时关键字残留：$forbidden_term" >&2
+              exit 1
+            fi
+          done
 
       - name: Lint
         run: pnpm lint
 
       - name: Test
         run: pnpm test
+
+      - name: Rust tests
+        run: cargo test --workspace
 
       - name: Build
         run: pnpm build
@@ -132,23 +198,12 @@ jobs:
         shell: pwsh
         run: ./scripts/build.ps1 -Platform win -Arch x64 -Package
 
-      - name: Verify Windows packaged Rust resources
-        shell: pwsh
-        run: |
-          $resourceDir = "release/win-unpacked/resources/revier-analysis"
-          if (-not (Test-Path -LiteralPath "$resourceDir/revier-analysis.exe")) {
-            throw "未找到 Windows 包内 Rust 分析程序：$resourceDir/revier-analysis.exe"
-          }
-          if (-not (Test-Path -LiteralPath "$resourceDir/duckdb.dll")) {
-            throw "未找到 Windows 包内 DuckDB 动态库：$resourceDir/duckdb.dll"
-          }
-
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v6
         with:
           name: revier-windows-x64
           path: |
-            release/*.msi
+            target/x86_64-pc-windows-msvc/release/bundle/**/*
           if-no-files-found: error
 
   build-linux:
@@ -182,7 +237,7 @@ jobs:
       - name: Install Linux packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm patchelf unzip
+          sudo apt-get install -y build-essential libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf rpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -194,35 +249,12 @@ jobs:
         shell: bash
         run: ./scripts/build.sh --platform linux --arch x64 --package
 
-      - name: Verify Linux packaged Rust resources
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          deb_file="$(find release -maxdepth 1 -name '*.deb' -print -quit)"
-          rpm_file="$(find release -maxdepth 1 -name '*.rpm' -print -quit)"
-
-          if [[ -z "$deb_file" ]]; then
-            echo "未找到 Linux deb 包。" >&2
-            exit 1
-          fi
-          if [[ -z "$rpm_file" ]]; then
-            echo "未找到 Linux rpm 包。" >&2
-            exit 1
-          fi
-
-          dpkg-deb --contents "$deb_file" | grep -E '/resources/revier-analysis/revier-analysis$'
-          dpkg-deb --contents "$deb_file" | grep -E '/resources/revier-analysis/libduckdb\.so$'
-          rpm -qlp "$rpm_file" | grep -E '/resources/revier-analysis/revier-analysis$'
-          rpm -qlp "$rpm_file" | grep -E '/resources/revier-analysis/libduckdb\.so$'
-
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v6
         with:
           name: revier-linux-x64
           path: |
-            release/*.deb
-            release/*.rpm
+            target/x86_64-unknown-linux-gnu/release/bundle/**/*
           if-no-files-found: error
 
   build-macos:
@@ -265,50 +297,12 @@ jobs:
         shell: bash
         run: ./scripts/build.sh --platform mac --universal --package
 
-      - name: Verify macOS Rust universal binary
-        shell: bash
-        run: |
-          lipo -info build/revier-analysis/current/revier-analysis
-          lipo -info build/revier-analysis/current/libduckdb.dylib
-          lipo build/revier-analysis/current/revier-analysis -verify_arch x86_64 arm64
-          lipo build/revier-analysis/current/libduckdb.dylib -verify_arch x86_64 arm64
-
-      - name: Verify macOS packaged Rust resources
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          resource_dirs="$(find release -path '*/Revier.app/Contents/Resources/revier-analysis' -type d | sort)"
-          if [[ -z "$resource_dirs" ]]; then
-            echo "未找到 macOS app 包内 Rust 分析资源目录。" >&2
-            exit 1
-          fi
-
-          while IFS= read -r resource_dir; do
-            test -x "$resource_dir/revier-analysis"
-            test -f "$resource_dir/libduckdb.dylib"
-            lipo "$resource_dir/revier-analysis" -verify_arch x86_64 arm64
-            lipo "$resource_dir/libduckdb.dylib" -verify_arch x86_64 arm64
-          done <<< "$resource_dirs"
-
-          zip_files="$(find release -maxdepth 1 -name '*.zip' | sort)"
-          if [[ -z "$zip_files" ]]; then
-            echo "未找到 macOS zip 包。" >&2
-            exit 1
-          fi
-
-          while IFS= read -r zip_file; do
-            unzip -l "$zip_file" | grep -E 'Revier\.app/Contents/Resources/revier-analysis/revier-analysis$'
-            unzip -l "$zip_file" | grep -E 'Revier\.app/Contents/Resources/revier-analysis/libduckdb\.dylib$'
-          done <<< "$zip_files"
-
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v6
         with:
           name: revier-macos-x64-arm64
           path: |
-            release/*.dmg
-            release/*.zip
+            target/universal-apple-darwin/release/bundle/**/*
           if-no-files-found: error
 
   publish-release:
@@ -330,5 +324,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare-release.outputs.tag_name }}
-          files: artifacts/*
+          files: artifacts/**/*
           generate_release_notes: true

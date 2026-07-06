@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { h } from 'vue';
 import { NButton, NPopconfirm, type DataTableColumns } from 'naive-ui';
-import type { ReviewProject } from '../../../shared/projectTypes';
+import type { ReviewProject } from '../../generated/bindings';
 
 defineProps<{
   projects: ReviewProject[];

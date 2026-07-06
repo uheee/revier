@@ -2,8 +2,12 @@
 import { LoaderCircle, OctagonX, Play } from 'lucide-vue-next';
 import { computed, reactive, watch } from 'vue';
 import type { SelectOption } from 'naive-ui';
-import type { GitBranch, ProjectReviewFilters } from '../../../shared/projectTypes';
-import type { AuthorFilterOption, ReviewFilters } from '../../../shared/reviewTypes';
+import type {
+  AuthorFilterOption,
+  GitBranch,
+  ProjectReviewFilters,
+  ReviewFilters
+} from '../../generated/bindings';
 
 const props = defineProps<{
   projectId: string;

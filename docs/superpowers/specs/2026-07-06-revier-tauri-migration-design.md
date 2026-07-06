@@ -1,6 +1,23 @@
 # Revier Tauri 迁移设计
 
-> 状态：设计草案已按用户确认内容整理。本文只定义迁移设计，不执行代码改造。
+> 状态：设计草案已按用户确认内容整理；2026-07-06 起按实施计划迁移到 Tauri/Rust 生产链路。本文保留历史背景说明，并记录当前迁移目标与验收口径。
+
+## 实施状态记录
+
+截至 2026-07-06，迁移实施已完成以下结构性调整：
+
+- 前端生产 IPC 已切换到 `src/renderer/api/revierClient.ts`，不再依赖 `window.revier`。
+- Electron 主进程、preload、Electron 构建配置和生产 TypeScript/Node 分析 fallback 已从生产路径移除。
+- 前端核心业务类型改为使用 `src/renderer/generated/bindings.ts`，该文件由 Rust contracts 生成。
+- `src-tauri` 作为 Tauri 桌面壳承接项目和 Review commands，`crates/revier-analysis` 继续作为 Rust 分析库。
+- 构建发布入口切换到 Tauri CLI；Release CI 上传 Tauri bundle 产物。
+- DuckDB 依赖改为启用 `bundled` feature，由 Rust native build 在编译期产出可链接库，不再把平台动态库作为 Tauri resources 单独拷贝。
+
+仍需跟进的能力差异：
+
+- TODO：旧 Electron `userData/projects.json` 到 Tauri app data 的首次迁移尚未实现；需要先确认各平台旧 `userData` 解析规则和产品名。
+- `projects_select_directory` 当前仍是明确错误占位，接入 Tauri dialog 插件后应替换为真实目录选择。
+- `review_start_analysis` 仍是同步执行路径；真正的在途取消需要后台任务 runner 和取消令牌。
 
 ## 背景
 
@@ -34,7 +51,7 @@ Revier 当前是 Electron + Vue 3 + TypeScript 桌面应用。现有生产链路
 | 桌面运行时 | Tauri 2 | 替代 Electron，提供窗口、命令、事件、权限和打包能力。具体 patch 版本在实施计划阶段确认并锁定。 |
 | UI | Vue 3、Pinia、Naive UI、Vite | 保留现有 UI 技术栈，只收窄职责到显示层。 |
 | 前端 API | `@tauri-apps/api` | Vue 通过 `invoke` 和事件监听访问 Tauri/Rust。 |
-| Rust 类型导出 | `specta`、`tauri-specta` | 由 Rust struct 生成 TypeScript bindings。具体版本在实施计划阶段确认并锁定。 |
+| Rust 类型导出 | `specta`、`specta-typescript` | 由 Rust struct 生成 TypeScript bindings。具体版本在实施计划阶段确认并锁定。 |
 | Git 与分析 | Rust、gix、DuckDB | 生产 Git 与分析能力统一放到 Rust。 |
 | 构建发布 | Tauri CLI、pnpm、Cargo | 前端由 Vite 构建，桌面包由 Tauri bundler 产出。 |
 
@@ -130,10 +147,10 @@ Rust 侧负责：
 
 持久化策略：
 
-- 从 Electron `userData/projects.json` 迁移到 Tauri app data 目录。
+- 当前实现读取和写入 Tauri app data 目录下的 `projects.json`。
 - JSON 文件结构保持兼容当前 `ReviewProject` 语义。
-- 若旧 Electron 数据存在，首次启动时迁移到 Tauri app data 目录。
-- 迁移完成后生产逻辑只读取 Tauri app data 目录。
+- TODO：若旧 Electron 数据存在，首次启动时迁移到 Tauri app data 目录；实现前需确认旧 Electron `userData` 在 Windows、macOS、Linux 的精确路径。
+- 迁移完成后生产逻辑仍只读取 Tauri app data 目录。
 
 ### Review 任务模块
 
@@ -280,7 +297,7 @@ pub struct AppError {
 
 ## 类型生成策略
 
-Rust 数据结构作为唯一 schema 来源。核心 struct 使用 `serde` 与 `specta::Type`，通过 `tauri-specta` 生成 TypeScript bindings。
+Rust 数据结构作为唯一 schema 来源。核心 struct 使用 `serde` 与 `specta::Type`，通过 `specta-typescript` 生成 TypeScript bindings。
 
 生成文件：
 
@@ -562,9 +579,9 @@ Release 阶段：
 | WebView 差异 | Diff 布局、字体、滚动和选择样式跨平台不一致 | 增加跨平台 smoke、截图或人工验证清单。 |
 | Rust 能力缺口 | 删除 TypeScript fallback 后功能断层 | 实施计划先补齐 Rust 等价能力，再删除旧路径。 |
 | 类型生成复杂度 | 构建步骤增加，CI 失败点增加 | bindings 生成脚本固定，CI 做 diff 校验。 |
-| 数据迁移 | 用户旧项目列表丢失 | 保持 JSON 结构兼容，首次启动迁移 Electron userData 数据。 |
+| 数据迁移 | 用户旧项目列表丢失 | 当前保持 JSON 结构兼容；旧 Electron userData 首次迁移标记为后续 TODO，实施前需确认各平台旧路径。 |
 | 发布链路重建 | 现有 Electron release CI 不能复用 | 分平台重写 Tauri release，并校验产物内容。 |
-| DuckDB 动态库 | Tauri 打包后的动态库加载路径变化 | 实施阶段单独验证 Windows、Linux、macOS 动态库加载。 |
+| DuckDB native build | `duckdb/bundled` 会增加本地编译耗时，并依赖平台 C/C++ 编译工具链 | CI 安装平台 native build 依赖；Windows 使用带 MSVC 工具链的 runner；本地以 `cargo test --workspace` 和 Tauri build 验证。 |
 | 破坏性删除 | 删除范围过大导致测试和工具断裂 | 按实施计划分阶段删除，每阶段有验证命令。 |
 
 ## 完成标准

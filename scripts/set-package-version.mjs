@@ -22,4 +22,9 @@ const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
 packageJson.version = version;
 writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
 
-logger.log(`package version: ${version}`);
+const tauriConfigPath = 'src-tauri/tauri.conf.json';
+const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, 'utf8'));
+tauriConfig.version = version;
+writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`);
+
+logger.log(`已同步版本号：${version}`);

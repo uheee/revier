@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AuthorSummary, BlockAttributionSummary } from '../../../shared/reviewTypes';
+import type { AuthorSummary, BlockAttributionSummary } from '../../generated/bindings';
 
 defineProps<{
   authors: AuthorSummary[];

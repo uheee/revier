@@ -1,11 +1,26 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::cli::{FileOverlayArgs, QueryFilesArgs};
+use crate::cli::FileOverlayArgs;
 use crate::contracts::{AnalysisRange, GitBranch, RepositoryValidation};
 use crate::error::AppError;
 use crate::git::commits::IndexedCommit;
 use crate::json::{FileOverlayCommandOutput, QueryFilesOutput};
 use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
+
+#[derive(Debug, Clone)]
+pub struct QueryFilesRequest {
+    pub repo: PathBuf,
+    pub db: Option<PathBuf>,
+    pub base: String,
+    pub head: String,
+    pub branch: String,
+    pub authors: Vec<String>,
+    pub author_query: Option<String>,
+    pub message: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub globs: Vec<String>,
+}
 
 pub fn validate_repository(repo_path: &Path) -> Result<RepositoryValidation, AppError> {
     let repo_path_string = normalize_path(repo_path);
@@ -72,8 +87,8 @@ pub fn list_branches(repo_path: &Path) -> Result<Vec<GitBranch>, AppError> {
     Ok(branches)
 }
 
-pub fn query_files(args: QueryFilesArgs) -> Result<QueryFilesOutput, AppError> {
-    crate::commands::query_files::query(args)
+pub fn query_files(request: QueryFilesRequest) -> Result<QueryFilesOutput, AppError> {
+    crate::commands::query_files::query_request(request)
 }
 
 pub fn resolve_analysis_range(

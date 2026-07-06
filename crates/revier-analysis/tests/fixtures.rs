@@ -12,6 +12,47 @@ pub struct FixtureRepo {
     pub head: String,
 }
 
+impl FixtureRepo {
+    pub fn query_files_request(&self) -> revier_analysis::api::QueryFilesRequest {
+        revier_analysis::api::QueryFilesRequest {
+            repo: self.repo.path().to_path_buf(),
+            db: None,
+            base: self.base.clone(),
+            head: self.head.clone(),
+            branch: "main".to_string(),
+            authors: Vec::new(),
+            author_query: None,
+            message: None,
+            since: None,
+            until: None,
+            globs: Vec::new(),
+        }
+    }
+
+    pub fn file_overlay_args(
+        &self,
+        file: impl Into<String>,
+    ) -> revier_analysis::cli::FileOverlayArgs {
+        revier_analysis::cli::FileOverlayArgs {
+            common: revier_analysis::cli::OverlayCommonArgs {
+                repo: self.repo.path().to_path_buf(),
+                db: None,
+                base: self.base.clone(),
+                head: self.head.clone(),
+                branch: "main".to_string(),
+                globs: Vec::new(),
+                authors: Vec::new(),
+                author_query: None,
+                message: None,
+                require_index: false,
+                format: revier_analysis::cli::OutputFormat::Json,
+                pretty: false,
+            },
+            file: file.into(),
+        }
+    }
+}
+
 pub fn linear() -> FixtureRepo {
     let repo = init_repo("linear");
     write_file(repo.path(), "src/app.txt", "one\n");

@@ -1,7 +1,8 @@
 mod fixtures;
 
-use revier_analysis::api::{list_branches, resolve_analysis_range, validate_repository};
-use revier_analysis::cli::{IndexCommonArgs, OutputFormat, QueryFilesArgs};
+use revier_analysis::api::{
+    list_branches, resolve_analysis_range, validate_repository, QueryFilesRequest,
+};
 use std::process::Command;
 
 #[test]
@@ -91,13 +92,9 @@ fn resolved_analysis_range_times_filter_query_files_boundaries() {
     )
     .expect("解析分析范围失败");
 
-    let output = revier_analysis::api::query_files(QueryFilesArgs {
-        common: IndexCommonArgs {
-            repo: fixture.repo.path().to_path_buf(),
-            db: Some(db_path),
-            format: OutputFormat::Json,
-            pretty: false,
-        },
+    let output = revier_analysis::api::query_files(QueryFilesRequest {
+        repo: fixture.repo.path().to_path_buf(),
+        db: Some(db_path),
         base: range.base_commit,
         head: range.head_commit,
         branch: range.branch,
@@ -133,13 +130,9 @@ fn subsecond_range_is_normalized_before_querying() {
     assert_eq!(range.start_at.as_deref(), Some("2026-05-02T00:00:00+00:00"));
     assert_eq!(range.end_at.as_deref(), Some("2026-05-02T00:00:00+00:00"));
 
-    let output = revier_analysis::api::query_files(QueryFilesArgs {
-        common: IndexCommonArgs {
-            repo: fixture.repo.path().to_path_buf(),
-            db: Some(db_path),
-            format: OutputFormat::Json,
-            pretty: false,
-        },
+    let output = revier_analysis::api::query_files(QueryFilesRequest {
+        repo: fixture.repo.path().to_path_buf(),
+        db: Some(db_path),
         base: range.base_commit,
         head: range.head_commit,
         branch: range.branch,

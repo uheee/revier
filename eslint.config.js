@@ -2,7 +2,9 @@ export default [
   {
     ignores: [
       'dist/**',
+      'out/**',
       'release/**',
+      'target/**',
       'node_modules/**',
       'coverage/**',
       'playwright-report/**',
