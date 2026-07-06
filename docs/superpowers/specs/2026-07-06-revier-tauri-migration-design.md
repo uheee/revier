@@ -13,11 +13,13 @@
 - 构建发布入口切换到 Tauri CLI；Release CI 上传 Tauri bundle 产物。
 - DuckDB 依赖改为启用 `bundled` feature，由 Rust native build 在编译期产出可链接库，不再把平台动态库作为 Tauri resources 单独拷贝。
 - `projects_select_directory` 已接入 `tauri-plugin-dialog`，取消选择返回空结果，选择成功后返回规范化为 `/` 分隔符的本地目录路径和目录名。
+- `review_start_analysis` 已改为后台任务模型：命令创建 running 任务后立即返回，真实分析在 Tauri 后台 runner 中执行，完成/失败/取消通过 `review://task-updated` 推送。
+- `review_cancel_analysis` 已接入协作式取消令牌；取消后的后台结果不会写入任务缓存，也不会覆盖 cancelled 终态。
 
 仍需跟进的能力差异：
 
 - TODO：旧 Electron `userData/projects.json` 到 Tauri app data 的首次迁移尚未实现；需要先确认各平台旧 `userData` 解析规则和产品名。
-- `review_start_analysis` 仍是同步执行路径；真正的在途取消需要后台任务 runner 和取消令牌。
+- TODO：取消令牌尚未下沉到 `revier-analysis` 的 Git/DuckDB 执行路径；当前只能在 Tauri 层阶段边界协作式取消，不能强制中断已进入的同步查询。
 
 ## 背景
 
@@ -158,7 +160,7 @@ Rust 侧维护：
 
 - `AnalysisTaskManager` 等价能力。
 - 任务状态。
-- 取消状态。
+- 协作式取消状态和取消令牌。
 - 任务内存缓存。
 - 文件列表缓存。
 - 分析范围缓存。
@@ -183,6 +185,8 @@ review://task-updated
 ```
 
 Vue 只订阅事件并显示任务状态，不参与任务调度或降级。
+
+当前实现中，`review_start_analysis` 只负责创建任务并返回启动 snapshot，文件列表在 completed 事件后由 Vue store 再调用 `review_list_changed_files` 读取。取消属于终态保护：一旦任务进入 cancelled，后台成功或失败结果都不能覆盖该状态。
 
 ### Git 与分析模块
 

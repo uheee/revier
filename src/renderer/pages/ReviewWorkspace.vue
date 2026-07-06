@@ -14,6 +14,7 @@ import { useReviewLayoutSizes } from '../composables/useReviewLayoutSizes';
 import { useProjectStore } from '../stores/projectStore';
 import { useReviewStore } from '../stores/reviewStore';
 import type {
+  AnalysisTaskSnapshot,
   GitBranch,
   ProjectReviewFilters,
   RelatedCommit,
@@ -58,9 +59,7 @@ onMounted(async () => {
   layout.setContainer(workspaceEl.value);
   void initializeProject();
   unsubscribe = await revierClient.review.onTaskUpdate((snapshot) => {
-    if (snapshot.taskId === reviewStore.task?.taskId) {
-      reviewStore.task = snapshot;
-    }
+    void handleTaskUpdate(snapshot);
   });
 });
 
@@ -72,7 +71,20 @@ onBeforeUnmount(() => {
 async function runAnalysis(filters: ReviewFilters): Promise<void> {
   selectedFilePath.value = undefined;
   await reviewStore.start(filters);
-  if (reviewStore.files[0]) {
+  if (reviewStore.task?.status === 'completed' && reviewStore.files[0]) {
+    await selectFile(reviewStore.files[0].path);
+  }
+}
+
+async function handleTaskUpdate(snapshot: AnalysisTaskSnapshot): Promise<void> {
+  const selectedBeforeUpdate = selectedFilePath.value;
+  await reviewStore.handleTaskUpdate(snapshot);
+  if (
+    snapshot.status === 'completed' &&
+    !selectedBeforeUpdate &&
+    !selectedFilePath.value &&
+    reviewStore.files[0]
+  ) {
     await selectFile(reviewStore.files[0].path);
   }
 }

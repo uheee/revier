@@ -1495,9 +1495,9 @@ let review_service = services::review::ReviewService::default();
 app.manage(AppState::new(project_service, review_service));
 ```
 
-- [ ] **Step 4: 新增 Review commands 并直接接入真实分析**
+- [ ] **Step 4: 新增 Review commands 并接入后台真实分析**
 
-创建 `src-tauri/src/commands/review.rs`。本步骤不允许先落空实现；`review_start_analysis` 必须通过 `ReviewService::start_analysis` 直接执行真实 Rust 分析，`review_list_changed_files` 必须读取任务缓存，未找到任务时返回 `TASK_NOT_FOUND` 或等价错误，不能用 `Ok(Vec::new())` 作为占位。
+创建 `src-tauri/src/commands/review.rs`。本步骤不允许先落空实现；`review_start_analysis` 必须通过 `ReviewService::start_analysis_task` 创建 running 任务并立即返回 snapshot，然后用 Tauri 后台 runner 执行真实 Rust 分析。`review_list_changed_files` 必须读取任务缓存，未找到任务时返回 `TASK_NOT_FOUND` 或等价错误，不能用 `Ok(Vec::new())` 作为占位。
 
 ```rust
 use revier_analysis::contracts::{AnalysisTaskSnapshot, ChangedFile, ReviewFilters};
@@ -1522,9 +1522,24 @@ pub fn review_start_analysis(
     state: State<'_, AppState>,
     filters: ReviewFilters,
 ) -> CommandResult<AnalysisTaskSnapshot> {
-    let snapshot = state.review.start_analysis(state.projects.as_ref(), filters)?;
-    app.emit(TASK_UPDATED_EVENT, &snapshot)
-        .map_err(|error| crate::error::command_error("TASK_EVENT_FAILED", error.to_string()))?;
+    let snapshot = state.review.start_analysis_task(filters.clone())?;
+    emit_task_update(&app, &snapshot)?;
+
+    let task_id = snapshot.task_id.clone();
+    let review = state.review.clone();
+    let projects = state.projects.clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = review.execute_analysis_task(projects.as_ref(), &task_id, filters);
+        let snapshot = match result {
+            Ok(snapshot) => Some(snapshot),
+            Err(_) => review.get_task(&task_id).ok(),
+        };
+        if let Some(snapshot) = snapshot {
+            let _ = emit_task_update(&app, &snapshot);
+        }
+    });
+
     Ok(snapshot)
 }
 
@@ -1537,8 +1552,9 @@ pub fn review_list_changed_files(
 }
 ```
 
-同一步扩展 `ReviewService`，新增 `start_analysis` 和 `list_changed_files`。
-`start_analysis` 必须按顺序执行：
+同一步扩展 `ReviewService`，新增 `start_analysis_task`、`execute_analysis_task` 和 `list_changed_files`。
+`start_analysis_task` 必须创建任务、缓存 filters、创建取消令牌、标记为 running，并在真实分析完成前返回启动 snapshot。
+后台 `execute_analysis_task` 必须按顺序执行：
 
 1. 通过 `filters.project_id` 从 `ProjectService` 读取项目。
 2. 调用 `revier_analysis::api::validate_repository(project.repo_path)`。
@@ -1548,12 +1564,15 @@ pub fn review_list_changed_files(
 6. 将返回的文件列表按新建任务 id 写入 `files_by_task`。
 7. 只有 `query_files` 成功后才能把任务标记为 completed。
 8. 返回 completed snapshot；command 层用该 snapshot 发送 `review://task-updated`。
+9. 如果任务已取消，后台结果不得写入文件/上下文缓存，也不得把任务覆盖成 completed 或 failed。
 
 `list_changed_files` 必须按任务 id 读取 `files_by_task` 并返回缓存文件。任务 id 不存在时返回 `TASK_NOT_FOUND`；任务存在但分析未完成时返回任务状态错误，不能用空列表代替。
 
 具体实现只能调用 Rust library API，不能调用 `src/main`、`src/analysis-core`、`simple-git`、Node 或 Electron 代码。DuckDB 索引缺失时保留 Rust `query_files` 错误并通过 command 错误映射向上返回；Task 5 中 `ReviewService` 不自动构建索引。
 
-TODO(Task 6/AnalysisService): 当前 Task 5 按已确认范围保持 `review_start_analysis` 同步执行真实分析并返回最终 snapshot；后续如果要让前端获得 running/failed 过程事件，需要单独确认并迁移为后台任务模型。
+已解决(Task 6 follow-up)：`review_start_analysis` 已迁移为后台任务模型，启动后立即返回 running snapshot，并由 `review://task-updated` 推送终态。
+
+TODO(AnalysisService)：当前取消为 Tauri 层协作式取消，只能在阶段边界阻止继续执行、阻止写缓存和阻止终态覆盖；`query_files` 内部的 Git/DuckDB 同步调用尚不能被令牌强制中断。后续 `revier-analysis` 暴露可取消 API 后，应删除 Tauri 层兼容 TODO 并把 token 下沉到分析执行路径。
 
 已解决(Task 6 follow-up)：`revier-analysis` 已暴露面向应用层的 `QueryFilesRequest`，`ReviewService` 不再依赖 CLI `QueryFilesArgs`；CLI 入口现在反向适配到 `QueryFilesRequest`。
 
@@ -1576,7 +1595,7 @@ Modify `src-tauri/src/lib.rs` invoke handler:
 
 - `review_start_analysis` 没有假 `completed` 或仅状态切换实现。
 - `review_list_changed_files` 没有返回 `Ok(Vec::new())` 作为默认占位。
-- `ReviewService::start_analysis` 调用了 `resolve_analysis_range` 和 `query_files`。
+- `ReviewService::execute_analysis_task` 调用了 `resolve_analysis_range` 和 `query_files`。
 - 索引缺失由 Rust `query_files` 错误向上返回，不在 `ReviewService` 中自动构建索引。
 
 - [ ] **Step 7: 运行测试**
@@ -1625,7 +1644,8 @@ git commit -m "feat: 添加 Tauri Review 服务"
 - 评审命令：`review_cancel_analysis`、`review_list_authors`、`review_get_file_overlay`、`review_get_commit_overlay`。
 - 已解决(Task 6 follow-up)：`projects_select_directory` 已接入 `tauri-plugin-dialog`。用户取消选择时返回空结果；选择成功后返回本地目录路径和目录名，路径字符串规范化为 `/` 分隔符。
 - TODO(Task 6 follow-up)：`review_get_commit_overlay` 当前使用 Rust 现有 diff/overlay API 组合实现单提交下钻，后续若 `revier-analysis` 暴露专用应用层 API，应删除服务层兼容适配。
-- TODO(Task 6 follow-up)：`review_start_analysis` 当前仍是同步执行；真正的在途取消需要后台任务 runner、任务启动即时事件和取消令牌，本任务只保留客户端请求序列取消与后端取消命令占位，不伪装为完整异步取消。
+- 已解决(Task 6 follow-up)：`review_start_analysis` 已改为后台执行，启动后立即返回 running snapshot；`review_cancel_analysis` 会取消任务令牌并发送 cancelled 事件，后台结果不会覆盖 cancelled。
+- TODO(AnalysisService)：取消令牌尚未下沉到 `revier-analysis::api::query_files` 内部，当前仍无法强制中断已经进入 Git/DuckDB 的同步调用。
 
 - [ ] **Step 1: 写 project store 失败测试**
 
@@ -1753,7 +1773,7 @@ let unsubscribe: (() => void) | undefined;
 
 onMounted(async () => {
   unsubscribe = await revierClient.review.onTaskUpdate((snapshot) => {
-    reviewStore.task = snapshot;
+    void reviewStore.handleTaskUpdate(snapshot);
   });
 });
 ```

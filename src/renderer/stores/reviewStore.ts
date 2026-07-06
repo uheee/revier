@@ -30,6 +30,10 @@ interface ReviewState {
   drilldownRequestId: number;
 }
 
+function isTerminalStatus(status: AnalysisTaskSnapshot['status']): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
 export const useReviewStore = defineStore('review', {
   state: (): ReviewState => ({
     task: undefined,
@@ -52,24 +56,68 @@ export const useReviewStore = defineStore('review', {
   actions: {
     async start(filters: ReviewFilters): Promise<void> {
       const requestId = ++this.analysisRequestId;
-      this.loading = true;
       this.error = undefined;
       this.overlay = undefined;
       this.selectedBlock = undefined;
       this.files = [];
       this.cancelOverlay();
       this.closeCommitDrilldown();
+      this.loading = true;
       try {
         const task = await revierClient.review.startAnalysis(filters);
         if (requestId !== this.analysisRequestId) return;
+        if (
+          this.task?.taskId === task.taskId &&
+          isTerminalStatus(this.task.status) &&
+          !isTerminalStatus(task.status)
+        ) {
+          return;
+        }
         this.task = task;
-        const files = await revierClient.review.listChangedFiles(task.taskId);
-        if (requestId !== this.analysisRequestId) return;
-        this.files = files;
+        if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+          await this.handleTaskUpdate(task);
+        }
       } catch (error) {
         if (requestId === this.analysisRequestId) this.error = toErrorMessage(error);
-      } finally {
         if (requestId === this.analysisRequestId) this.loading = false;
+      }
+    },
+
+    async handleTaskUpdate(snapshot: AnalysisTaskSnapshot): Promise<void> {
+      if (this.task && snapshot.taskId !== this.task.taskId) {
+        return;
+      }
+      if (this.task && isTerminalStatus(this.task.status) && !isTerminalStatus(snapshot.status)) {
+        return;
+      }
+
+      this.task = snapshot;
+      if (snapshot.status === 'completed') {
+        const requestId = this.analysisRequestId;
+        try {
+          const files = await revierClient.review.listChangedFiles(snapshot.taskId);
+          if (requestId !== this.analysisRequestId) return;
+          if (this.task?.taskId !== snapshot.taskId) return;
+          this.files = files;
+          this.error = undefined;
+        } catch (error) {
+          if (requestId === this.analysisRequestId) this.error = toErrorMessage(error);
+        } finally {
+          if (requestId === this.analysisRequestId && this.task?.taskId === snapshot.taskId) {
+            this.loading = false;
+          }
+        }
+        return;
+      }
+
+      if (snapshot.status === 'failed') {
+        this.error = snapshot.error?.message ?? '分析任务失败';
+        this.loading = false;
+        return;
+      }
+
+      if (snapshot.status === 'cancelled') {
+        this.loading = false;
       }
     },
 
@@ -79,6 +127,16 @@ export const useReviewStore = defineStore('review', {
       this.loading = false;
       this.cancelOverlay();
       this.closeCommitDrilldown();
+      if (this.task && this.task.status !== 'completed' && this.task.status !== 'failed') {
+        this.task = {
+          ...this.task,
+          status: 'cancelled',
+          stage: 'ready',
+          progress: undefined,
+          message: '任务已取消',
+          error: undefined
+        };
+      }
       if (taskId) {
         await revierClient.review.cancelAnalysis(taskId);
       }

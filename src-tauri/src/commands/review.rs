@@ -23,11 +23,24 @@ pub fn review_start_analysis(
     state: State<'_, AppState>,
     filters: ReviewFilters,
 ) -> CommandResult<AnalysisTaskSnapshot> {
-    let snapshot = state
-        .review
-        .start_analysis(state.projects.as_ref(), filters)?;
-    app.emit(TASK_UPDATED_EVENT, &snapshot)
-        .map_err(|error| crate::error::command_error("TASK_EVENT_FAILED", error.to_string()))?;
+    let snapshot = state.review.start_analysis_task(filters.clone())?;
+    emit_task_update(&app, &snapshot)?;
+
+    let task_id = snapshot.task_id.clone();
+    let review = state.review.clone();
+    let projects = state.projects.clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = review.execute_analysis_task(projects.as_ref(), &task_id, filters);
+        let snapshot = match result {
+            Ok(snapshot) => Some(snapshot),
+            Err(_) => review.get_task(&task_id).ok(),
+        };
+        if let Some(snapshot) = snapshot {
+            let _ = emit_task_update(&app, &snapshot);
+        }
+    });
+
     Ok(snapshot)
 }
 
@@ -40,8 +53,14 @@ pub fn review_list_changed_files(
 }
 
 #[tauri::command]
-pub fn review_cancel_analysis(state: State<'_, AppState>, task_id: String) -> CommandResult<()> {
-    state.review.cancel_analysis(&task_id)
+pub fn review_cancel_analysis(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task_id: String,
+) -> CommandResult<()> {
+    let snapshot = state.review.cancel_analysis(&task_id)?;
+    emit_task_update(&app, &snapshot)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -66,4 +85,9 @@ pub fn review_get_commit_overlay(
     request: CommitOverlayRequest,
 ) -> CommandResult<FileOverlay> {
     state.review.get_commit_overlay(request)
+}
+
+fn emit_task_update(app: &AppHandle, snapshot: &AnalysisTaskSnapshot) -> CommandResult<()> {
+    app.emit(TASK_UPDATED_EVENT, snapshot)
+        .map_err(|error| crate::error::command_error("TASK_EVENT_FAILED", error.to_string()))
 }

@@ -48,6 +48,14 @@ const task: AnalysisTaskSnapshot = {
   progress: 1
 };
 
+const runningTask: AnalysisTaskSnapshot = {
+  taskId: 'task-1',
+  projectId: 'project-1',
+  status: 'running',
+  stage: 'readRepository',
+  message: '读取项目仓库'
+};
+
 const file: ChangedFile = {
   path: 'src/main/index.ts',
   status: 'modified',
@@ -93,19 +101,64 @@ describe('renderer reviewStore', () => {
     vi.mocked(revierClient.review.listAuthors).mockReset();
   });
 
-  it('starts analysis and loads changed files', async () => {
-    vi.mocked(revierClient.review.startAnalysis).mockResolvedValue(task);
+  it('starts analysis and loads changed files after completion event', async () => {
+    vi.mocked(revierClient.review.startAnalysis).mockResolvedValue(runningTask);
     vi.mocked(revierClient.review.listChangedFiles).mockResolvedValue([file]);
 
     const store = useReviewStore();
     await store.start(filters);
 
     expect(revierClient.review.startAnalysis).toHaveBeenCalledWith(filters);
+    expect(revierClient.review.listChangedFiles).not.toHaveBeenCalled();
+    expect(store.task).toEqual(runningTask);
+    expect(store.files).toEqual([]);
+    expect(store.loading).toBe(true);
+
+    await store.handleTaskUpdate(task);
+
     expect(revierClient.review.listChangedFiles).toHaveBeenCalledWith(task.taskId);
     expect(store.task).toEqual(task);
     expect(store.files).toEqual([file]);
     expect(store.loading).toBe(false);
     expect(store.error).toBeUndefined();
+  });
+
+  it('keeps completed task when completion event arrives before start returns', async () => {
+    let resolveStart!: (value: AnalysisTaskSnapshot) => void;
+    vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      })
+    );
+    vi.mocked(revierClient.review.listChangedFiles).mockResolvedValue([file]);
+
+    const store = useReviewStore();
+    const start = store.start(filters);
+    await store.handleTaskUpdate(task);
+    resolveStart(runningTask);
+    await start;
+
+    expect(store.task).toEqual(task);
+    expect(store.files).toEqual([file]);
+    expect(store.loading).toBe(false);
+  });
+
+  it('accepts completed update after optimistic cancel when backend already finished', async () => {
+    vi.mocked(revierClient.review.cancelAnalysis).mockResolvedValue();
+    vi.mocked(revierClient.review.listChangedFiles).mockResolvedValue([file]);
+
+    const store = useReviewStore();
+    store.task = runningTask;
+    store.loading = true;
+    await store.cancelAnalysis();
+
+    expect(store.task?.status).toBe('cancelled');
+
+    await store.handleTaskUpdate(task);
+
+    expect(store.task).toEqual(task);
+    expect(store.files).toEqual([file]);
+    expect(store.loading).toBe(false);
   });
 
   it('loads overlay and selects a diff block', async () => {

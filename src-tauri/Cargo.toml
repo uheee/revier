@@ -23,6 +23,7 @@ serde_json = "1.0"
 revier-analysis = { path = "../crates/revier-analysis" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 uuid = { version = "1", features = ["v4"] }
+tokio-util = "0.7"
 
 [dev-dependencies]
 tempfile = "3.10"

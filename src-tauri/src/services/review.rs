@@ -19,6 +19,7 @@ use revier_analysis::json::{
     DiffBlockOutput, FileOverlayCommandOutput, RelatedCommitAttributionOutput, RelatedCommitOutput,
     SideBySideDiffRowOutput, TouchedRangeOutput, WordChangeOutput,
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::error::{command_error, command_error_with_detail, CommandResult};
 use crate::services::projects::ProjectService;
@@ -29,6 +30,7 @@ pub struct ReviewService {
     filters_by_task: Mutex<HashMap<TaskId, ReviewFilters>>,
     files_by_task: Mutex<HashMap<TaskId, Vec<ChangedFile>>>,
     contexts_by_task: Mutex<HashMap<TaskId, ReviewTaskContext>>,
+    cancellations_by_task: Mutex<HashMap<TaskId, CancellationToken>>,
 }
 
 #[derive(Clone)]
@@ -72,6 +74,9 @@ impl ReviewService {
 
     pub fn mark_running(&self, task_id: &str, stage: AnalysisStage, message: &str) {
         if let Some(task) = self.tasks.lock().expect("任务锁被污染").get_mut(task_id) {
+            if matches!(task.status, AnalysisTaskStatus::Cancelled) {
+                return;
+            }
             task.status = AnalysisTaskStatus::Running;
             task.stage = stage;
             task.progress = None;
@@ -82,6 +87,11 @@ impl ReviewService {
 
     pub fn mark_completed(&self, task_id: &str) {
         if let Some(task) = self.tasks.lock().expect("任务锁被污染").get_mut(task_id) {
+            if matches!(task.status, AnalysisTaskStatus::Cancelled) {
+                self.clear_task_results(task_id);
+                self.cleanup_cancellation(task_id);
+                return;
+            }
             task.status = AnalysisTaskStatus::Completed;
             task.stage = AnalysisStage::Ready;
             task.progress = Some(1.0);
@@ -90,9 +100,18 @@ impl ReviewService {
         }
     }
 
-    pub fn start_analysis(
+    #[cfg(test)]
+    fn start_analysis(
         &self,
         projects: &ProjectService,
+        filters: ReviewFilters,
+    ) -> CommandResult<AnalysisTaskSnapshot> {
+        let task = self.start_analysis_task(filters.clone())?;
+        self.execute_analysis_task(projects, &task.task_id, filters)
+    }
+
+    pub fn start_analysis_task(
+        &self,
         filters: ReviewFilters,
     ) -> CommandResult<AnalysisTaskSnapshot> {
         let task = self.create_task(filters.project_id.clone());
@@ -100,22 +119,45 @@ impl ReviewService {
             .lock()
             .expect("筛选条件锁被污染")
             .insert(task.task_id.clone(), filters.clone());
+        self.cancellations_by_task
+            .lock()
+            .expect("取消令牌锁被污染")
+            .insert(task.task_id.clone(), CancellationToken::new());
+        self.mark_running(&task.task_id, AnalysisStage::ReadRepository, "等待后台分析");
+        self.get_task(&task.task_id)
+    }
 
-        match self.run_analysis(projects, &task.task_id, filters) {
+    pub fn execute_analysis_task(
+        &self,
+        projects: &ProjectService,
+        task_id: &str,
+        filters: ReviewFilters,
+    ) -> CommandResult<AnalysisTaskSnapshot> {
+        match self.run_analysis(projects, task_id, filters) {
             Ok(result) => {
+                if self.is_cancelled(task_id) {
+                    self.cleanup_cancellation(task_id);
+                    return self.get_task(task_id);
+                }
                 self.files_by_task
                     .lock()
                     .expect("文件缓存锁被污染")
-                    .insert(task.task_id.clone(), result.files);
+                    .insert(task_id.to_string(), result.files);
                 self.contexts_by_task
                     .lock()
                     .expect("任务上下文锁被污染")
-                    .insert(task.task_id.clone(), result.context);
-                self.mark_completed(&task.task_id);
-                self.get_task(&task.task_id)
+                    .insert(task_id.to_string(), result.context);
+                self.mark_completed(task_id);
+                self.cleanup_cancellation(task_id);
+                self.get_task(task_id)
             }
             Err(error) => {
-                self.mark_failed(&task.task_id, error.clone());
+                if self.is_cancelled(task_id) || error.code == "TASK_CANCELLED" {
+                    self.cleanup_cancellation(task_id);
+                    return self.get_task(task_id);
+                }
+                self.mark_failed(task_id, error.clone());
+                self.cleanup_cancellation(task_id);
                 Err(error)
             }
         }
@@ -137,18 +179,42 @@ impl ReviewService {
             })
     }
 
-    pub fn cancel_analysis(&self, task_id: &str) -> CommandResult<()> {
-        // TODO(Task 6 follow-up): 真实在途取消需要后台任务 runner 和取消令牌。
-        let mut tasks = self.tasks.lock().expect("任务锁被污染");
-        let task = tasks
-            .get_mut(task_id)
-            .ok_or_else(|| command_error("TASK_NOT_FOUND", format!("未找到任务：{task_id}")))?;
-        task.status = AnalysisTaskStatus::Cancelled;
-        task.stage = AnalysisStage::Ready;
-        task.progress = None;
-        task.message = Some("任务已取消".to_string());
-        task.error = None;
-        Ok(())
+    pub fn cancel_analysis(&self, task_id: &str) -> CommandResult<AnalysisTaskSnapshot> {
+        if let Some(token) = self
+            .cancellations_by_task
+            .lock()
+            .expect("取消令牌锁被污染")
+            .get(task_id)
+            .cloned()
+        {
+            token.cancel();
+        }
+
+        let snapshot = {
+            let mut tasks = self.tasks.lock().expect("任务锁被污染");
+            let task = tasks
+                .get_mut(task_id)
+                .ok_or_else(|| command_error("TASK_NOT_FOUND", format!("未找到任务：{task_id}")))?;
+            if matches!(
+                task.status,
+                AnalysisTaskStatus::Pending
+                    | AnalysisTaskStatus::Running
+                    | AnalysisTaskStatus::Cancelled
+            ) {
+                task.status = AnalysisTaskStatus::Cancelled;
+                task.stage = AnalysisStage::Ready;
+                task.progress = None;
+                task.message = Some("任务已取消".to_string());
+                task.error = None;
+            }
+            task.clone()
+        };
+
+        if matches!(snapshot.status, AnalysisTaskStatus::Cancelled) {
+            self.clear_task_results(task_id);
+        }
+
+        Ok(snapshot)
     }
 
     pub fn list_authors(
@@ -315,6 +381,7 @@ impl ReviewService {
         task_id: &str,
         filters: ReviewFilters,
     ) -> CommandResult<AnalysisRunResult> {
+        self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::ReadRepository, "读取项目仓库");
         let project = projects.get_project(&filters.project_id)?;
         let repo_path = PathBuf::from(&project.repo_path);
@@ -330,6 +397,7 @@ impl ReviewService {
             ));
         }
 
+        self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::ResolveRange, "解析分析范围");
         let range = revier_analysis::api::resolve_analysis_range(
             &repo_path,
@@ -339,7 +407,10 @@ impl ReviewService {
         )
         .map_err(map_analysis_error)?;
 
+        self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::LoadChangedFiles, "读取变更文件");
+        // TODO(revier-analysis-cancel): query_files 仍是同步 API。等 analysis 层接收取消令牌后，
+        // 删除这里的阶段边界兼容检查，改为把 token 传入 Git/DuckDB 执行路径。
         let output = revier_analysis::api::query_files(QueryFilesRequest {
             repo: repo_path,
             db: None,
@@ -355,6 +426,7 @@ impl ReviewService {
         })
         .map_err(map_analysis_error)?;
 
+        self.ensure_not_cancelled(task_id)?;
         let files = output
             .files
             .into_iter()
@@ -372,10 +444,62 @@ impl ReviewService {
 
     fn mark_failed(&self, task_id: &str, error: revier_analysis::contracts::AppError) {
         if let Some(task) = self.tasks.lock().expect("任务锁被污染").get_mut(task_id) {
+            if matches!(task.status, AnalysisTaskStatus::Cancelled) {
+                self.clear_task_results(task_id);
+                self.cleanup_cancellation(task_id);
+                return;
+            }
             task.status = AnalysisTaskStatus::Failed;
             task.error = Some(error.clone());
             task.message = Some(error.message);
         }
+    }
+
+    fn ensure_not_cancelled(&self, task_id: &str) -> CommandResult<()> {
+        if self.is_cancelled(task_id) {
+            Err(command_error(
+                "TASK_CANCELLED",
+                format!("任务已取消：{task_id}"),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn is_cancelled(&self, task_id: &str) -> bool {
+        let status_cancelled = self
+            .tasks
+            .lock()
+            .expect("任务锁被污染")
+            .get(task_id)
+            .is_some_and(|task| matches!(task.status, AnalysisTaskStatus::Cancelled));
+        if status_cancelled {
+            return true;
+        }
+
+        self.cancellations_by_task
+            .lock()
+            .expect("取消令牌锁被污染")
+            .get(task_id)
+            .is_some_and(CancellationToken::is_cancelled)
+    }
+
+    fn cleanup_cancellation(&self, task_id: &str) {
+        self.cancellations_by_task
+            .lock()
+            .expect("取消令牌锁被污染")
+            .remove(task_id);
+    }
+
+    fn clear_task_results(&self, task_id: &str) {
+        self.files_by_task
+            .lock()
+            .expect("文件缓存锁被污染")
+            .remove(task_id);
+        self.contexts_by_task
+            .lock()
+            .expect("任务上下文锁被污染")
+            .remove(task_id);
     }
 
     fn ensure_completed_task(&self, task_id: &str) -> CommandResult<()> {
@@ -800,8 +924,9 @@ mod tests {
 
     use revier_analysis::cli::{IndexBuildArgs, IndexCommonArgs, OutputFormat};
     use revier_analysis::contracts::{
-        AnalysisTaskStatus, ChangedFileStatus, CommitOverlayRequest, FileOverlayMode,
-        FileOverlayRequest, ReviewAuthorOptionsRequest, ReviewFilters,
+        AnalysisStage, AnalysisTaskStatus, ChangedFileStatus, CommitOverlayRequest,
+        FileOverlayMode, FileOverlayRequest, ProjectPreferences, ReviewAuthorOptionsRequest,
+        ReviewFilters,
     };
     use tempfile::{tempdir, TempDir};
 
@@ -833,6 +958,20 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "src/app.txt");
         assert!(matches!(files[0].status, ChangedFileStatus::Modified));
+    }
+
+    #[test]
+    fn start_analysis_task_returns_running_snapshot_before_execution() {
+        let service = ReviewService::default();
+
+        let task = service
+            .start_analysis_task(review_filters("project-1".to_string()))
+            .expect("创建后台分析任务失败");
+
+        assert!(matches!(task.status, AnalysisTaskStatus::Running));
+        assert!(matches!(task.stage, AnalysisStage::ReadRepository));
+        assert_eq!(task.project_id, "project-1");
+        assert!(task.message.is_some());
     }
 
     #[test]
@@ -896,9 +1035,110 @@ mod tests {
         let service = ReviewService::default();
         let task = service.create_task("project-1".to_string());
 
+        let snapshot = service
+            .cancel_analysis(&task.task_id)
+            .expect("取消任务失败");
+
+        assert!(matches!(snapshot.status, AnalysisTaskStatus::Cancelled));
+    }
+
+    #[test]
+    fn completed_state_does_not_override_cancelled_task() {
+        let service = ReviewService::default();
+        let task = service.create_task("project-1".to_string());
+
         service
             .cancel_analysis(&task.task_id)
             .expect("取消任务失败");
+        service.mark_completed(&task.task_id);
+
+        let snapshot = service.get_task(&task.task_id).expect("读取任务失败");
+        assert!(matches!(snapshot.status, AnalysisTaskStatus::Cancelled));
+    }
+
+    #[test]
+    fn completed_state_cleans_late_cached_results_for_cancelled_task() {
+        let service = ReviewService::default();
+        let task = service.create_task("project-1".to_string());
+
+        service
+            .cancel_analysis(&task.task_id)
+            .expect("取消任务失败");
+        service
+            .files_by_task
+            .lock()
+            .expect("文件缓存锁被污染")
+            .insert(
+                task.task_id.clone(),
+                vec![ChangedFile {
+                    path: "src/app.txt".to_string(),
+                    old_path: None,
+                    status: ChangedFileStatus::Modified,
+                    additions: 1,
+                    deletions: 0,
+                    is_binary: false,
+                    is_previewable: true,
+                }],
+            );
+        service
+            .contexts_by_task
+            .lock()
+            .expect("任务上下文锁被污染")
+            .insert(
+                task.task_id.clone(),
+                ReviewTaskContext {
+                    project: ReviewProject {
+                        id: "project-1".to_string(),
+                        name: "fixture".to_string(),
+                        repo_path: "E:/Projects/revier".to_string(),
+                        pinned: false,
+                        last_opened_at: None,
+                        preferences: ProjectPreferences {
+                            default_branch: None,
+                            default_days: None,
+                            default_glob_rules: Vec::new(),
+                            review_filters: None,
+                        },
+                    },
+                    filters: review_filters("project-1".to_string()),
+                    range: AnalysisRange {
+                        branch: "main".to_string(),
+                        base_commit: "base".to_string(),
+                        head_commit: "head".to_string(),
+                        start_at: None,
+                        end_at: None,
+                    },
+                },
+            );
+
+        service.mark_completed(&task.task_id);
+
+        let snapshot = service.get_task(&task.task_id).expect("读取任务失败");
+        assert!(matches!(snapshot.status, AnalysisTaskStatus::Cancelled));
+        assert!(!service
+            .files_by_task
+            .lock()
+            .expect("文件缓存锁被污染")
+            .contains_key(&task.task_id));
+        assert!(!service
+            .contexts_by_task
+            .lock()
+            .expect("任务上下文锁被污染")
+            .contains_key(&task.task_id));
+    }
+
+    #[test]
+    fn failed_state_does_not_override_cancelled_task() {
+        let service = ReviewService::default();
+        let task = service.create_task("project-1".to_string());
+
+        service
+            .cancel_analysis(&task.task_id)
+            .expect("取消任务失败");
+        service.mark_failed(
+            &task.task_id,
+            command_error("INDEX_UNAVAILABLE", "索引文件不存在"),
+        );
 
         let snapshot = service.get_task(&task.task_id).expect("读取任务失败");
         assert!(matches!(snapshot.status, AnalysisTaskStatus::Cancelled));
