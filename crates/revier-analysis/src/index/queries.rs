@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use crate::execution::AnalysisExecutionContext;
 use crate::git::commits::IndexedCommit;
 use crate::json::ChangedFileOutput;
 use chrono::{DateTime, Utc};
@@ -121,15 +122,28 @@ pub fn query_files(
     conn: &duckdb::Connection,
     filter: &QueryFilesFilter,
 ) -> Result<Vec<ChangedFileOutput>, AppError> {
+    let context = AnalysisExecutionContext::none();
+    query_files_with_context(conn, filter, &context)
+}
+
+pub fn query_files_with_context(
+    conn: &duckdb::Connection,
+    filter: &QueryFilesFilter,
+    context: &AnalysisExecutionContext,
+) -> Result<Vec<ChangedFileOutput>, AppError> {
+    context.check_cancelled()?;
     ensure_range_indexed(conn, &filter.base, &filter.head)?;
+    context.check_cancelled()?;
     let matcher = build_glob_matcher(&filter.globs)?;
-    let commits = matching_commits(conn, filter)?;
+    context.check_cancelled()?;
+    let commits = matching_commits(conn, filter, context)?;
     if commits.is_empty() {
         return Ok(Vec::new());
     }
 
     let mut files = Vec::new();
     for commit_hash in commits {
+        context.check_cancelled()?;
         let mut stmt = conn
             .prepare(
                 "select path, old_path, status, additions, deletions, is_binary, is_previewable
@@ -154,6 +168,7 @@ pub fn query_files(
             .map_err(|error| AppError::DuckDb(error.to_string()))?;
 
         for file in rows {
+            context.check_cancelled()?;
             let file = file.map_err(|error| AppError::DuckDb(error.to_string()))?;
             if path_matches(&matcher, &file.path, file.old_path.as_deref()) {
                 files.push(file);
@@ -163,6 +178,7 @@ pub fn query_files(
 
     files.sort_by(|left, right| left.path.cmp(&right.path));
     files.dedup_by(|left, right| left.path == right.path && left.old_path == right.old_path);
+    context.check_cancelled()?;
     Ok(files)
 }
 
@@ -198,7 +214,9 @@ fn ensure_range_indexed(conn: &duckdb::Connection, base: &str, head: &str) -> Re
 fn matching_commits(
     conn: &duckdb::Connection,
     filter: &QueryFilesFilter,
+    context: &AnalysisExecutionContext,
 ) -> Result<Vec<String>, AppError> {
+    context.check_cancelled()?;
     let mut stmt = conn
         .prepare(
             "select hash, author_key, author_name, coalesce(author_email, ''), subject, strftime(committed_at, '%Y-%m-%dT%H:%M:%S+00:00')
@@ -231,6 +249,7 @@ fn matching_commits(
 
     let mut hashes = Vec::new();
     for row in rows {
+        context.check_cancelled()?;
         let (hash, author_key, author_name, author_email, subject, committed_at) =
             row.map_err(|error| AppError::DuckDb(error.to_string()))?;
         let committed_at = parse_filter_time(&committed_at, "committed_at")?;

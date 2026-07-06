@@ -5,6 +5,7 @@ pub mod cli;
 pub mod commands;
 pub mod contracts;
 pub mod error;
+pub mod execution;
 pub mod git;
 pub mod index;
 pub mod json;

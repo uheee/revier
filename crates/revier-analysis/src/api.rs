@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::FileOverlayArgs;
 use crate::contracts::{AnalysisRange, GitBranch, RepositoryValidation};
 use crate::error::AppError;
+use crate::execution::AnalysisExecutionContext;
 use crate::git::commits::IndexedCommit;
 use crate::json::{FileOverlayCommandOutput, QueryFilesOutput};
 use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
@@ -88,7 +89,15 @@ pub fn list_branches(repo_path: &Path) -> Result<Vec<GitBranch>, AppError> {
 }
 
 pub fn query_files(request: QueryFilesRequest) -> Result<QueryFilesOutput, AppError> {
-    crate::commands::query_files::query_request(request)
+    let context = AnalysisExecutionContext::none();
+    query_files_with_context(request, &context)
+}
+
+pub fn query_files_with_context(
+    request: QueryFilesRequest,
+    context: &AnalysisExecutionContext,
+) -> Result<QueryFilesOutput, AppError> {
+    crate::commands::query_files::query_request_with_context(request, context)
 }
 
 pub fn resolve_analysis_range(
@@ -97,6 +106,18 @@ pub fn resolve_analysis_range(
     start_at: Option<String>,
     end_at: Option<String>,
 ) -> Result<AnalysisRange, AppError> {
+    let context = AnalysisExecutionContext::none();
+    resolve_analysis_range_with_context(repo_path, branch, start_at, end_at, &context)
+}
+
+pub fn resolve_analysis_range_with_context(
+    repo_path: &Path,
+    branch: &str,
+    start_at: Option<String>,
+    end_at: Option<String>,
+    context: &AnalysisExecutionContext,
+) -> Result<AnalysisRange, AppError> {
+    context.check_cancelled()?;
     let repo = gix::discover(repo_path).map_err(|error| AppError::Repository(error.to_string()))?;
     let end = normalize_utc_second(parse_or_default_time(
         end_at.as_deref(),
@@ -113,30 +134,33 @@ pub fn resolve_analysis_range(
         ));
     }
 
-    let commits = crate::git::commits::list_reachable_commits(&repo, branch)
+    let commits = crate::git::commits::list_reachable_commits_with_context(&repo, branch, context)
         .map_err(|error| normalize_range_commit_error(&repo, branch, error))?;
     if commits.is_empty() {
         return Err(no_available_commits_error(branch));
     }
 
-    let mut commits = commits
-        .into_iter()
-        .map(|commit| parse_commit_time(&commit).map(|committed_at| (committed_at, commit)))
-        .collect::<Result<Vec<_>, _>>()?;
-    commits.sort_by_key(|(committed_at, _)| *committed_at);
+    let mut timed_commits = Vec::with_capacity(commits.len());
+    for commit in commits {
+        context.check_cancelled()?;
+        let committed_at = parse_commit_time(&commit)?;
+        timed_commits.push((committed_at, commit));
+    }
+    timed_commits.sort_by_key(|(committed_at, _)| *committed_at);
+    context.check_cancelled()?;
 
-    let base_commit = commits
+    let base_commit = timed_commits
         .iter()
         .rev()
         .find(|(committed_at, _)| *committed_at < start)
-        .or_else(|| commits.first())
+        .or_else(|| timed_commits.first())
         .map(|(_, commit)| commit)
         .ok_or_else(|| no_available_commits_error(branch))?;
-    let head_commit = commits
+    let head_commit = timed_commits
         .iter()
         .rev()
         .find(|(committed_at, _)| *committed_at <= end)
-        .or_else(|| commits.last())
+        .or_else(|| timed_commits.last())
         .map(|(_, commit)| commit)
         .ok_or_else(|| no_available_commits_error(branch))?;
 
@@ -190,6 +214,10 @@ fn normalize_utc_second(time: DateTime<Utc>) -> DateTime<Utc> {
 }
 
 fn normalize_range_commit_error(repo: &gix::Repository, branch: &str, error: AppError) -> AppError {
+    if matches!(error, AppError::Cancelled) {
+        return error;
+    }
+
     if repo.head_id().is_err() {
         return no_available_commits_error(branch);
     }

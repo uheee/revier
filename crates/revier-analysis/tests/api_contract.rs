@@ -1,9 +1,15 @@
 mod fixtures;
 
 use revier_analysis::api::{
-    list_branches, resolve_analysis_range, validate_repository, QueryFilesRequest,
+    list_branches, query_files_with_context, resolve_analysis_range,
+    resolve_analysis_range_with_context, validate_repository, QueryFilesRequest,
 };
+use revier_analysis::error::AppError;
+use revier_analysis::execution::AnalysisExecutionContext;
+use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 #[test]
 fn validates_non_git_directory_without_recoverable() {
@@ -12,6 +18,68 @@ fn validates_non_git_directory_without_recoverable() {
 
     assert!(!result.valid);
     assert!(result.error.is_some());
+}
+
+#[test]
+fn query_files_with_context_returns_cancelled_before_opening_repo() {
+    let context = AnalysisExecutionContext::with_cancel(|| true);
+
+    let error = query_files_with_context(
+        QueryFilesRequest {
+            repo: PathBuf::from("missing-repo"),
+            db: None,
+            base: "base".to_string(),
+            head: "head".to_string(),
+            branch: "main".to_string(),
+            authors: Vec::new(),
+            author_query: None,
+            message: None,
+            since: None,
+            until: None,
+            globs: Vec::new(),
+        },
+        &context,
+    )
+    .expect_err("已取消的查询不应继续打开仓库");
+
+    assert!(matches!(error, AppError::Cancelled));
+}
+
+#[test]
+fn resolve_analysis_range_with_context_returns_cancelled_before_discovering_repo() {
+    let context = AnalysisExecutionContext::with_cancel(|| true);
+
+    let error = resolve_analysis_range_with_context(
+        PathBuf::from("missing-repo").as_path(),
+        "main",
+        None,
+        None,
+        &context,
+    )
+    .expect_err("已取消的范围解析不应继续读取仓库");
+
+    assert!(matches!(error, AppError::Cancelled));
+}
+
+#[test]
+fn resolve_analysis_range_with_context_preserves_cancelled_for_empty_repo() {
+    let repo = tempfile::tempdir().expect("创建临时目录失败");
+    gix::create::into(
+        repo.path(),
+        gix::create::Kind::WithWorktree,
+        gix::create::Options::default(),
+    )
+    .expect("初始化测试仓库失败");
+    let checks = Arc::new(AtomicUsize::new(0));
+    let checks_for_context = Arc::clone(&checks);
+    let context = AnalysisExecutionContext::with_cancel(move || {
+        checks_for_context.fetch_add(1, Ordering::SeqCst) >= 1
+    });
+
+    let error = resolve_analysis_range_with_context(repo.path(), "main", None, None, &context)
+        .expect_err("中途取消不应被空仓库错误覆盖");
+
+    assert!(matches!(error, AppError::Cancelled));
 }
 
 #[test]

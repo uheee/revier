@@ -14,6 +14,7 @@ use revier_analysis::contracts::{
     ReviewProject, SideBySideDiffRow, SideBySideDiffRowType, TaskId, TouchedRange, WordChange,
 };
 use revier_analysis::error::AppError as AnalysisAppError;
+use revier_analysis::execution::AnalysisExecutionContext;
 use revier_analysis::json::{
     AttributionWarningOutput, AuthorOutput, BlockAttributionOutput, ChangedFileOutput,
     DiffBlockOutput, FileOverlayCommandOutput, RelatedCommitAttributionOutput, RelatedCommitOutput,
@@ -381,6 +382,7 @@ impl ReviewService {
         task_id: &str,
         filters: ReviewFilters,
     ) -> CommandResult<AnalysisRunResult> {
+        let context = self.analysis_context_for_task(task_id);
         self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::ReadRepository, "读取项目仓库");
         let project = projects.get_project(&filters.project_id)?;
@@ -399,31 +401,33 @@ impl ReviewService {
 
         self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::ResolveRange, "解析分析范围");
-        let range = revier_analysis::api::resolve_analysis_range(
+        let range = revier_analysis::api::resolve_analysis_range_with_context(
             &repo_path,
             &filters.branch,
             filters.start_at.clone(),
             filters.end_at.clone(),
+            &context,
         )
         .map_err(map_analysis_error)?;
 
         self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::LoadChangedFiles, "读取变更文件");
-        // TODO(revier-analysis-cancel): query_files 仍是同步 API。等 analysis 层接收取消令牌后，
-        // 删除这里的阶段边界兼容检查，改为把 token 传入 Git/DuckDB 执行路径。
-        let output = revier_analysis::api::query_files(QueryFilesRequest {
-            repo: repo_path,
-            db: None,
-            base: range.base_commit.clone(),
-            head: range.head_commit.clone(),
-            branch: range.branch.clone(),
-            authors: filters.author_keys.clone().unwrap_or_default(),
-            author_query: filters.author_query.clone(),
-            message: filters.message_query.clone(),
-            since: range.start_at.clone(),
-            until: range.end_at.clone(),
-            globs: filters.glob_rules.clone(),
-        })
+        let output = revier_analysis::api::query_files_with_context(
+            QueryFilesRequest {
+                repo: repo_path,
+                db: None,
+                base: range.base_commit.clone(),
+                head: range.head_commit.clone(),
+                branch: range.branch.clone(),
+                authors: filters.author_keys.clone().unwrap_or_default(),
+                author_query: filters.author_query.clone(),
+                message: filters.message_query.clone(),
+                since: range.start_at.clone(),
+                until: range.end_at.clone(),
+                globs: filters.glob_rules.clone(),
+            },
+            &context,
+        )
         .map_err(map_analysis_error)?;
 
         self.ensure_not_cancelled(task_id)?;
@@ -464,6 +468,16 @@ impl ReviewService {
         } else {
             Ok(())
         }
+    }
+
+    fn analysis_context_for_task(&self, task_id: &str) -> AnalysisExecutionContext {
+        self.cancellations_by_task
+            .lock()
+            .expect("取消令牌锁被污染")
+            .get(task_id)
+            .cloned()
+            .map(|token| AnalysisExecutionContext::with_cancel(move || token.is_cancelled()))
+            .unwrap_or_else(AnalysisExecutionContext::none)
     }
 
     fn is_cancelled(&self, task_id: &str) -> bool {
@@ -891,6 +905,7 @@ fn map_analysis_error(error: AnalysisAppError) -> revier_analysis::contracts::Ap
         AnalysisAppError::DuckDb(_) => "DUCKDB_ERROR",
         AnalysisAppError::Spike(_) => "SPIKE_ERROR",
         AnalysisAppError::Analysis(_) => "ANALYSIS_ERROR",
+        AnalysisAppError::Cancelled => "TASK_CANCELLED",
         AnalysisAppError::Json(_) => "JSON_ERROR",
         AnalysisAppError::Io(_) => "IO_ERROR",
     };

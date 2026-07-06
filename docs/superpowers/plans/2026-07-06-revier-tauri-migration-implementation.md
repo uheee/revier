@@ -1559,8 +1559,8 @@ pub fn review_list_changed_files(
 1. 通过 `filters.project_id` 从 `ProjectService` 读取项目。
 2. 调用 `revier_analysis::api::validate_repository(project.repo_path)`。
 3. 仓库校验失败时返回 `REPOSITORY_INVALID`。
-4. 使用 `revier_analysis::api::resolve_analysis_range(project.repo_path, &filters.branch, filters.start_at.clone(), filters.end_at.clone())` 解析选中范围。
-5. 使用解析出的 `base_commit`、`head_commit`、`branch`、`start_at`、`end_at` 和筛选字段调用 `revier_analysis::api::query_files`。
+4. 使用 `revier_analysis::api::resolve_analysis_range_with_context(project.repo_path, &filters.branch, filters.start_at.clone(), filters.end_at.clone(), &context)` 解析选中范围。
+5. 使用解析出的 `base_commit`、`head_commit`、`branch`、`start_at`、`end_at` 和筛选字段调用 `revier_analysis::api::query_files_with_context`。
 6. 将返回的文件列表按新建任务 id 写入 `files_by_task`。
 7. 只有 `query_files` 成功后才能把任务标记为 completed。
 8. 返回 completed snapshot；command 层用该 snapshot 发送 `review://task-updated`。
@@ -1572,7 +1572,9 @@ pub fn review_list_changed_files(
 
 已解决(Task 6 follow-up)：`review_start_analysis` 已迁移为后台任务模型，启动后立即返回 running snapshot，并由 `review://task-updated` 推送终态。
 
-TODO(AnalysisService)：当前取消为 Tauri 层协作式取消，只能在阶段边界阻止继续执行、阻止写缓存和阻止终态覆盖；`query_files` 内部的 Git/DuckDB 同步调用尚不能被令牌强制中断。后续 `revier-analysis` 暴露可取消 API 后，应删除 Tauri 层兼容 TODO 并把 token 下沉到分析执行路径。
+已解决(Task 6 follow-up)：`revier-analysis` 已新增 `AnalysisExecutionContext` 可注入取消检查；`ReviewService` 会把 Tauri 任务的 `CancellationToken` 下沉到 `resolve_analysis_range_with_context` 和 `query_files_with_context`。
+
+TODO(AnalysisService)：DuckDB 单次同步查询内部尚不能被令牌强制中断；当前只在 Git 遍历、DuckDB 查询前后、commit/file 结果循环中协作式取消。
 
 已解决(Task 6 follow-up)：`revier-analysis` 已暴露面向应用层的 `QueryFilesRequest`，`ReviewService` 不再依赖 CLI `QueryFilesArgs`；CLI 入口现在反向适配到 `QueryFilesRequest`。
 
@@ -1595,7 +1597,7 @@ Modify `src-tauri/src/lib.rs` invoke handler:
 
 - `review_start_analysis` 没有假 `completed` 或仅状态切换实现。
 - `review_list_changed_files` 没有返回 `Ok(Vec::new())` 作为默认占位。
-- `ReviewService::execute_analysis_task` 调用了 `resolve_analysis_range` 和 `query_files`。
+- `ReviewService::execute_analysis_task` 调用了 `resolve_analysis_range_with_context` 和 `query_files_with_context`。
 - 索引缺失由 Rust `query_files` 错误向上返回，不在 `ReviewService` 中自动构建索引。
 
 - [ ] **Step 7: 运行测试**
@@ -1645,7 +1647,8 @@ git commit -m "feat: 添加 Tauri Review 服务"
 - 已解决(Task 6 follow-up)：`projects_select_directory` 已接入 `tauri-plugin-dialog`。用户取消选择时返回空结果；选择成功后返回本地目录路径和目录名，路径字符串规范化为 `/` 分隔符。
 - TODO(Task 6 follow-up)：`review_get_commit_overlay` 当前使用 Rust 现有 diff/overlay API 组合实现单提交下钻，后续若 `revier-analysis` 暴露专用应用层 API，应删除服务层兼容适配。
 - 已解决(Task 6 follow-up)：`review_start_analysis` 已改为后台执行，启动后立即返回 running snapshot；`review_cancel_analysis` 会取消任务令牌并发送 cancelled 事件，后台结果不会覆盖 cancelled。
-- TODO(AnalysisService)：取消令牌尚未下沉到 `revier-analysis::api::query_files` 内部，当前仍无法强制中断已经进入 Git/DuckDB 的同步调用。
+- 已解决(Task 6 follow-up)：取消令牌已通过 `AnalysisExecutionContext` 下沉到 `revier-analysis::api::query_files_with_context` 和范围解析调用链。
+- TODO(AnalysisService)：DuckDB 单次同步查询内部仍不能被强制中断；当前通过查询前后和结果循环检查实现协作式取消。
 
 - [ ] **Step 1: 写 project store 失败测试**
 

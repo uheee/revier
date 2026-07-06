@@ -15,11 +15,12 @@
 - `projects_select_directory` 已接入 `tauri-plugin-dialog`，取消选择返回空结果，选择成功后返回规范化为 `/` 分隔符的本地目录路径和目录名。
 - `review_start_analysis` 已改为后台任务模型：命令创建 running 任务后立即返回，真实分析在 Tauri 后台 runner 中执行，完成/失败/取消通过 `review://task-updated` 推送。
 - `review_cancel_analysis` 已接入协作式取消令牌；取消后的后台结果不会写入任务缓存，也不会覆盖 cancelled 终态。
+- `revier-analysis` 已新增 `AnalysisExecutionContext` 可注入取消检查，Tauri 层把当前任务的 `CancellationToken` 下沉到范围解析和 `query_files` 调用链。
 
 仍需跟进的能力差异：
 
 - TODO：旧 Electron `userData/projects.json` 到 Tauri app data 的首次迁移尚未实现；需要先确认各平台旧 `userData` 解析规则和产品名。
-- TODO：取消令牌尚未下沉到 `revier-analysis` 的 Git/DuckDB 执行路径；当前只能在 Tauri 层阶段边界协作式取消，不能强制中断已进入的同步查询。
+- TODO：DuckDB 单次同步查询内部仍不能被强制中断；当前在 Git 遍历、DuckDB 查询前后和结果循环中做协作式取消检查。
 
 ## 背景
 

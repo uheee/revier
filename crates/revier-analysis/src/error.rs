@@ -29,6 +29,9 @@ pub enum AppError {
     #[error("分析内部错误：{0}")]
     Analysis(String),
 
+    #[error("操作已取消")]
+    Cancelled,
+
     #[error("JSON 输出失败：{0}")]
     Json(#[from] serde_json::Error),
 
@@ -44,6 +47,7 @@ impl AppError {
             Self::FileNotAnalyzable(_) | Self::IndexUnavailable(_) => 4,
             Self::RequiredIndexUnavailable(_) | Self::SchemaIncompatible(_) => 5,
             Self::DuckDb(_) => 6,
+            Self::Cancelled => 130,
             Self::Spike(_) | Self::Analysis(_) | Self::Json(_) | Self::Io(_) => 10,
         }
     }

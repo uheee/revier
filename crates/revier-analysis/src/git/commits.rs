@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use crate::execution::AnalysisExecutionContext;
 use chrono::{DateTime, Utc};
 use gix::bstr::ByteSlice;
 use std::collections::HashSet;
@@ -20,9 +21,20 @@ pub fn list_reachable_commits(
     repo: &gix::Repository,
     branch: &str,
 ) -> Result<Vec<IndexedCommit>, AppError> {
+    let context = AnalysisExecutionContext::none();
+    list_reachable_commits_with_context(repo, branch, &context)
+}
+
+pub fn list_reachable_commits_with_context(
+    repo: &gix::Repository,
+    branch: &str,
+    context: &AnalysisExecutionContext,
+) -> Result<Vec<IndexedCommit>, AppError> {
+    context.check_cancelled()?;
     let tip = repo
         .rev_parse_single(branch)
         .map_err(|error| AppError::Repository(error.to_string()))?;
+    context.check_cancelled()?;
     let walk = repo
         .rev_walk([tip.detach()])
         .all()
@@ -30,10 +42,12 @@ pub fn list_reachable_commits(
 
     let mut commits = Vec::new();
     for item in walk {
+        context.check_cancelled()?;
         let info = item.map_err(|error| AppError::Repository(error.to_string()))?;
         let commit = info
             .object()
             .map_err(|error| AppError::Repository(error.to_string()))?;
+        context.check_cancelled()?;
         commits.push(indexed_commit_from_gix(&commit)?);
     }
     Ok(commits)

@@ -199,6 +199,7 @@ fn map_analysis_error(error: AnalysisAppError) -> revier_analysis::contracts::Ap
         AnalysisAppError::DuckDb(_) => "DUCKDB_ERROR",
         AnalysisAppError::Spike(_) => "SPIKE_ERROR",
         AnalysisAppError::Analysis(_) => "ANALYSIS_ERROR",
+        AnalysisAppError::Cancelled => "TASK_CANCELLED",
         AnalysisAppError::Json(_) => "JSON_ERROR",
         AnalysisAppError::Io(_) => "IO_ERROR",
     };

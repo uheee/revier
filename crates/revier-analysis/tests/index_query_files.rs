@@ -1,7 +1,12 @@
 mod fixtures;
 
+use revier_analysis::error::AppError;
+use revier_analysis::execution::AnalysisExecutionContext;
+use revier_analysis::index::queries::QueryFilesFilter;
 use serde_json::Value;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 #[test]
 fn query_files_filters_by_author_message_time_and_glob() {
@@ -55,6 +60,62 @@ fn query_files_filters_by_author_message_time_and_glob() {
     assert!(json["files"][0]["oldPath"].is_null());
     assert_eq!(json["files"][0]["status"], "modified");
     assert_eq!(json["warnings"].as_array().expect("warnings").len(), 0);
+}
+
+#[test]
+fn index_query_files_with_context_returns_cancelled_before_schema_query() {
+    let conn = duckdb::Connection::open_in_memory().expect("创建内存数据库");
+    let context = AnalysisExecutionContext::with_cancel(|| true);
+
+    let error = revier_analysis::index::queries::query_files_with_context(
+        &conn,
+        &QueryFilesFilter {
+            base: "base".to_string(),
+            head: "head".to_string(),
+            authors: Vec::new(),
+            author_query: None,
+            message: None,
+            since: None,
+            until: None,
+            globs: Vec::new(),
+        },
+        &context,
+    )
+    .expect_err("已取消的索引查询不应继续读取 DuckDB");
+
+    assert!(matches!(error, AppError::Cancelled));
+}
+
+#[test]
+fn index_query_files_with_context_returns_cancelled_during_commit_iteration() {
+    let fixture = fixtures::linear_with_authors();
+    let dir = tempfile::tempdir().expect("创建临时目录");
+    let db_path = dir.path().join("index.duckdb");
+    run_index_build(&fixture, &db_path);
+    let conn = revier_analysis::index::connection::open_database(&db_path).expect("打开索引数据库");
+    let checks = Arc::new(AtomicUsize::new(0));
+    let checks_for_context = Arc::clone(&checks);
+    let context = AnalysisExecutionContext::with_cancel(move || {
+        checks_for_context.fetch_add(1, Ordering::SeqCst) >= 4
+    });
+
+    let error = revier_analysis::index::queries::query_files_with_context(
+        &conn,
+        &QueryFilesFilter {
+            base: fixture.base,
+            head: fixture.head,
+            authors: Vec::new(),
+            author_query: None,
+            message: None,
+            since: None,
+            until: None,
+            globs: Vec::new(),
+        },
+        &context,
+    )
+    .expect_err("提交遍历中途取消应返回取消错误");
+
+    assert!(matches!(error, AppError::Cancelled));
 }
 
 #[test]
