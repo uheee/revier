@@ -214,7 +214,8 @@ jobs:
         with:
           name: revier-windows-x64
           path: |
-            target/x86_64-pc-windows-msvc/release/bundle/**/*
+            target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
           if-no-files-found: error
 
   build-linux:
@@ -265,7 +266,9 @@ jobs:
         with:
           name: revier-linux-x64
           path: |
-            target/x86_64-unknown-linux-gnu/release/bundle/**/*
+            target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
   build-macos:
@@ -313,7 +316,7 @@ jobs:
         with:
           name: revier-macos-x64-arm64
           path: |
-            target/universal-apple-darwin/release/bundle/**/*
+            target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
   publish-release:
