@@ -93,6 +93,58 @@ pub fn linear_deletion() -> FixtureRepo {
     }
 }
 
+pub fn changed_then_restored() -> FixtureRepo {
+    let repo = init_repo("changed-then-restored");
+    write_file(repo.path(), "src/app.txt", "base\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_file(repo.path(), "src/app.txt", "base\ntemporary\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: temporary change"]);
+
+    write_file(repo.path(), "src/app.txt", "base\n");
+    git(repo.path(), ["add", "."]);
+    git(
+        repo.path(),
+        ["commit", "-m", "revert: restore base content"],
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "changed-then-restored",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn added_and_deleted_text_files() -> FixtureRepo {
+    let repo = init_repo("added-and-deleted-text-files");
+    write_file(repo.path(), "src/deleted.txt", "old one\nold two\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base file"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    fs::remove_file(repo.path().join("src/deleted.txt")).expect("删除旧文本文件");
+    write_file(
+        repo.path(),
+        "src/added.txt",
+        "new one\nnew two\nnew three\n",
+    );
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: replace text file"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "added-and-deleted-text-files",
+        repo,
+        base,
+        head,
+    }
+}
+
 pub fn replacement_hunk_deletion() -> FixtureRepo {
     let repo = init_repo("replacement-hunk-deletion");
     write_file(repo.path(), "src/app.txt", "keep\ndelete me\ntail\n");
@@ -179,6 +231,55 @@ pub fn linear_with_authors() -> FixtureRepo {
 
     FixtureRepo {
         name: "linear-authors",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn separate_files_with_authors() -> FixtureRepo {
+    let repo = init_repo("separate-files-authors");
+    write_file(repo.path(), "src/app.txt", "base\n");
+    write_file(repo.path(), "docs/notes.txt", "base\n");
+    git_with_author(repo.path(), ["add", "."], "Base", "base@example.com", None);
+    git_with_author(
+        repo.path(),
+        ["commit", "-m", "feat: base"],
+        "Base",
+        "base@example.com",
+        Some("2026-05-01T00:00:00Z"),
+    );
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_file(repo.path(), "src/app.txt", "base\nalice\n");
+    git_with_author(
+        repo.path(),
+        ["add", "."],
+        "Alice",
+        "alice@example.com",
+        None,
+    );
+    git_with_author(
+        repo.path(),
+        ["commit", "-m", "feat: alice app"],
+        "Alice",
+        "alice@example.com",
+        Some("2026-05-02T00:00:00Z"),
+    );
+
+    write_file(repo.path(), "docs/notes.txt", "base\nbob\n");
+    git_with_author(repo.path(), ["add", "."], "Bob", "bob@example.com", None);
+    git_with_author(
+        repo.path(),
+        ["commit", "-m", "docs: bob notes"],
+        "Bob",
+        "bob@example.com",
+        Some("2026-05-03T00:00:00Z"),
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "separate-files-authors",
         repo,
         base,
         head,
@@ -391,6 +492,25 @@ pub fn rename_merge() -> FixtureRepo {
 
     FixtureRepo {
         name: "rename-merge",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn pure_rename() -> FixtureRepo {
+    let repo = init_repo("pure-rename");
+    write_file(repo.path(), "src/old.txt", "alpha\nbeta\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: add old file"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["mv", "src/old.txt", "src/new.txt"]);
+    git(repo.path(), ["commit", "-m", "refactor: rename file"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "pure-rename",
         repo,
         base,
         head,

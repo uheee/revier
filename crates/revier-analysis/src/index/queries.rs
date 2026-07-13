@@ -5,6 +5,7 @@ use crate::json::ChangedFileOutput;
 use chrono::{DateTime, Utc};
 use duckdb::params;
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use std::collections::HashSet;
 
 pub struct IndexStatusRecord {
     pub indexed_commit_count: u64,
@@ -131,12 +132,34 @@ pub fn query_files_with_context(
     filter: &QueryFilesFilter,
     context: &AnalysisExecutionContext,
 ) -> Result<Vec<ChangedFileOutput>, AppError> {
+    query_files_internal(conn, filter, None, context)
+}
+
+pub fn query_files_for_commits_with_context(
+    conn: &duckdb::Connection,
+    filter: &QueryFilesFilter,
+    commit_hashes: &[String],
+    context: &AnalysisExecutionContext,
+) -> Result<Vec<ChangedFileOutput>, AppError> {
+    let commit_hashes = commit_hashes.iter().cloned().collect::<HashSet<_>>();
+    query_files_internal(conn, filter, Some(&commit_hashes), context)
+}
+
+fn query_files_internal(
+    conn: &duckdb::Connection,
+    filter: &QueryFilesFilter,
+    allowed_commits: Option<&HashSet<String>>,
+    context: &AnalysisExecutionContext,
+) -> Result<Vec<ChangedFileOutput>, AppError> {
     context.check_cancelled()?;
     ensure_range_indexed(conn, &filter.base, &filter.head)?;
     context.check_cancelled()?;
     let matcher = build_glob_matcher(&filter.globs)?;
     context.check_cancelled()?;
-    let commits = matching_commits(conn, filter, context)?;
+    let mut commits = matching_commits(conn, filter, context)?;
+    if let Some(allowed_commits) = allowed_commits {
+        commits.retain(|hash| allowed_commits.contains(hash));
+    }
     if commits.is_empty() {
         return Ok(Vec::new());
     }
@@ -180,6 +203,15 @@ pub fn query_files_with_context(
     files.dedup_by(|left, right| left.path == right.path && left.old_path == right.old_path);
     context.check_cancelled()?;
     Ok(files)
+}
+
+pub fn path_matches_globs(
+    rules: &[String],
+    path: &str,
+    old_path: Option<&str>,
+) -> Result<bool, AppError> {
+    let matcher = build_glob_matcher(rules)?;
+    Ok(path_matches(&matcher, path, old_path))
 }
 
 fn ensure_range_indexed(conn: &duckdb::Connection, base: &str, head: &str) -> Result<(), AppError> {

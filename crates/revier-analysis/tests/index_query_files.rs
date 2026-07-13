@@ -59,7 +59,122 @@ fn query_files_filters_by_author_message_time_and_glob() {
     assert_eq!(json["files"][0]["path"], "src/app.txt");
     assert!(json["files"][0]["oldPath"].is_null());
     assert_eq!(json["files"][0]["status"], "modified");
+    assert_eq!(json["files"][0]["additions"], 2);
+    assert_eq!(json["files"][0]["deletions"], 0);
     assert_eq!(json["warnings"].as_array().expect("warnings").len(), 0);
+}
+
+#[test]
+fn query_files_omits_files_restored_to_base_content() {
+    let fixture = fixtures::changed_then_restored();
+    let dir = tempfile::tempdir().expect("创建临时目录");
+    let db_path = dir.path().join("index.duckdb");
+    run_index_build(&fixture, &db_path);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
+        .args([
+            "index",
+            "query-files",
+            "--repo",
+            fixture.repo.path().to_str().expect("repo path"),
+            "--db",
+            db_path.to_str().expect("db path"),
+            "--base",
+            &fixture.base,
+            "--head",
+            &fixture.head,
+            "--branch",
+            "main",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("运行 query-files");
+
+    assert!(
+        output.status.success(),
+        "query-files 应成功，stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout).expect("解析 query json");
+    assert!(json["files"].as_array().expect("files").is_empty());
+}
+
+#[test]
+fn query_files_intersects_filtered_commit_paths_with_final_changes() {
+    let fixture = fixtures::separate_files_with_authors();
+    let dir = tempfile::tempdir().expect("创建临时目录");
+    let db_path = dir.path().join("index.duckdb");
+    run_index_build(&fixture, &db_path);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
+        .args([
+            "index",
+            "query-files",
+            "--repo",
+            fixture.repo.path().to_str().expect("repo path"),
+            "--db",
+            db_path.to_str().expect("db path"),
+            "--base",
+            &fixture.base,
+            "--head",
+            &fixture.head,
+            "--branch",
+            "main",
+            "--author",
+            "alice@example.com",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("运行 query-files");
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).expect("解析 query json");
+    let files = json["files"].as_array().expect("files");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["path"], "src/app.txt");
+    assert_eq!(files[0]["additions"], 1);
+    assert_eq!(files[0]["deletions"], 0);
+}
+
+#[test]
+fn query_files_glob_matches_renamed_old_path() {
+    let fixture = fixtures::pure_rename();
+    let dir = tempfile::tempdir().expect("创建临时目录");
+    let db_path = dir.path().join("index.duckdb");
+    run_index_build(&fixture, &db_path);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_revier-analysis"))
+        .args([
+            "index",
+            "query-files",
+            "--repo",
+            fixture.repo.path().to_str().expect("repo path"),
+            "--db",
+            db_path.to_str().expect("db path"),
+            "--base",
+            &fixture.base,
+            "--head",
+            &fixture.head,
+            "--branch",
+            "main",
+            "--glob",
+            "src/old.txt",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("运行 query-files");
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).expect("解析 query json");
+    let files = json["files"].as_array().expect("files");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["path"], "src/new.txt");
+    assert_eq!(files[0]["oldPath"], "src/old.txt");
+    assert_eq!(files[0]["additions"], 0);
+    assert_eq!(files[0]["deletions"], 0);
 }
 
 #[test]

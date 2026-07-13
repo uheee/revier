@@ -193,13 +193,64 @@ pub fn changed_file_between(
     head_commit: &str,
     requested_path: &str,
 ) -> Result<Option<CommitFileChange>, AppError> {
-    let base = resolve_commit(repo, base_commit)?;
-    let head = resolve_commit(repo, head_commit)?;
-    let changes = pairwise_file_changes(repo, &base, &head, 0)?;
+    let changes = range_file_changes(repo, base_commit, head_commit)?;
 
     Ok(changes.into_iter().find(|change| {
         change.path == requested_path || change.old_path.as_deref() == Some(requested_path)
     }))
+}
+
+pub fn range_file_changes(
+    repo: &gix::Repository,
+    base_commit: &str,
+    head_commit: &str,
+) -> Result<Vec<CommitFileChange>, AppError> {
+    let base = resolve_commit(repo, base_commit)?;
+    let head = resolve_commit(repo, head_commit)?;
+    let mut changes = pairwise_file_changes(repo, &base, &head, 0)?;
+    for change in &mut changes {
+        populate_range_line_counts(repo, base_commit, head_commit, change)?;
+    }
+    Ok(changes)
+}
+
+fn populate_range_line_counts(
+    repo: &gix::Repository,
+    base_commit: &str,
+    head_commit: &str,
+    change: &mut CommitFileChange,
+) -> Result<(), AppError> {
+    if change.is_binary {
+        return Ok(());
+    }
+
+    let old_text = if change.status == "added" {
+        String::new()
+    } else {
+        crate::git::blob::read_text_at_commit(
+            repo,
+            base_commit,
+            change.old_path.as_deref().unwrap_or(&change.path),
+        )?
+    };
+    let new_text = if change.status == "deleted" {
+        String::new()
+    } else {
+        crate::git::blob::read_text_at_commit(repo, head_commit, &change.path)?
+    };
+
+    for part in crate::overlay::line_diff::diff_lines(&old_text, &new_text) {
+        match part {
+            crate::overlay::line_diff::LineDiffPart::Added(lines) => {
+                change.additions += lines.len() as u64;
+            }
+            crate::overlay::line_diff::LineDiffPart::Removed(lines) => {
+                change.deletions += lines.len() as u64;
+            }
+            crate::overlay::line_diff::LineDiffPart::Equal(_) => {}
+        }
+    }
+    Ok(())
 }
 
 fn pairwise_file_changes(

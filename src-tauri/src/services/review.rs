@@ -1018,6 +1018,8 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "src/app.txt");
         assert!(matches!(files[0].status, ChangedFileStatus::Modified));
+        assert_eq!(files[0].additions, 1);
+        assert_eq!(files[0].deletions, 0);
     }
 
     #[test]

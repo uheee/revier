@@ -61,7 +61,9 @@ pub fn query_request_with_context(
     context.check_cancelled()?;
     crate::index::migrations::ensure_compatible_schema(&conn)?;
     context.check_cancelled()?;
-    let files = crate::index::queries::query_files_with_context(
+    let range_hashes = crate::git::commits::range_commit_hashes(&repo, &args.base, &args.head)?;
+    context.check_cancelled()?;
+    let touched_files = crate::index::queries::query_files_for_commits_with_context(
         &conn,
         &QueryFilesFilter {
             base: args.base.clone(),
@@ -71,10 +73,38 @@ pub fn query_request_with_context(
             message: args.message,
             since: args.since,
             until: args.until,
-            globs: args.globs,
+            globs: Vec::new(),
         },
+        &range_hashes,
         context,
     )?;
+    context.check_cancelled()?;
+    let final_changes = crate::git::diff::range_file_changes(&repo, &args.base, &args.head)?;
+    let mut files = Vec::new();
+    for change in final_changes {
+        context.check_cancelled()?;
+        if !touched_files
+            .iter()
+            .any(|touched| paths_overlap(&change, touched))
+            || !crate::index::queries::path_matches_globs(
+                &args.globs,
+                &change.path,
+                change.old_path.as_deref(),
+            )?
+        {
+            continue;
+        }
+        files.push(crate::json::ChangedFileOutput {
+            path: change.path,
+            old_path: change.old_path,
+            status: change.status,
+            additions: change.additions,
+            deletions: change.deletions,
+            is_binary: change.is_binary,
+            is_previewable: change.is_previewable,
+        });
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
 
     Ok(QueryFilesOutput {
         version: 1,
@@ -85,4 +115,15 @@ pub fn query_request_with_context(
         files,
         warnings: Vec::new(),
     })
+}
+
+fn paths_overlap(
+    change: &crate::git::diff::CommitFileChange,
+    touched: &crate::json::ChangedFileOutput,
+) -> bool {
+    change.path == touched.path
+        || change.old_path.as_deref() == Some(touched.path.as_str())
+        || touched.old_path.as_deref().is_some_and(|old_path| {
+            change.path == old_path || change.old_path.as_deref() == Some(old_path)
+        })
 }
