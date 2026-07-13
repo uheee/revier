@@ -4,7 +4,9 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use revier_analysis::api::QueryFilesRequest;
-use revier_analysis::cli::{FileOverlayArgs, OutputFormat, OverlayCommonArgs};
+use revier_analysis::cli::{
+    FileOverlayArgs, IndexBuildArgs, IndexCommonArgs, OutputFormat, OverlayCommonArgs,
+};
 use revier_analysis::contracts::{
     AnalysisRange, AnalysisStage, AnalysisTaskSnapshot, AnalysisTaskStatus, AttributionConfidence,
     AttributionMethod, AttributionWarning, AttributionWarningCode, AuthorFilterOption,
@@ -411,6 +413,16 @@ impl ReviewService {
         .map_err(map_analysis_error)?;
 
         self.ensure_not_cancelled(task_id)?;
+        self.mark_running(task_id, AnalysisStage::LoadChangedFiles, "准备仓库索引");
+        ensure_analysis_index(
+            &repo_path,
+            &range.branch,
+            &range.base_commit,
+            &range.head_commit,
+        )
+        .map_err(map_analysis_error)?;
+
+        self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::LoadChangedFiles, "读取变更文件");
         let output = revier_analysis::api::query_files_with_context(
             QueryFilesRequest {
@@ -571,6 +583,39 @@ impl ReviewService {
                 )
             })
     }
+}
+
+fn ensure_analysis_index(
+    repo_path: &Path,
+    branch: &str,
+    base: &str,
+    head: &str,
+) -> Result<(), AnalysisAppError> {
+    let repo = revier_analysis::git::repository::open_repository(repo_path)?;
+    let identity = revier_analysis::git::repository::repository_identity(&repo)?;
+    let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)?;
+    if db_path.exists() && range_is_indexed(&db_path, base, head)? {
+        return Ok(());
+    }
+
+    revier_analysis::commands::index_build::run(IndexBuildArgs {
+        common: IndexCommonArgs {
+            repo: repo_path.to_path_buf(),
+            db: Some(db_path),
+            format: OutputFormat::Json,
+            pretty: false,
+        },
+        branch: branch.to_string(),
+    })?;
+    Ok(())
+}
+
+fn range_is_indexed(db_path: &Path, base: &str, head: &str) -> Result<bool, AnalysisAppError> {
+    let conn = revier_analysis::index::connection::open_database(db_path)?;
+    revier_analysis::index::migrations::ensure_compatible_schema(&conn)?;
+    let base_indexed = revier_analysis::index::queries::commit_exists(&conn, base)?;
+    let head_indexed = revier_analysis::index::queries::commit_exists(&conn, head)?;
+    Ok(base_indexed && head_indexed)
 }
 
 fn overlay_common_args(context: &ReviewTaskContext) -> OverlayCommonArgs {
@@ -1171,7 +1216,7 @@ mod tests {
     }
 
     #[test]
-    fn start_analysis_returns_error_and_does_not_complete_when_index_missing() {
+    fn start_analysis_builds_index_and_completes_when_index_missing() {
         let fixture = create_linear_repo();
         let app_data_dir = tempdir().expect("创建应用数据目录失败");
         let _env = isolated_app_data(app_data_dir.path());
@@ -1184,16 +1229,62 @@ mod tests {
             .expect("添加项目失败");
         let service = ReviewService::default();
 
-        let error = service
+        let task = service
             .start_analysis(&projects, review_filters(project.id))
-            .expect_err("索引缺失时不应完成分析");
+            .expect("索引缺失时应自动构建并完成分析");
 
-        assert_eq!(error.code, "INDEX_UNAVAILABLE");
+        assert!(matches!(task.status, AnalysisTaskStatus::Completed));
+        let files = service
+            .list_changed_files(&task.task_id)
+            .expect("读取缓存文件失败");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "src/app.txt");
+        let repo = revier_analysis::git::repository::open_repository(fixture.path())
+            .expect("打开仓库失败");
+        let identity =
+            revier_analysis::git::repository::repository_identity(&repo).expect("读取仓库标识失败");
+        let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
+            .expect("生成默认索引路径失败");
+        assert!(db_path.exists(), "应创建默认索引文件");
         let tasks = service.tasks.lock().expect("任务锁被污染");
         assert_eq!(tasks.len(), 1);
-        let task = tasks.values().next().expect("应创建失败任务");
-        assert!(!matches!(task.status, AnalysisTaskStatus::Completed));
-        assert!(matches!(task.status, AnalysisTaskStatus::Failed));
+        let task = tasks.values().next().expect("应创建完成任务");
+        assert!(matches!(task.status, AnalysisTaskStatus::Completed));
+    }
+
+    #[test]
+    fn start_analysis_rebuilds_index_and_completes_when_head_is_missing() {
+        let fixture = create_linear_repo();
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        build_default_index(fixture.path());
+        write_file(fixture.path(), "src/app.txt", "one\ntwo\nthree\n");
+        git_commit_with_author(
+            fixture.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-12T00:00:00Z",
+            "feat: add third line",
+        );
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let service = ReviewService::default();
+
+        let task = service
+            .start_analysis(&projects, review_filters(project.id))
+            .expect("索引存在但 head 缺失时应重建并完成分析");
+
+        assert!(matches!(task.status, AnalysisTaskStatus::Completed));
+        let files = service
+            .list_changed_files(&task.task_id)
+            .expect("读取缓存文件失败");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "src/app.txt");
     }
 
     #[test]
