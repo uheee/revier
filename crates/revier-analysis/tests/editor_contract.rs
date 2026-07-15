@@ -55,8 +55,20 @@ fn text_encoding_使用精确_json_值() {
         "\"utf-16be\""
     );
     assert_eq!(
+        serde_json::to_string(&ResolvedTextEncoding::Utf8).unwrap(),
+        "\"utf-8\""
+    );
+    assert_eq!(
+        serde_json::to_string(&ResolvedTextEncoding::Gb18030).unwrap(),
+        "\"gb18030\""
+    );
+    assert_eq!(
         serde_json::to_string(&ResolvedTextEncoding::Utf16Le).unwrap(),
         "\"utf-16le\""
+    );
+    assert_eq!(
+        serde_json::to_string(&ResolvedTextEncoding::Utf16Be).unwrap(),
+        "\"utf-16be\""
     );
 }
 
