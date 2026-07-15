@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Revier Monaco 编辑器最终视觉稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+      color: #273448;
+      background: #e9edf2;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 50% -20%, rgb(15 118 110 / 11%), transparent 38rem), #e9edf2;
+    }
+
+    main {
+      width: min(1500px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 32px 0 48px;
+    }
+
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 26px 0 10px; font-size: 18px; }
+
+    .lead {
+      max-width: 980px;
+      margin: 0 0 22px;
+      color: #667085;
+      font-size: 14px;
+      line-height: 1.75;
+    }
+
+    .preview {
+      display: block;
+      width: 100%;
+      border: 1px solid #cdd6e0;
+      border-radius: 10px;
+      box-shadow: 0 18px 42px rgb(15 23 42 / 12%);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      padding: 14px 16px;
+      background: #fff;
+      border: 1px solid #d7dfe8;
+      border-radius: 8px;
+    }
+
+    .card b { display: block; margin-bottom: 6px; color: #0f766e; }
+    .card p { margin: 0; color: #667085; font-size: 13px; line-height: 1.65; }
+
+    .tokens {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .token {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 9px;
+      background: #fff;
+      border: 1px solid #d7dfe8;
+      border-radius: 6px;
+      color: #596679;
+      font-family: "JetBrainsMono Nerd Font Mono", "Microsoft YaHei", monospace;
+      font-size: 12px;
+    }
+
+    .swatch { width: 13px; height: 13px; border-radius: 3px; background: var(--color); }
+
+    .note {
+      margin-top: 22px;
+      padding: 12px 14px;
+      color: #526174;
+      background: #e2f1ee;
+      border-left: 3px solid #0f766e;
+      border-radius: 5px;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Revier Monaco 编辑器最终视觉稿</h1>
+    <p class="lead">最终方案融合 IDE 工具感与 Review 语义，完整支持浅色/深色主题。左栏保留全部筛选，代码区使用 Monaco 原生 Diff 和 Minimap，作者信息进入独立 AuthorRail，底部状态栏承载编码与语言交互。</p>
+
+    <img class="preview" src="./2026-07-16-revier-monaco-editor-visual.png" alt="Revier Monaco 编辑器浅色与深色最终视觉方案" />
+
+    <h2>关键视觉规则</h2>
+    <section class="grid">
+      <article class="card"><b>IDE 工具结构</b><p>保留标签、命令入口、Minimap 和底部状态栏。顶部不重复显示语言和 Minimap 开关。</p></article>
+      <article class="card"><b>连续块边界</b><p>旧侧深红、新侧深绿，teal 只绘制块首和块尾；多行块内部不出现横线。</p></article>
+      <article class="card"><b>外置 AuthorRail</b><p>作者列位于 Monaco 最右侧，严格服从块高度；空间不足时显示 `…` 并向左展开完整列表。</p></article>
+      <article class="card"><b>筛选区保留</b><p>分支、时间、作者、提交信息、文件规则和变更文件列表继续位于左栏。</p></article>
+      <article class="card"><b>完整主题</b><p>浅色和深色覆盖整个工作台、弹层和状态栏，不使用浅色外壳与深色编辑器拼接。</p></article>
+      <article class="card"><b>草稿语义</b><p>首次编辑后隐藏真实块边界和 AuthorRail，右栏显示临时草稿不提供归因。</p></article>
+    </section>
+
+    <h2>核心颜色</h2>
+    <div class="tokens">
+      <span class="token"><i class="swatch" style="--color:#0F766E"></i>Light Accent #0F766E</span>
+      <span class="token"><i class="swatch" style="--color:#2DD4BF"></i>Dark Accent #2DD4BF</span>
+      <span class="token"><i class="swatch" style="--color:#FBE7E5"></i>Light Removed #FBE7E5</span>
+      <span class="token"><i class="swatch" style="--color:#E2F3E8"></i>Light Added #E2F3E8</span>
+      <span class="token"><i class="swatch" style="--color:#3E262C"></i>Dark Removed #3E262C</span>
+      <span class="token"><i class="swatch" style="--color:#1D3A30"></i>Dark Added #1D3A30</span>
+    </div>
+
+    <p class="note">字体顺序：`JetBrainsMono Nerd Font Mono` → `Microsoft YaHei` → `monospace`。详细布局、交互、数据流、TOML 配置和验收规则见同目录的设计文档。</p>
+  </main>
+</body>
+</html>
