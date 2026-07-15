@@ -25,14 +25,17 @@
     "generate:bindings:check": "pnpm generate:bindings && git diff --exit-code -- src/renderer/generated/bindings.ts"
   },
   "dependencies": {
+    "@shikijs/monaco": "^4.3.1",
     "@tauri-apps/api": "^2.11.1",
     "@vueuse/components": "^10.11.0",
     "@vueuse/core": "^10.11.0",
     "diff": "^5.2.0",
     "lucide-vue-next": "^0.468.0",
     "minimatch": "^9.0.5",
+    "monaco-editor": "^0.55.1",
     "naive-ui": "^2.44.1",
     "pinia": "^2.2.2",
+    "shiki": "^4.3.1",
     "vue": "^3.5.0",
     "vue-router": "^4.4.3"
   },
