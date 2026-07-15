@@ -89,11 +89,15 @@ export type AuthorSummary = AuthorSummary_Serialize | AuthorSummary_Deserialize;
 export type AuthorSummary_Deserialize = {
 	name: string,
 	email?: string,
+	commitCount: number,
+	lastCommittedAt: string,
 };
 
 export type AuthorSummary_Serialize = {
 	name: string,
 	email?: string,
+	commitCount: number,
+	lastCommittedAt: string,
 };
 
 export type BlockAttributionSummary = {
@@ -125,10 +129,20 @@ export type ChangedFile_Serialize = {
 	isPreviewable: boolean,
 };
 
-export type CommitOverlayRequest = {
+export type CommitOverlayRequest = CommitOverlayRequest_Serialize | CommitOverlayRequest_Deserialize;
+
+export type CommitOverlayRequest_Deserialize = {
 	taskId: string,
 	filePath: string,
 	commitHash: string,
+	encoding?: TextEncoding,
+};
+
+export type CommitOverlayRequest_Serialize = {
+	taskId: string,
+	filePath: string,
+	commitHash: string,
+	encoding?: TextEncoding,
 };
 
 export type DiffBlock = DiffBlock_Serialize | DiffBlock_Deserialize;
@@ -170,13 +184,87 @@ export type DirectorySelection = {
 	name: string,
 };
 
+export type EditorFontSettings = {
+	fontFamilies: string[],
+	fontSize: number,
+	lineHeight: number,
+	minimap: boolean,
+};
+
+export type EditorSettings = {
+	version: number,
+	theme: EditorThemeMode,
+	defaultEncoding: TextEncoding,
+	editor: EditorFontSettings,
+	largeFile: LargeFileSettings,
+	themes: EditorThemes,
+};
+
+export type EditorSettingsSnapshot = EditorSettingsSnapshot_Serialize | EditorSettingsSnapshot_Deserialize;
+
+export type EditorSettingsSnapshot_Deserialize = {
+	settings: EditorSettings,
+	configPath: string,
+	warning?: string,
+};
+
+export type EditorSettingsSnapshot_Serialize = {
+	settings: EditorSettings,
+	configPath: string,
+	warning?: string,
+};
+
+export type EditorSyntaxColors = {
+	comment: string,
+	keyword: string,
+	string: string,
+	number: string,
+	type: string,
+	function: string,
+	variable: string,
+};
+
+export type EditorThemeColors = {
+	workspaceBackground: string,
+	panelBackground: string,
+	editorBackground: string,
+	border: string,
+	foreground: string,
+	muted: string,
+	accent: string,
+	selection: string,
+	diffRemoved: string,
+	diffRemovedStrong: string,
+	diffRemovedWord: string,
+	diffAdded: string,
+	diffAddedStrong: string,
+	diffAddedWord: string,
+	syntax: EditorSyntaxColors,
+};
+
+export type EditorThemeMode = "system" | "light" | "dark";
+
+export type EditorThemes = {
+	light: EditorThemeColors,
+	dark: EditorThemeColors,
+};
+
 export type FileOverlay = FileOverlay_Serialize | FileOverlay_Deserialize;
 
 export type FileOverlayMode = "range" | "commit";
 
-export type FileOverlayRequest = {
+export type FileOverlayRequest = FileOverlayRequest_Serialize | FileOverlayRequest_Deserialize;
+
+export type FileOverlayRequest_Deserialize = {
 	taskId: string,
 	filePath: string,
+	encoding?: TextEncoding,
+};
+
+export type FileOverlayRequest_Serialize = {
+	taskId: string,
+	filePath: string,
+	encoding?: TextEncoding,
 };
 
 export type FileOverlay_Deserialize = {
@@ -188,6 +276,9 @@ export type FileOverlay_Deserialize = {
 	warnings: AppError_Deserialize[],
 	commit?: RelatedCommit_Deserialize,
 	parentHash?: string,
+	oldContent: string,
+	newContent: string,
+	resolvedEncoding: ResolvedTextEncoding,
 };
 
 export type FileOverlay_Serialize = {
@@ -199,11 +290,19 @@ export type FileOverlay_Serialize = {
 	warnings: AppError_Serialize[],
 	commit?: RelatedCommit_Serialize,
 	parentHash?: string,
+	oldContent: string,
+	newContent: string,
+	resolvedEncoding: ResolvedTextEncoding,
 };
 
 export type GitBranch = {
 	name: string,
 	current: boolean,
+};
+
+export type LargeFileSettings = {
+	maxBytes: number,
+	maxLines: number,
 };
 
 export type ProjectPreferences = ProjectPreferences_Serialize | ProjectPreferences_Deserialize;
@@ -291,6 +390,8 @@ export type RepositoryValidation_Serialize = {
 	error?: string,
 };
 
+export type ResolvedTextEncoding = "utf-8" | "gb18030" | "utf-16le" | "utf-16be";
+
 export type ReviewAuthorOptionsRequest = ReviewAuthorOptionsRequest_Serialize | ReviewAuthorOptionsRequest_Deserialize;
 
 export type ReviewAuthorOptionsRequest_Deserialize = {
@@ -374,6 +475,8 @@ export type SideBySideDiffRow_Serialize = {
 	wordChanges?: WordChange_Serialize[],
 	blockId?: string,
 };
+
+export type TextEncoding = "auto" | "utf-8" | "gb18030" | "utf-16le" | "utf-16be";
 
 export type TouchedRange = TouchedRange_Serialize | TouchedRange_Deserialize;
 

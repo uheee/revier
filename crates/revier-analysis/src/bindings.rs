@@ -7,6 +7,16 @@ use crate::contracts::*;
 
 pub fn export_typescript_bindings(output: &Path) -> Result<(), std::io::Error> {
     let types = Types::default()
+        .register::<TextEncoding>()
+        .register::<ResolvedTextEncoding>()
+        .register::<EditorThemeMode>()
+        .register::<EditorFontSettings>()
+        .register::<LargeFileSettings>()
+        .register::<EditorSyntaxColors>()
+        .register::<EditorThemeColors>()
+        .register::<EditorThemes>()
+        .register::<EditorSettings>()
+        .register::<EditorSettingsSnapshot>()
         .register::<AppError>()
         .register::<ProjectReviewFilters>()
         .register::<ProjectPreferences>()

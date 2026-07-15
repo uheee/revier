@@ -4,6 +4,118 @@ use specta::Type;
 pub type ProjectId = String;
 pub type TaskId = String;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub enum TextEncoding {
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "utf-8")]
+    Utf8,
+    #[serde(rename = "gb18030")]
+    Gb18030,
+    #[serde(rename = "utf-16le")]
+    Utf16Le,
+    #[serde(rename = "utf-16be")]
+    Utf16Be,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub enum ResolvedTextEncoding {
+    #[serde(rename = "utf-8")]
+    Utf8,
+    #[serde(rename = "gb18030")]
+    Gb18030,
+    #[serde(rename = "utf-16le")]
+    Utf16Le,
+    #[serde(rename = "utf-16be")]
+    Utf16Be,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum EditorThemeMode {
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorFontSettings {
+    pub font_families: Vec<String>,
+    pub font_size: u32,
+    pub line_height: u32,
+    pub minimap: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LargeFileSettings {
+    #[specta(type = u32)]
+    pub max_bytes: u64,
+    #[specta(type = u32)]
+    pub max_lines: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorSyntaxColors {
+    pub comment: String,
+    pub keyword: String,
+    pub string: String,
+    pub number: String,
+    pub r#type: String,
+    pub function: String,
+    pub variable: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorThemeColors {
+    pub workspace_background: String,
+    pub panel_background: String,
+    pub editor_background: String,
+    pub border: String,
+    pub foreground: String,
+    pub muted: String,
+    pub accent: String,
+    pub selection: String,
+    pub diff_removed: String,
+    pub diff_removed_strong: String,
+    pub diff_removed_word: String,
+    pub diff_added: String,
+    pub diff_added_strong: String,
+    pub diff_added_word: String,
+    pub syntax: EditorSyntaxColors,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorThemes {
+    pub light: EditorThemeColors,
+    pub dark: EditorThemeColors,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorSettings {
+    pub version: u32,
+    pub theme: EditorThemeMode,
+    pub default_encoding: TextEncoding,
+    pub editor: EditorFontSettings,
+    pub large_file: LargeFileSettings,
+    pub themes: EditorThemes,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorSettingsSnapshot {
+    pub settings: EditorSettings,
+    pub config_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = std::string::String)]
+    pub warning: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AppError {
@@ -201,6 +313,9 @@ pub struct ChangedFile {
 pub struct FileOverlayRequest {
     pub task_id: TaskId,
     pub file_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = crate::contracts::TextEncoding)]
+    pub encoding: Option<TextEncoding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -222,6 +337,9 @@ pub struct CommitOverlayRequest {
     pub task_id: TaskId,
     pub file_path: String,
     pub commit_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = crate::contracts::TextEncoding)]
+    pub encoding: Option<TextEncoding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -231,6 +349,9 @@ pub struct AuthorSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[specta(optional, type = std::string::String)]
     pub email: Option<String>,
+    #[specta(type = u32)]
+    pub commit_count: u64,
+    pub last_committed_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -433,4 +554,7 @@ pub struct FileOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[specta(optional, type = std::string::String)]
     pub parent_hash: Option<String>,
+    pub old_content: String,
+    pub new_content: String,
+    pub resolved_encoding: ResolvedTextEncoding,
 }
