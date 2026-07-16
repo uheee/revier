@@ -88,6 +88,8 @@ Task 编号与章节位置保持不变，以维持既有提交、审查记录和
   - 导出编码模块。
 - `crates/revier-analysis/src/cli.rs`
   - `file-overlay` 接收 `--encoding`。
+- `crates/revier-analysis/src/commands/trace_block.rs`
+  - 构造内部 `FileOverlayArgs` 时显式沿用 `auto`，保持 trace-block 现有 CLI 语义。
 - `crates/revier-analysis/src/contracts.rs`
   - 增加编码、完整文本、作者统计和编辑器设置契约。
 - `crates/revier-analysis/src/bindings.rs`、`src/renderer/generated/bindings.ts`
@@ -98,6 +100,8 @@ Task 编号与章节位置保持不变，以维持既有提交、审查记录和
   - 内部保留真实变更类型，并让非 UTF-8 文本仍可出现在文件列表中。
 - `crates/revier-analysis/src/overlay/file_overlay.rs`、`crates/revier-analysis/src/json.rs`
   - 输出完整文本与实际编码。
+- `crates/revier-analysis/tests/fixtures.rs`
+  - 为共享 `FileOverlayArgs` 测试夹具补充 `auto` 编码。
 - `src-tauri/src/state.rs`、`src-tauri/src/lib.rs`、`src-tauri/src/services/mod.rs`、`src-tauri/src/commands/mod.rs`
   - 启动时加载一次设置并注册命令。
 - `src-tauri/src/services/review.rs`
@@ -581,11 +585,13 @@ git commit -m "feat(settings): 从 TOML 加载编辑器设置"
 - Create: `crates/revier-analysis/tests/text_encoding.rs`
 - Modify: `crates/revier-analysis/src/lib.rs`
 - Modify: `crates/revier-analysis/src/cli.rs`
+- Modify: `crates/revier-analysis/src/commands/trace_block.rs`
 - Modify: `crates/revier-analysis/src/git/blob.rs`
 - Modify: `crates/revier-analysis/src/git/diff.rs`
 - Modify: `crates/revier-analysis/src/commands/query_files.rs`
 - Modify: `crates/revier-analysis/src/json.rs`
 - Modify: `crates/revier-analysis/src/overlay/file_overlay.rs`
+- Modify: `crates/revier-analysis/tests/fixtures.rs`
 - Modify: `crates/revier-analysis/tests/file_overlay_cli.rs`
 
 - [ ] **Step 1: 编写解码失败测试**
@@ -638,6 +644,8 @@ GB18030 使用 `encoding_rs::GB18030.decode_without_bom_handling_and_without_rep
 pub encoding: String,
 ```
 
+`commands/trace_block.rs` 和 `tests/fixtures.rs` 中现有的 `FileOverlayArgs` 构造器显式设置 `encoding: "auto".to_string()`；这只是调用方适配，不给 `trace-block` 增加新的 CLI 参数。
+
 在 `build_file_overlay` 中解析为 `TextEncoding`。对同一历史文件使用一个解析后编码：优先以新侧 Blob（删除文件用旧侧）解析 `auto`，再用该 `ResolvedTextEncoding` 严格解码左右两侧；这样 `FileOverlay.resolvedEncoding` 始终有唯一含义。编码发生历史切换时要求用户手动选择，不偷偷让两侧使用不同编码。
 
 `build_file_overlay` 不得仅因 `change.is_binary` 提前返回；先按请求编码尝试严格解码。解码成功时 Overlay 的 `file.status` 使用内部真实变更类型，`isBinary=false`、`isPreviewable=true`；解码仍呈现明显二进制或失败时才返回不可分析错误。这样 BOM UTF-16 和通过 TOML 指定的 BOM-less UTF-16 能进入编辑器，真实二进制仍不可预览。
@@ -681,7 +689,7 @@ cargo test -p revier-analysis
 运行：
 
 ```powershell
-git add crates/revier-analysis/src/text_encoding.rs crates/revier-analysis/tests/text_encoding.rs crates/revier-analysis/src/lib.rs crates/revier-analysis/src/cli.rs crates/revier-analysis/src/git/blob.rs crates/revier-analysis/src/git/diff.rs crates/revier-analysis/src/commands/query_files.rs crates/revier-analysis/src/json.rs crates/revier-analysis/src/overlay/file_overlay.rs crates/revier-analysis/tests/file_overlay_cli.rs
+git add crates/revier-analysis/src/text_encoding.rs crates/revier-analysis/tests/text_encoding.rs crates/revier-analysis/src/lib.rs crates/revier-analysis/src/cli.rs crates/revier-analysis/src/commands/trace_block.rs crates/revier-analysis/src/git/blob.rs crates/revier-analysis/src/git/diff.rs crates/revier-analysis/src/commands/query_files.rs crates/revier-analysis/src/json.rs crates/revier-analysis/src/overlay/file_overlay.rs crates/revier-analysis/tests/fixtures.rs crates/revier-analysis/tests/file_overlay_cli.rs
 git commit -m "feat(overlay): 按指定编码返回完整文件文本"
 ```
 
