@@ -32,7 +32,10 @@ const commitOverlay: FileOverlay = {
     matchedByFilter: false,
     touchedRanges: []
   },
-  parentHash: 'parent'
+  parentHash: 'parent',
+  oldContent: 'old',
+  newContent: 'new',
+  resolvedEncoding: 'utf-8'
 };
 
 describe('DiffDrilldownOverlay', () => {

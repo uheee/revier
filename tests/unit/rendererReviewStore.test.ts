@@ -72,7 +72,14 @@ const block: DiffBlock = {
   newStart: 1,
   newEnd: 3,
   changeType: 'modified',
-  authors: [{ name: 'Snowind', email: 'jinks.tao@gmail.com' }],
+  authors: [
+    {
+      name: 'Snowind',
+      email: 'jinks.tao@gmail.com',
+      commitCount: 1,
+      lastCommittedAt: '2026-05-10T00:00:00.000Z'
+    }
+  ],
   rows: [],
   relatedCommits: []
 };
@@ -87,7 +94,10 @@ const overlay: FileOverlay = {
   },
   blocks: [block],
   rows: [],
-  warnings: []
+  warnings: [],
+  oldContent: 'old',
+  newContent: 'new',
+  resolvedEncoding: 'utf-8'
 };
 
 describe('renderer reviewStore', () => {

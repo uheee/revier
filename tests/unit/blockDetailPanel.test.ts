@@ -12,7 +12,14 @@ const block: DiffBlock = {
   rowStartIndex: 0,
   rowEndIndex: 0,
   changeType: 'modified',
-  authors: [{ name: 'Alice', email: 'alice@example.com' }],
+  authors: [
+    {
+      name: 'Alice',
+      email: 'alice@example.com',
+      commitCount: 1,
+      lastCommittedAt: '2026-05-10T00:00:00.000Z'
+    }
+  ],
   rows: [],
   relatedCommits: [
     {

@@ -68,12 +68,22 @@ const overlay: FileOverlay = {
       rowStartIndex: 1,
       rowEndIndex: 3,
       changeType: 'modified',
-      authors: [{ name: 'Alice', email: 'alice@example.com' }],
+      authors: [
+        {
+          name: 'Alice',
+          email: 'alice@example.com',
+          commitCount: 1,
+          lastCommittedAt: '2026-05-10T00:00:00.000Z'
+        }
+      ],
       rows: [],
       relatedCommits: []
     }
   ],
-  warnings: []
+  warnings: [],
+  oldContent: 'same\nold-1\nold-2\nold-3\nafter',
+  newContent: 'same\nnew-1\nnew-2\nnew-3\nafter',
+  resolvedEncoding: 'utf-8'
 };
 
 type DiffViewerTestProps = {
