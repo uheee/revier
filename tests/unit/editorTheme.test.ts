@@ -40,6 +40,8 @@ describe('编辑器主题转换', () => {
       toFontFamily(['JetBrainsMono Nerd Font Mono', 'Microsoft YaHei', 'monospace'])
     ).toBe('"JetBrainsMono Nerd Font Mono", "Microsoft YaHei", monospace');
     expect(toFontFamily(['Fira Code', 'sans-serif'])).toBe('"Fira Code", sans-serif');
+    expect(toFontFamily([' ', '', 'monospace'])).toBe('monospace');
+    expect(toFontFamily([])).toBe('monospace');
   });
 
   it('只在 system 模式解析系统深色偏好', () => {
@@ -84,8 +86,11 @@ describe('编辑器主题转换', () => {
       'editor.foreground': colors.foreground,
       'contrastBorder': colors.border,
       'focusBorder': colors.accent,
-      'diffEditor.removedLineBackground': colors.diffRemoved,
-      'diffEditor.insertedLineBackground': colors.diffAdded
+      'diffEditor.removedLineBackground': `${colors.diffRemoved}99`,
+      'diffEditor.removedTextBackground': `${colors.diffRemovedWord}CC`,
+      'diffEditor.insertedLineBackground': `${colors.diffAdded}99`,
+      'diffEditor.insertedTextBackground': `${colors.diffAddedWord}CC`,
+      'editor.inactiveSelectionBackground': `${colors.selection}80`
     });
     expect(shiki).toMatchObject({
       name: 'revier-test',
@@ -100,5 +105,23 @@ describe('编辑器主题转换', () => {
         'diffEditor.insertedLineBackground': colors.diffAdded
       }
     });
+
+    const shikiSettings = shiki.settings ?? [];
+    expect(shikiSettings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scope: expect.arrayContaining(['constant.numeric']),
+          settings: { foreground: colors.syntax.number }
+        }),
+        expect.objectContaining({
+          scope: expect.arrayContaining(['entity.name.function', 'support.function']),
+          settings: { foreground: colors.syntax.function }
+        }),
+        expect.objectContaining({
+          scope: expect.arrayContaining(['entity.name.type', 'support.type']),
+          settings: { foreground: colors.syntax.type }
+        })
+      ])
+    );
   });
 });

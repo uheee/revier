@@ -41,7 +41,45 @@ function tokenRules(theme: EditorThemeColors): editor.ITokenThemeRule[] {
   ];
 }
 
-function sharedEditorColors(theme: EditorThemeColors): Record<string, string> {
+const inactiveSelectionAlpha = '80';
+const diffLineAlpha = '99';
+const diffTextAlpha = 'CC';
+
+function withAlpha(color: string, alpha: string): string {
+  return `${color}${alpha}`;
+}
+
+function shikiTokenRules(theme: EditorThemeColors): NonNullable<ThemeRegistration['settings']> {
+  return [
+    {
+      scope: ['comment', 'punctuation.definition.comment'],
+      settings: { foreground: theme.syntax.comment }
+    },
+    {
+      scope: ['keyword', 'storage.type', 'storage.modifier'],
+      settings: { foreground: theme.syntax.keyword }
+    },
+    {
+      scope: ['string', 'punctuation.definition.string'],
+      settings: { foreground: theme.syntax.string }
+    },
+    { scope: ['constant.numeric'], settings: { foreground: theme.syntax.number } },
+    {
+      scope: ['entity.name.type', 'support.type', 'storage.type.class'],
+      settings: { foreground: theme.syntax.type }
+    },
+    {
+      scope: ['entity.name.function', 'support.function', 'meta.function-call'],
+      settings: { foreground: theme.syntax.function }
+    },
+    {
+      scope: ['variable', 'entity.name.variable'],
+      settings: { foreground: theme.syntax.variable }
+    }
+  ];
+}
+
+function shikiEditorColors(theme: EditorThemeColors): Record<string, string> {
   return {
     'editor.background': theme.editorBackground,
     'editor.foreground': theme.foreground,
@@ -66,16 +104,29 @@ function sharedEditorColors(theme: EditorThemeColors): Record<string, string> {
   };
 }
 
+function monacoEditorColors(theme: EditorThemeColors): Record<string, string> {
+  return {
+    ...shikiEditorColors(theme),
+    'editor.inactiveSelectionBackground': withAlpha(theme.selection, inactiveSelectionAlpha),
+    'diffEditor.removedLineBackground': withAlpha(theme.diffRemoved, diffLineAlpha),
+    'diffEditor.removedTextBackground': withAlpha(theme.diffRemovedWord, diffTextAlpha),
+    'diffEditor.insertedLineBackground': withAlpha(theme.diffAdded, diffLineAlpha),
+    'diffEditor.insertedTextBackground': withAlpha(theme.diffAddedWord, diffTextAlpha)
+  };
+}
+
 export function toFontFamily(families: string[]): string {
-  return families
+  const result = families
+    .map((family) => family.trim())
+    .filter(Boolean)
     .map((family) => {
-      const trimmed = family.trim();
-      if (genericFamilies.has(trimmed.toLowerCase())) {
-        return trimmed;
+      if (genericFamilies.has(family.toLowerCase())) {
+        return family;
       }
-      return `"${trimmed.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+      return `"${family.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
     })
     .join(', ');
+  return result || 'monospace';
 }
 
 export function resolveThemeMode(
@@ -157,22 +208,17 @@ export function toMonacoTheme(theme: EditorThemeColors): editor.IStandaloneTheme
     base: isDarkColor(theme.workspaceBackground) ? 'vs-dark' : 'vs',
     inherit: true,
     rules: tokenRules(theme),
-    colors: sharedEditorColors(theme)
+    colors: monacoEditorColors(theme)
   };
 }
 
 export function toShikiTheme(name: string, theme: EditorThemeColors): ThemeRegistration {
-  const settings = tokenRules(theme).map((rule) => ({
-    scope: rule.token,
-    settings: { foreground: `#${rule.foreground}` }
-  }));
-
   return {
     name,
     type: isDarkColor(theme.workspaceBackground) ? 'dark' : 'light',
     bg: theme.editorBackground,
     fg: theme.foreground,
-    colors: sharedEditorColors(theme),
-    settings
+    colors: shikiEditorColors(theme),
+    settings: shikiTokenRules(theme)
   };
 }

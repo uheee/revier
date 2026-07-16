@@ -24,7 +24,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { darkTheme, dateZhCN, zhCN } from 'naive-ui';
 import { RouterView } from 'vue-router';
 import { useEditorSettings } from './composables/useEditorSettings';
@@ -33,4 +33,13 @@ import { toNaiveThemeOverrides } from './editor/editorTheme';
 const { snapshot, effectiveTheme, activeColors, fontFamily } = useEditorSettings();
 const warningVisible = ref(true);
 const themeOverrides = computed(() => toNaiveThemeOverrides(activeColors.value, fontFamily.value));
+
+watch(
+  () => snapshot.value.warning,
+  (warning) => {
+    if (warning) {
+      warningVisible.value = true;
+    }
+  }
+);
 </script>

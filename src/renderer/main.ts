@@ -6,6 +6,14 @@ import { createPinia } from 'pinia';
 import './styles.css';
 import { initializeEditorSettings } from './composables/useEditorSettings';
 
-await initializeEditorSettings();
+async function bootstrap(): Promise<void> {
+  try {
+    await initializeEditorSettings();
+  } catch (error) {
+    console.error('初始化编辑器设置失败，应用将继续启动。', error);
+  }
 
-createApp(App).use(createPinia()).use(router).use(naive).mount('#app');
+  createApp(App).use(createPinia()).use(router).use(naive).mount('#app');
+}
+
+void bootstrap();
