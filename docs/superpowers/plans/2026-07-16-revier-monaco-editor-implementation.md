@@ -22,6 +22,18 @@
 
 本计划不实现保存、导出、LSP、自动补全承诺、诊断、调试、终端、设置页面、TOML 热重载、草稿归因或旧自绘 Diff 运行时回退。
 
+## 执行顺序勘误（2026-07-17）
+
+Task 2 将 `AuthorSummary` 与 `FileOverlay` 的新增字段设为必需字段后，现有 `src-tauri/src/services/review.rs` 构造器会在 Task 5 适配前无法编译，因此原顺序中的 Task 3 无法先运行 `revier-tauri` 设置服务测试。
+
+经用户书面确认，权威执行顺序调整为：
+
+```text
+Task 1 → Task 2 → Task 4 → Task 5 → Task 3 → Task 6 → Task 7 → Task 8 → Task 9 → Task 10 → Task 11 → Task 12 → Task 13
+```
+
+Task 编号与章节位置保持不变，以维持既有提交、审查记录和引用稳定。该调整只修正依赖顺序，不改变任何功能、文件范围、测试要求或验收标准。
+
 ## 已核实的公开 API
 
 - Shiki 官方 Monaco 集成继续使用 `createHighlighter` 与 `shikiToMonaco`：<https://shiki.style/packages/monaco>
@@ -463,6 +475,8 @@ git commit -m "feat(editor): 定义编辑器设置与文本编码契约"
 
 ### Task 3: 启动时创建、校验并缓存 editor.toml
 
+> **执行依赖：** 只有 Task 4 与 Task 5 已完成、`cargo check -p revier-tauri` 恢复通过后才能开始本任务。不得用临时空文本、固定 UTF-8 或作者统计占位值绕过编译错误。
+
 **Files:**
 - Create: `src-tauri/src/services/editor_settings.rs`
 - Create: `src-tauri/src/commands/editor_settings.rs`
@@ -674,6 +688,8 @@ git commit -m "feat(overlay): 按指定编码返回完整文件文本"
 ---
 
 ### Task 5: 在 Tauri ReviewService 传递编码并聚合作者统计
+
+> **执行作用：** 本任务除实现既定编码与作者统计外，还负责完整适配 Task 2 的必需契约字段，使 `revier-tauri` 恢复可编译；完成并通过双重审查后再回到 Task 3。
 
 **Files:**
 - Modify: `src-tauri/src/services/review.rs`
