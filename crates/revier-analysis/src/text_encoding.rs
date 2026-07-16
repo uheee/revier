@@ -62,10 +62,7 @@ fn decode_auto(bytes: &[u8]) -> Result<DecodedText, AppError> {
         return Err(binary_error());
     }
     match std::str::from_utf8(bytes) {
-        Ok(text) => Ok(DecodedText {
-            text: text.to_string(),
-            encoding: ResolvedTextEncoding::Utf8,
-        }),
+        Ok(text) => decoded_text(text.to_string(), ResolvedTextEncoding::Utf8),
         Err(error) => Err(AppError::FileNotAnalyzable(format!(
             "文本没有 BOM 且不是合法 UTF-8，无法确定编码：{error}"
         ))),
@@ -80,10 +77,7 @@ fn decode_utf8(bytes: &[u8]) -> Result<DecodedText, AppError> {
     }
     let text = std::str::from_utf8(bytes)
         .map_err(|error| AppError::FileNotAnalyzable(format!("文本不是合法 UTF-8：{error}")))?;
-    Ok(DecodedText {
-        text: text.to_string(),
-        encoding: ResolvedTextEncoding::Utf8,
-    })
+    decoded_text(text.to_string(), ResolvedTextEncoding::Utf8)
 }
 
 fn decode_gb18030(bytes: &[u8]) -> Result<DecodedText, AppError> {
@@ -91,10 +85,7 @@ fn decode_gb18030(bytes: &[u8]) -> Result<DecodedText, AppError> {
     let text = encoding_rs::GB18030
         .decode_without_bom_handling_and_without_replacement(bytes)
         .ok_or_else(|| AppError::FileNotAnalyzable("文本不是合法 GB18030".to_string()))?;
-    Ok(DecodedText {
-        text: text.into_owned(),
-        encoding: ResolvedTextEncoding::Gb18030,
-    })
+    decoded_text(text.into_owned(), ResolvedTextEncoding::Gb18030)
 }
 
 fn decode_utf16(bytes: &[u8], little_endian: bool) -> Result<DecodedText, AppError> {
@@ -128,14 +119,14 @@ fn decode_utf16(bytes: &[u8], little_endian: bool) -> Result<DecodedText, AppErr
     });
     let text = String::from_utf16(&units.collect::<Vec<_>>())
         .map_err(|error| AppError::FileNotAnalyzable(format!("文本不是合法 UTF-16：{error}")))?;
-    Ok(DecodedText {
+    decoded_text(
         text,
-        encoding: if little_endian {
+        if little_endian {
             ResolvedTextEncoding::Utf16Le
         } else {
             ResolvedTextEncoding::Utf16Be
         },
-    })
+    )
 }
 
 fn contains_nul(bytes: &[u8]) -> bool {
@@ -144,6 +135,31 @@ fn contains_nul(bytes: &[u8]) -> bool {
 
 fn binary_error() -> AppError {
     AppError::FileNotAnalyzable("文件包含明显二进制 NUL 字节".to_string())
+}
+
+fn decoded_text(text: String, encoding: ResolvedTextEncoding) -> Result<DecodedText, AppError> {
+    reject_obvious_binary_text(&text)?;
+    Ok(DecodedText { text, encoding })
+}
+
+fn reject_obvious_binary_text(text: &str) -> Result<(), AppError> {
+    let mut character_count = 0_usize;
+    let mut suspicious_control_count = 0_usize;
+    for character in text.chars() {
+        character_count += 1;
+        if character == '\0' {
+            return Err(binary_error());
+        }
+        if character.is_control() && !matches!(character, '\t' | '\n' | '\r') {
+            suspicious_control_count += 1;
+        }
+    }
+    if suspicious_control_count >= 3 && suspicious_control_count * 10 >= character_count * 3 {
+        return Err(AppError::FileNotAnalyzable(
+            "文本包含密集的明显控制字符".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn reject_utf16_bom(bytes: &[u8], requested: &str) -> Result<(), AppError> {

@@ -93,6 +93,23 @@ fn 手动_utf16_不被交错_nul_启发式提前拒绝() {
 }
 
 #[test]
+fn utf16_bom_解码后拒绝密集控制字符() {
+    let error = decode_text_bytes(
+        &[0xff, 0xfe, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x41, 0x00],
+        TextEncoding::Auto,
+    )
+    .expect_err("密集控制字符必须判定为二进制");
+    assert!(matches!(error, AppError::FileNotAnalyzable(_)));
+}
+
+#[test]
+fn 手动_utf16_解码后拒绝_unicode_nul() {
+    let error = decode_text_bytes(&[0x41, 0x00, 0x00, 0x00, 0x42, 0x00], TextEncoding::Utf16Le)
+        .expect_err("Unicode NUL 必须判定为二进制");
+    assert!(matches!(error, AppError::FileNotAnalyzable(_)));
+}
+
+#[test]
 fn 手动编码拒绝冲突_bom() {
     for (bytes, encoding) in [
         (&[0xfe, 0xff, 0x00, 0x41][..], TextEncoding::Utf16Le),

@@ -740,6 +740,54 @@ pub fn conflicting_utf16_bom_change() -> FixtureRepo {
     }
 }
 
+pub fn utf16_bom_binary_change() -> FixtureRepo {
+    let repo = init_repo("utf16-bom-binary-change");
+    write_file(repo.path(), ".gitattributes", "* -text\n");
+    write_bytes(repo.path(), "src/app.txt", &utf16le_bom("正常\n"));
+    git(repo.path(), ["add", "."]);
+    git(
+        repo.path(),
+        ["commit", "-m", "feat: 添加正常 UTF-16LE 文本"],
+    );
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_bytes(repo.path(), "src/app.txt", &utf16le_bom("\u{1}\u{2}\u{3}A"));
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "test: 写入 UTF-16 控制字符"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "utf16-bom-binary-change",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn manual_utf16_binary_change() -> FixtureRepo {
+    let repo = init_repo("manual-utf16-binary-change");
+    write_file(repo.path(), ".gitattributes", "* -text\n");
+    write_bytes(repo.path(), "src/app.txt", &utf16le("正常\n"));
+    git(repo.path(), ["add", "."]);
+    git(
+        repo.path(),
+        ["commit", "-m", "feat: 添加无 BOM UTF-16LE 文本"],
+    );
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_bytes(repo.path(), "src/app.txt", &utf16le("A\0B"));
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "test: 写入 Unicode NUL"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "manual-utf16-binary-change",
+        repo,
+        base,
+        head,
+    }
+}
+
 pub fn exact_text_shapes() -> FixtureRepo {
     let repo = init_repo("exact-text-shapes");
     write_file(repo.path(), ".gitattributes", "* -text\n");
@@ -791,8 +839,12 @@ fn write_bytes(repo: &Path, path: &str, content: &[u8]) {
 
 fn utf16le_bom(content: &str) -> Vec<u8> {
     let mut bytes = vec![0xff, 0xfe];
-    bytes.extend(content.encode_utf16().flat_map(u16::to_le_bytes));
+    bytes.extend(utf16le(content));
     bytes
+}
+
+fn utf16le(content: &str) -> Vec<u8> {
+    content.encode_utf16().flat_map(u16::to_le_bytes).collect()
 }
 
 fn utf16be_bom(content: &str) -> Vec<u8> {

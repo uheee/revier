@@ -145,6 +145,22 @@ fn file_overlay_auto_拒绝历史双侧冲突_bom() {
 }
 
 #[test]
+fn file_overlay_拒绝带_bom_utf16_控制字符二进制() {
+    let fixture = fixtures::utf16_bom_binary_change();
+    let output = run_file_overlay(&fixture, "src/app.txt", Some("auto"));
+    assert_eq!(output.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("文件不可分析"));
+}
+
+#[test]
+fn file_overlay_拒绝手动_utf16_unicode_nul_二进制() {
+    let fixture = fixtures::manual_utf16_binary_change();
+    let output = run_file_overlay(&fixture, "src/app.txt", Some("utf-16le"));
+    assert_eq!(output.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("文件不可分析"));
+}
+
+#[test]
 fn file_overlay_auto_不猜测_gb18030() {
     let fixture = fixtures::gb18030_change();
     let output = run_file_overlay(&fixture, "src/app.txt", Some("auto"));
