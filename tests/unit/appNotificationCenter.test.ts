@@ -15,7 +15,7 @@ vi.mock('../../src/renderer/editor/editorTheme', () => ({
 }));
 
 describe('应用通知中心挂载', () => {
-  it('真实渲染通知中心入口且不再渲染配置 warning 横幅', () => {
+  it('根组件不直接渲染通知入口、fixed 覆盖或配置 warning 横幅', () => {
     const wrapper = mount(App, {
       global: {
         stubs: {
@@ -30,8 +30,8 @@ describe('应用通知中心挂载', () => {
       }
     });
 
-    expect(wrapper.find('[data-test="notification-center"]').exists()).toBe(true);
-    expect(wrapper.find('.app-notification-center').exists()).toBe(true);
+    expect(wrapper.find('[data-test="notification-center"]').exists()).toBe(false);
+    expect(wrapper.find('.app-notification-center').exists()).toBe(false);
     expect(wrapper.find('.editor-settings-warning').exists()).toBe(false);
     expect(wrapper.text()).not.toContain('不应显示在横幅中');
   });

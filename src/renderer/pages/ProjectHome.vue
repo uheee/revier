@@ -5,6 +5,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import ProjectEditor from '../components/projects/ProjectEditor.vue';
 import ProjectList from '../components/projects/ProjectList.vue';
+import NotificationCenter from '../components/NotificationCenter.vue';
 import { useProjectStore } from '../stores/projectStore';
 
 const router = useRouter();
@@ -64,6 +65,7 @@ function normalizeRepoPath(repoPath: string): string {
         <span>{{ projects.length }} 个项目</span>
       </div>
       <div class="project-topbar__actions">
+        <NotificationCenter />
         <n-button :loading="loading" @click="projectStore.loadProjects()">刷新</n-button>
         <n-button
           data-test="open-project-dialog"

@@ -36,11 +36,35 @@ const block: DiffBlock = {
 };
 
 describe('BlockDetailPanel', () => {
+  it('在详情标题右端渲染唯一通知入口', () => {
+    const wrapper = mount(BlockDetailPanel, {
+      global: {
+        stubs: {
+          NotificationCenter: {
+            name: 'NotificationCenter',
+            template: '<button data-test="notification-center">通知</button>'
+          },
+          'n-alert': true,
+          'n-empty': true,
+          'n-tag': true,
+          'n-tooltip': true
+        }
+      }
+    });
+
+    const heading = wrapper.get('.section-heading');
+    const children = Array.from(heading.element.children);
+    expect(wrapper.findAll('[data-test="notification-center"]')).toHaveLength(1);
+    expect(children[0]?.tagName).toBe('H2');
+    expect((children[1] as HTMLElement | undefined)?.dataset.test).toBe('notification-center');
+  });
+
   it('emits selected commit for drilldown', async () => {
     const wrapper = mount(BlockDetailPanel, {
       props: { block, selectedCommitHash: undefined },
       global: {
         stubs: {
+          NotificationCenter: true,
           'n-alert': true,
           'n-empty': true,
           'n-tag': { template: '<span><slot /></span>' },
@@ -58,6 +82,7 @@ describe('BlockDetailPanel', () => {
       props: { block, selectedCommitHash: 'abc123', activeCommitHash: 'abc123' },
       global: {
         stubs: {
+          NotificationCenter: true,
           'n-alert': true,
           'n-empty': true,
           'n-tag': { template: '<span><slot /></span>' },

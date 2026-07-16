@@ -21,6 +21,9 @@ describe('通知中心', () => {
 
     expect(wrapper.find('[aria-label="通知中心"]').exists()).toBe(true);
     expect(wrapper.find('.notification-center__badge .n-badge-sup').exists()).toBe(false);
+    const popover = wrapper.findComponent({ name: 'Popover' });
+    expect(popover.exists()).toBe(true);
+    expect(popover.props('placement')).toBe('bottom-end');
     await openCenter(wrapper);
     expect(document.body.textContent).toContain('暂无通知');
 

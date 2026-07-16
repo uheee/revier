@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { LoaderCircle, OctagonX } from 'lucide-vue-next';
 import type { DiffBlock, RelatedCommit } from '../../generated/bindings';
+import NotificationCenter from '../NotificationCenter.vue';
 import DiffBlockAuthors from './DiffBlockAuthors.vue';
 
 defineProps<{
@@ -33,6 +34,7 @@ function commitKey(commit: RelatedCommit): string {
   <aside class="block-detail-panel">
     <header class="section-heading">
       <h2>详情</h2>
+      <NotificationCenter />
     </header>
 
     <n-empty v-if="!block" size="small" description="未选择变更块" />
