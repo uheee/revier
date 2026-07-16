@@ -97,7 +97,11 @@ pub fn query_request_with_context(
         files.push(crate::json::ChangedFileOutput {
             path: change.path,
             old_path: change.old_path,
-            status: change.status,
+            status: if change.is_binary {
+                "binary".to_string()
+            } else {
+                change.status
+            },
             additions: change.additions,
             deletions: change.deletions,
             is_binary: change.is_binary,

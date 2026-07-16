@@ -131,7 +131,7 @@ fn marks_binary_files_as_not_previewable() {
         .iter()
         .find(|change| change.path == "assets/logo.bin")
         .expect("存在二进制文件");
-    assert_eq!(binary.status, "binary");
+    assert_eq!(binary.status, "added");
     assert!(binary.is_binary);
     assert!(!binary.is_previewable);
 

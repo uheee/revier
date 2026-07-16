@@ -66,14 +66,14 @@ pub fn read_text_at_commit(
     let Some(bytes) = read_blob_at_commit(repo, commit_hash, path)? else {
         return Ok(String::new());
     };
-    if is_binary_bytes(&bytes) {
-        return Err(AppError::FileNotAnalyzable(format!(
-            "文件包含二进制内容：{path}"
-        )));
-    }
-    String::from_utf8(bytes).map_err(|error| {
-        AppError::FileNotAnalyzable(format!("文件不是 UTF-8 文本：{path}，{error}"))
-    })
+    crate::text_encoding::decode_text_bytes(&bytes, crate::contracts::TextEncoding::Auto)
+        .map(|decoded| decoded.text)
+        .map_err(|error| match error {
+            AppError::FileNotAnalyzable(message) => {
+                AppError::FileNotAnalyzable(format!("{path}：{message}"))
+            }
+            other => other,
+        })
 }
 
 pub fn is_binary_at_commit(
@@ -87,6 +87,9 @@ pub fn is_binary_at_commit(
         .unwrap_or(false))
 }
 
-fn is_binary_bytes(bytes: &[u8]) -> bool {
+pub(crate) fn is_binary_bytes(bytes: &[u8]) -> bool {
+    if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
+        return false;
+    }
     bytes.iter().take(8000).any(|byte| *byte == 0)
 }

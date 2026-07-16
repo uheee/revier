@@ -49,6 +49,7 @@ impl FixtureRepo {
                 pretty: false,
             },
             file: file.into(),
+            encoding: "auto".to_string(),
         }
     }
 }
@@ -668,6 +669,60 @@ pub fn binary_change() -> FixtureRepo {
     }
 }
 
+pub fn gb18030_change() -> FixtureRepo {
+    let repo = init_repo("gb18030-change");
+    write_file(repo.path(), ".gitattributes", "* -text\n");
+    write_bytes(
+        repo.path(),
+        "src/app.txt",
+        encoding_rs::GB18030.encode("你好\n").0.as_ref(),
+    );
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: 添加 GB18030 文本"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_bytes(
+        repo.path(),
+        "src/app.txt",
+        encoding_rs::GB18030.encode("你好，世界\n").0.as_ref(),
+    );
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: 修改 GB18030 文本"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "gb18030-change",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn exact_text_shapes() -> FixtureRepo {
+    let repo = init_repo("exact-text-shapes");
+    write_file(repo.path(), ".gitattributes", "* -text\n");
+    write_bytes(repo.path(), "src/crlf.txt", b"one\r\n");
+    write_bytes(repo.path(), "src/trailing.txt", b"old");
+    write_bytes(repo.path(), "src/empty.txt", b"not empty\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: 添加文本形态夹具"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_bytes(repo.path(), "src/crlf.txt", b"one\r\ntwo\r\n");
+    write_bytes(repo.path(), "src/trailing.txt", b"new\n");
+    write_bytes(repo.path(), "src/empty.txt", b"");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: 修改文本形态夹具"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "exact-text-shapes",
+        repo,
+        base,
+        head,
+    }
+}
+
 fn init_repo(name: &'static str) -> TempDir {
     let repo = tempfile::Builder::new()
         .prefix(&format!("revier-{name}-"))
@@ -681,6 +736,10 @@ fn init_repo(name: &'static str) -> TempDir {
 }
 
 fn write_file(repo: &Path, path: &str, content: &str) {
+    write_bytes(repo, path, content.as_bytes());
+}
+
+fn write_bytes(repo: &Path, path: &str, content: &[u8]) {
     let full_path = repo.join(path);
     if let Some(parent) = full_path.parent() {
         fs::create_dir_all(parent).expect("create parent directory");

@@ -11,6 +11,7 @@ pub mod index;
 pub mod json;
 pub mod overlay;
 pub mod spike;
+pub mod text_encoding;
 
 use clap::Parser;
 use cli::{Cli, Command, IndexSubcommand, SpikeSubcommand};

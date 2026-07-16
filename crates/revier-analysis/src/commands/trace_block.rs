@@ -11,6 +11,7 @@ pub fn run(args: TraceBlockArgs) -> Result<String, AppError> {
         FileOverlayArgs {
             common: args.common,
             file: args.file,
+            encoding: "auto".to_string(),
         },
     )?;
     let block = select_block(&output.overlay.blocks, &selector)?;

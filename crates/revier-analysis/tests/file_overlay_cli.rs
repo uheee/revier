@@ -54,6 +54,9 @@ fn file_overlay_outputs_file_overlay_compatible_json_for_linear_change() {
     assert_eq!(overlay["file"]["status"], "modified");
     assert_eq!(overlay["file"]["isBinary"], false);
     assert_eq!(overlay["file"]["isPreviewable"], true);
+    assert_eq!(overlay["oldContent"], "one\n");
+    assert_eq!(overlay["newContent"], "one\ntwo\n");
+    assert_eq!(overlay["resolvedEncoding"], "utf-8");
 
     assert_eq!(overlay["range"]["branch"], "main");
     assert_eq!(overlay["range"]["baseCommit"], fixture.base);
@@ -96,6 +99,78 @@ fn file_overlay_outputs_file_overlay_compatible_json_for_linear_change() {
     assert!(!related_commits.is_empty());
     assert_eq!(related_commits[0]["matchedByFilter"], true);
     assert_eq!(related_commits[0]["attribution"]["method"], "blame");
+}
+
+#[test]
+fn file_overlay_按_gb18030_返回完整中文文本() {
+    let fixture = fixtures::gb18030_change();
+    let output = run_file_overlay(&fixture, "src/app.txt", Some("gb18030"));
+    assert!(
+        output.status.success(),
+        "GB18030 overlay 应成功，stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("解析 JSON");
+    assert_eq!(value["overlay"]["oldContent"], "你好\n");
+    assert_eq!(value["overlay"]["newContent"], "你好，世界\n");
+    assert_eq!(value["overlay"]["resolvedEncoding"], "gb18030");
+    assert_eq!(value["overlay"]["file"]["status"], "modified");
+    assert_eq!(value["overlay"]["file"]["isBinary"], false);
+}
+
+#[test]
+fn file_overlay_auto_不猜测_gb18030() {
+    let fixture = fixtures::gb18030_change();
+    let output = run_file_overlay(&fixture, "src/app.txt", Some("auto"));
+    assert_eq!(output.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("无法确定编码"));
+}
+
+#[test]
+fn file_overlay_保留_crlf_末尾换行与空文件() {
+    let fixture = fixtures::exact_text_shapes();
+    for (file, old_content, new_content) in [
+        ("src/crlf.txt", "one\r\n", "one\r\ntwo\r\n"),
+        ("src/trailing.txt", "old", "new\n"),
+        ("src/empty.txt", "not empty\n", ""),
+    ] {
+        let output = run_file_overlay(&fixture, file, None);
+        assert!(
+            output.status.success(),
+            "{file} overlay 应成功，stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).expect("解析 JSON");
+        assert_eq!(value["overlay"]["oldContent"], old_content);
+        assert_eq!(value["overlay"]["newContent"], new_content);
+    }
+}
+
+fn run_file_overlay(
+    fixture: &fixtures::FixtureRepo,
+    file: &str,
+    encoding: Option<&str>,
+) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_revier-analysis"));
+    command.args([
+        "file-overlay",
+        "--repo",
+        fixture.repo.path().to_str().expect("仓库路径"),
+        "--base",
+        &fixture.base,
+        "--head",
+        &fixture.head,
+        "--branch",
+        "main",
+        "--file",
+        file,
+        "--format",
+        "json",
+    ]);
+    if let Some(encoding) = encoding {
+        command.args(["--encoding", encoding]);
+    }
+    command.output().expect("运行 file-overlay 命令")
 }
 
 #[test]

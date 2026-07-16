@@ -224,19 +224,26 @@ fn populate_range_line_counts(
         return Ok(());
     }
 
-    let old_text = if change.status == "added" {
-        String::new()
+    let old_text_result = if change.status == "added" {
+        Ok(String::new())
     } else {
         crate::git::blob::read_text_at_commit(
             repo,
             base_commit,
             change.old_path.as_deref().unwrap_or(&change.path),
-        )?
+        )
     };
-    let new_text = if change.status == "deleted" {
-        String::new()
+    let new_text_result = if change.status == "deleted" {
+        Ok(String::new())
     } else {
-        crate::git::blob::read_text_at_commit(repo, head_commit, &change.path)?
+        crate::git::blob::read_text_at_commit(repo, head_commit, &change.path)
+    };
+    let (old_text, new_text) = match (old_text_result, new_text_result) {
+        (Ok(old_text), Ok(new_text)) => (old_text, new_text),
+        (Err(AppError::FileNotAnalyzable(_)), _) | (_, Err(AppError::FileNotAnalyzable(_))) => {
+            return Ok(())
+        }
+        (Err(error), _) | (_, Err(error)) => return Err(error),
     };
 
     for part in crate::overlay::line_diff::diff_lines(&old_text, &new_text) {
@@ -320,7 +327,7 @@ fn map_tree_change(
                 parent_index,
                 location,
                 None,
-                if is_binary { "binary" } else { "added" },
+                "added",
                 is_binary,
                 None,
             )))
@@ -341,7 +348,7 @@ fn map_tree_change(
                 parent_index,
                 location,
                 None,
-                if is_binary { "binary" } else { "deleted" },
+                "deleted",
                 is_binary,
                 None,
             )))
@@ -364,7 +371,7 @@ fn map_tree_change(
                 parent_index,
                 location,
                 None,
-                if is_binary { "binary" } else { "modified" },
+                "modified",
                 is_binary,
                 None,
             )))
@@ -389,7 +396,7 @@ fn map_tree_change(
                 parent_index,
                 location,
                 Some(source_location),
-                if is_binary { "binary" } else { "renamed" },
+                "renamed",
                 is_binary,
                 diff.map(|stats| stats.similarity),
             )))
@@ -435,7 +442,7 @@ fn blob_contains_nul(
     let blob = repo
         .find_blob(id)
         .map_err(|error| AppError::Repository(error.to_string()))?;
-    Ok(blob.data.iter().take(8000).any(|byte| *byte == 0))
+    Ok(crate::git::blob::is_binary_bytes(&blob.data))
 }
 
 pub(crate) fn diff_resource_cache() -> Result<gix_diff::blob::Platform, AppError> {

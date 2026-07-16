@@ -157,6 +157,9 @@ pub struct FileOverlayArgs {
 
     #[arg(long)]
     pub file: String,
+
+    #[arg(long, default_value = "auto")]
+    pub encoding: String,
 }
 
 #[derive(Debug, Parser)]

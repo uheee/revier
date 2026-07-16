@@ -1,6 +1,6 @@
 use crate::cli::FileOverlayArgs;
 use crate::error::AppError;
-use crate::git::blob::read_text_at_commit;
+use crate::git::blob::read_blob_at_commit;
 use crate::git::diff::CommitFileChange;
 use crate::json::{
     AnalysisRangeOutput, ChangedFileOutput, FileOverlayCommandOutput, FileOverlayOutput,
@@ -13,6 +13,7 @@ pub fn build_file_overlay(
 ) -> Result<FileOverlayCommandOutput, AppError> {
     let context = crate::attribution::context::AttributionContext::open(repo, &args.common)?;
     let mut warnings = context.warnings.clone();
+    let requested_encoding = crate::text_encoding::parse_text_encoding(&args.encoding)?;
 
     let change = crate::git::diff::changed_file_between(
         repo,
@@ -31,52 +32,71 @@ pub fn build_file_overlay(
     )?;
     append_warnings(&mut warnings, path_candidates.warnings);
 
-    if change.is_binary {
+    let old_path = old_text_path(&change);
+    let new_path = new_text_path(&change);
+    let old_bytes = match old_path {
+        Some(path) => read_blob_at_commit(repo, &args.common.base, path)?.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let new_bytes = match new_path {
+        Some(path) => read_blob_at_commit(repo, &args.common.head, path)?.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let preferred_bytes = if new_path.is_some() {
+        &new_bytes
+    } else {
+        &old_bytes
+    };
+    let resolved =
+        crate::text_encoding::decode_text_bytes(preferred_bytes, requested_encoding)?.encoding;
+    let concrete_encoding = crate::text_encoding::resolved_as_requested(resolved);
+    let old_text = crate::text_encoding::decode_text_bytes(&old_bytes, concrete_encoding)?.text;
+    let new_text = crate::text_encoding::decode_text_bytes(&new_bytes, concrete_encoding)?.text;
+    if change.is_binary
+        && !matches!(
+            resolved,
+            crate::contracts::ResolvedTextEncoding::Utf16Le
+                | crate::contracts::ResolvedTextEncoding::Utf16Be
+        )
+    {
         return Err(AppError::FileNotAnalyzable(format!(
-            "文件包含二进制内容：{}",
+            "文件包含明显二进制内容：{}",
             args.file
         )));
     }
-
-    let old_path = old_text_path(&change);
-    let new_path = new_text_path(&change);
-    let old_text = match old_path {
-        Some(path) => read_text_at_commit(repo, &args.common.base, path)?,
-        None => String::new(),
-    };
-    let new_text = match new_path {
-        Some(path) => read_text_at_commit(repo, &args.common.head, path)?,
-        None => String::new(),
-    };
     let diff = build_overlay_diff(&old_text, &new_text);
-    let blocks = crate::attribution::patch_inference::attach_patch_inference(
-        &context,
-        diff.blocks,
-        &change.path,
-        change.old_path.as_deref(),
-        &args.common.authors,
-        args.common.author_query.as_deref(),
-        args.common.message.as_deref(),
-    )?;
-    let blocks = crate::attribution::blame::attach_blame_attribution(
-        &context,
-        &args.common.head,
-        &change.path,
-        blocks,
-        &args.common.authors,
-        args.common.author_query.as_deref(),
-        args.common.message.as_deref(),
-    )?;
-    let blocks = crate::attribution::deletion_trace::attach_deletion_trace(
-        &context,
-        blocks,
-        &path_candidates.paths,
-        &change.path,
-        change.old_path.as_deref(),
-        &args.common.authors,
-        args.common.author_query.as_deref(),
-        args.common.message.as_deref(),
-    )?;
+    let blocks = if resolved == crate::contracts::ResolvedTextEncoding::Utf8 {
+        let blocks = crate::attribution::patch_inference::attach_patch_inference(
+            &context,
+            diff.blocks,
+            &change.path,
+            change.old_path.as_deref(),
+            &args.common.authors,
+            args.common.author_query.as_deref(),
+            args.common.message.as_deref(),
+        )?;
+        let blocks = crate::attribution::blame::attach_blame_attribution(
+            &context,
+            &args.common.head,
+            &change.path,
+            blocks,
+            &args.common.authors,
+            args.common.author_query.as_deref(),
+            args.common.message.as_deref(),
+        )?;
+        crate::attribution::deletion_trace::attach_deletion_trace(
+            &context,
+            blocks,
+            &path_candidates.paths,
+            &change.path,
+            change.old_path.as_deref(),
+            &args.common.authors,
+            args.common.author_query.as_deref(),
+            args.common.message.as_deref(),
+        )?
+    } else {
+        diff.blocks
+    };
 
     Ok(FileOverlayCommandOutput {
         version: 1,
@@ -90,6 +110,9 @@ pub fn build_file_overlay(
                 start_at: None,
                 end_at: None,
             },
+            old_content: old_text,
+            new_content: new_text,
+            resolved_encoding: crate::text_encoding::resolved_as_str(resolved).to_string(),
             rows: diff.rows,
             blocks,
             warnings: warnings.clone(),
@@ -130,7 +153,7 @@ fn changed_file_output(change: &CommitFileChange) -> ChangedFileOutput {
         status: change.status.clone(),
         additions: change.additions,
         deletions: change.deletions,
-        is_binary: change.is_binary,
-        is_previewable: change.is_previewable,
+        is_binary: false,
+        is_previewable: true,
     }
 }
