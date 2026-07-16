@@ -3,7 +3,11 @@ use revier_analysis::contracts::{
     EditorThemeColors, EditorThemeMode, EditorThemes, LargeFileSettings, TextEncoding,
 };
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{
+    fs::{self, OpenOptions},
+    io::{self, Write},
+    path::PathBuf,
+};
 
 pub struct EditorSettingsService {
     snapshot: EditorSettingsSnapshot,
@@ -13,10 +17,18 @@ impl EditorSettingsService {
     pub fn load(path: PathBuf) -> Self {
         let defaults = EditorSettingsFile::default();
         let path_text = path.to_string_lossy().into_owned();
-        let result = if path.exists() {
-            read_and_validate(&path)
-        } else {
-            write_defaults(&path, &defaults).map(|()| defaults.clone())
+        let result = match fs::read(&path) {
+            Ok(bytes) => parse_and_validate(bytes),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                match write_defaults(&path, &defaults) {
+                    Ok(()) => Ok(defaults.clone()),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                        read_and_validate(&path)
+                    }
+                    Err(error) => Err(error.to_string()),
+                }
+            }
+            Err(error) => Err(format!("读取失败：{error}")),
         };
         let (settings, warning) = match result {
             Ok(settings) => (settings.into(), None),
@@ -42,6 +54,10 @@ impl EditorSettingsService {
 
 fn read_and_validate(path: &PathBuf) -> Result<EditorSettingsFile, String> {
     let bytes = fs::read(path).map_err(|error| format!("读取失败：{error}"))?;
+    parse_and_validate(bytes)
+}
+
+fn parse_and_validate(bytes: Vec<u8>) -> Result<EditorSettingsFile, String> {
     let text =
         String::from_utf8(bytes).map_err(|error| format!("解析失败：配置不是 UTF-8：{error}"))?;
     let settings: EditorSettingsFile =
@@ -50,12 +66,20 @@ fn read_and_validate(path: &PathBuf) -> Result<EditorSettingsFile, String> {
     Ok(settings)
 }
 
-fn write_defaults(path: &PathBuf, defaults: &EditorSettingsFile) -> Result<(), String> {
+fn write_defaults(path: &PathBuf, defaults: &EditorSettingsFile) -> io::Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("创建配置目录失败：{error}"))?;
+        fs::create_dir_all(parent)
+            .map_err(|error| io::Error::new(error.kind(), format!("创建配置目录失败：{error}")))?;
     }
-    let text = toml::to_string_pretty(defaults).map_err(|error| format!("序列化失败：{error}"))?;
-    fs::write(path, text).map_err(|error| format!("写入默认配置失败：{error}"))
+    let text = toml::to_string_pretty(defaults)
+        .map_err(|error| io::Error::other(format!("序列化失败：{error}")))?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| io::Error::new(error.kind(), format!("创建默认配置失败：{error}")))?;
+    file.write_all(text.as_bytes())
+        .map_err(|error| io::Error::new(error.kind(), format!("写入默认配置失败：{error}")))
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -78,8 +102,8 @@ struct EditorFile {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct LargeFileFile {
-    max_bytes: u64,
-    max_lines: u64,
+    max_bytes: u32,
+    max_lines: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -289,8 +313,8 @@ impl From<EditorSettingsFile> for EditorSettings {
                 minimap: value.editor.minimap,
             },
             large_file: LargeFileSettings {
-                max_bytes: value.large_file.max_bytes,
-                max_lines: value.large_file.max_lines,
+                max_bytes: u64::from(value.large_file.max_bytes),
+                max_lines: u64::from(value.large_file.max_lines),
             },
             themes: EditorThemes {
                 light: value.themes.light.into(),
@@ -332,7 +356,7 @@ impl From<ThemeColorsFile> for EditorThemeColors {
 
 #[cfg(test)]
 mod tests {
-    use super::EditorSettingsService;
+    use super::{write_defaults, EditorSettingsFile, EditorSettingsService};
     use revier_analysis::contracts::{EditorThemeMode, TextEncoding};
     use std::fs;
     use tempfile::tempdir;
@@ -430,15 +454,128 @@ mod tests {
         ] {
             let directory = tempdir().unwrap();
             let path = directory.path().join("editor.toml");
-            fs::write(&path, valid_toml().replace(replacement.0, replacement.1)).unwrap();
+            let original = valid_toml().replace(replacement.0, replacement.1);
+            fs::write(&path, &original).unwrap();
 
-            let snapshot = EditorSettingsService::load(path).snapshot();
+            let snapshot = EditorSettingsService::load(path.clone()).snapshot();
 
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
             assert!(matches!(snapshot.settings.theme, EditorThemeMode::System));
             assert_eq!(snapshot.settings.themes.light.accent, "#0F766E");
             assert_eq!(snapshot.settings.themes.dark.accent, "#2DD4BF");
-            assert!(snapshot.warning.unwrap().contains(expected_error));
+            let warning = snapshot.warning.unwrap();
+            assert!(warning.contains(&path.to_string_lossy().to_string()));
+            assert!(warning.contains(expected_error));
         }
+    }
+
+    #[test]
+    fn exclusive_default_write_never_overwrites_existing_broken_file() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("editor.toml");
+        let original = b"broken\xFF";
+        fs::write(&path, original).unwrap();
+
+        let error = write_defaults(&path, &EditorSettingsFile::default()).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(path).unwrap(), original);
+    }
+
+    #[test]
+    fn rejects_values_above_u32_and_accepts_u32_maximum() {
+        let directory = tempdir().unwrap();
+        let overflow_path = directory.path().join("overflow.toml");
+        let overflow = valid_toml().replace("max_bytes = 1048576", "max_bytes = 4294967296");
+        fs::write(&overflow_path, &overflow).unwrap();
+
+        let overflow_snapshot = EditorSettingsService::load(overflow_path.clone()).snapshot();
+
+        assert_eq!(fs::read_to_string(&overflow_path).unwrap(), overflow);
+        assert_eq!(overflow_snapshot.settings.large_file.max_bytes, 1_048_576);
+        let warning = overflow_snapshot.warning.unwrap();
+        assert!(warning.contains(&overflow_path.to_string_lossy().to_string()));
+        assert!(warning.contains("max_bytes"));
+
+        let maximum_path = directory.path().join("maximum.toml");
+        fs::write(
+            &maximum_path,
+            valid_toml().replace("max_bytes = 1048576", "max_bytes = 4294967295"),
+        )
+        .unwrap();
+        let maximum_snapshot = EditorSettingsService::load(maximum_path).snapshot();
+        assert!(maximum_snapshot.warning.is_none());
+        assert_eq!(
+            maximum_snapshot.settings.large_file.max_bytes,
+            u32::MAX as u64
+        );
+    }
+
+    #[test]
+    fn invalid_snapshots_keep_original_files_and_report_specific_errors() {
+        for (name, contents, expected_error) in [
+            (
+                "missing-field",
+                valid_toml().replace("font_size = 13\n", ""),
+                "font_size",
+            ),
+            (
+                "version",
+                valid_toml().replace("version = 1", "version = 2"),
+                "version",
+            ),
+            (
+                "font-size",
+                valid_toml().replace("font_size = 13", "font_size = 0"),
+                "editor.font_size",
+            ),
+            (
+                "line-height",
+                valid_toml().replace("line_height = 22", "line_height = 0"),
+                "editor.line_height",
+            ),
+            (
+                "max-bytes",
+                valid_toml().replace("max_bytes = 1048576", "max_bytes = 0"),
+                "large_file.max_bytes",
+            ),
+            (
+                "max-lines",
+                valid_toml().replace("max_lines = 5000", "max_lines = 0"),
+                "large_file.max_lines",
+            ),
+        ] {
+            let directory = tempdir().unwrap();
+            let path = directory.path().join(format!("{name}.toml"));
+            fs::write(&path, &contents).unwrap();
+
+            let snapshot = EditorSettingsService::load(path.clone()).snapshot();
+
+            assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+            assert_eq!(snapshot.settings.editor.font_size, 13);
+            let warning = snapshot.warning.unwrap();
+            assert!(warning.contains(&path.to_string_lossy().to_string()));
+            assert!(warning.contains(expected_error), "实际 warning：{warning}");
+        }
+    }
+
+    #[test]
+    fn reports_directory_and_default_write_failures_with_defaults() {
+        let directory = tempdir().unwrap();
+        let directory_snapshot =
+            EditorSettingsService::load(directory.path().to_path_buf()).snapshot();
+        assert_eq!(directory_snapshot.settings.version, 1);
+        let directory_warning = directory_snapshot.warning.unwrap();
+        assert!(directory_warning.contains(&directory.path().to_string_lossy().to_string()));
+        assert!(directory_warning.contains("读取失败"));
+
+        let occupied_parent = directory.path().join("occupied");
+        fs::write(&occupied_parent, "not a directory").unwrap();
+        let path = occupied_parent.join("editor.toml");
+
+        let error = write_defaults(&path, &EditorSettingsFile::default()).unwrap_err();
+
+        assert!(error.to_string().contains("创建配置目录失败"));
     }
 
     fn valid_toml() -> &'static str {
