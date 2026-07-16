@@ -3,6 +3,7 @@ mod error;
 mod services;
 mod state;
 
+use services::editor_settings::EditorSettingsService;
 use services::projects::ProjectService;
 use services::review::ReviewService;
 use state::AppState;
@@ -12,13 +13,20 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let config_dir = app.path().app_config_dir()?;
             let data_dir = app.path().app_data_dir()?;
+            let editor_settings = EditorSettingsService::load(config_dir.join("editor.toml"));
             let project_service = ProjectService::new(data_dir.join("projects.json"));
             let review_service = ReviewService::default();
-            app.manage(AppState::new(project_service, review_service));
+            app.manage(AppState::new(
+                editor_settings,
+                project_service,
+                review_service,
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::editor_settings::editor_settings_get,
             commands::projects::projects_list,
             commands::projects::projects_add,
             commands::projects::projects_update,
