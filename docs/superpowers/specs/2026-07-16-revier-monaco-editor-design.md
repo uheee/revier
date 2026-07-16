@@ -101,6 +101,7 @@ ReviewWorkspace / DiffDrilldownOverlay
         oldContent/newContent     DiffBlock 元数据
 
 Renderer
+   ├── NotificationCenter（会话内通知，不持久化）
    │ editor_settings_get / review_get_file_overlay
 Tauri Commands
    ├── EditorSettingsService ── app_config_dir/editor.toml
@@ -154,11 +155,21 @@ Tauri Commands
 - 监听系统浅深色变化。
 - 把同一颜色配置应用到根节点 CSS 变量、Monaco Theme 和 Shiki Theme。
 
+### `NotificationCenter.vue` 与 `useNotifications.ts`
+
+- 应用顶部右侧始终显示通知铃铛；没有通知时仍可打开并展示空列表。
+- 通知分为 `info`、`warning`、`error`，统一承接配置读取、Shiki 语言降级、Monaco 初始化以及后续运行时消息。
+- 通知仅保存在当前运行会话的内存中，最多保留 100 条，重启后清空，绝不写入 `editor.toml` 或其他持久化存储。
+- 列表按时间从新到旧排列并支持滚动；打开面板时把当前通知标记为已读，但保留历史记录。
+- 支持删除单条和清空全部。
+- 铃铛始终可见；仅存在未读通知时在按钮右下角显示红色数量徽标，1 至 99 显示实际数量，超过 99 显示 `99+`。
+- 点击铃铛从顶部右侧向下展开通知列表；配置与运行时警告不再占用顶部横幅或编辑器状态栏。
+
 ### `editorLanguageRegistry.ts`
 
 - 维护扩展名、文件名与 Monaco/Shiki 语言 ID 的映射。
 - 只加载已确认语言的语法资源。
-- 语言加载失败时返回纯文本模式和非阻断警告。
+- 语言加载失败时返回纯文本模式，并把非阻断警告送入全局通知中心。
 
 ## 后端模块划分
 

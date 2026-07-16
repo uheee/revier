@@ -34,6 +34,17 @@ Task 1 → Task 2 → Task 4 → Task 5 → Task 3 → Task 6 → Task 7 → Tas
 
 Task 编号与章节位置保持不变，以维持既有提交、审查记录和引用稳定。该调整只修正依赖顺序，不改变任何功能、文件范围、测试要求或验收标准。
 
+## 通知中心设计勘误（2026-07-17）
+
+用户确认把配置、Shiki、Monaco 及后续运行时的信息、警告和错误统一收纳到应用顶部右侧的通知中心，不再使用顶部 warning banner，也不占用编辑器状态栏。
+
+- 铃铛按钮始终显示；没有通知时仍可打开空列表。
+- 通知列表按时间倒序并支持滚动，分为 `info`、`warning`、`error`。
+- 打开列表时把当前通知标记为已读，但保留历史；支持删除单条和清空全部。
+- 仅存在未读通知时在铃铛右下角显示红色数量徽标；超过 99 条显示 `99+`。
+- 通知仅保存在当前运行内存中，最多 100 条，重启清空，绝不写回 `editor.toml` 或其他持久化位置。
+- Task 6 已实现的顶部 warning banner 是过渡实现，由 Task 7 原子替换为通知中心；Task 10 状态栏不承担通知职责，Task 12 负责通知中心的最终 IDE 视觉统一。
+
 ## 已核实的公开 API
 
 - Shiki 官方 Monaco 集成继续使用 `createHighlighter` 与 `shikiToMonaco`：<https://shiki.style/packages/monaco>
@@ -64,6 +75,10 @@ Task 编号与章节位置保持不变，以维持既有提交、审查记录和
   - 行号命中、可见块几何、作者排序和裁剪纯函数。
 - `src/renderer/composables/useEditorSettings.ts`
   - 启动设置快照、系统主题监听和根主题应用。
+- `src/renderer/composables/useNotifications.ts`
+  - 会话内通知队列、未读计数、100 条上限、已读和删除操作。
+- `src/renderer/components/NotificationCenter.vue`
+  - 顶部右侧常驻铃铛、红色未读徽标与可滚动通知列表。
 - `src/renderer/components/review/MonacoDiffSurface.vue`
   - Monaco 适配层的 Vue 生命周期外壳。
 - `src/renderer/components/review/DiffAuthorRail.vue`
@@ -72,6 +87,8 @@ Task 编号与章节位置保持不变，以维持既有提交、审查记录和
   - 状态、光标、编码和语言上拉选择。
 - `tests/unit/editorLanguages.test.ts`
 - `tests/unit/editorTheme.test.ts`
+- `tests/unit/useNotifications.test.ts`
+- `tests/unit/notificationCenter.test.ts`
 - `tests/unit/monacoDiffSession.test.ts`
 - `tests/unit/diffBlockGeometry.test.ts`
 - `tests/unit/monacoDiffSurface.test.ts`
@@ -113,7 +130,7 @@ Task 编号与章节位置保持不变，以维持既有提交、审查记录和
 - `src/renderer/api/revierClient.ts`
   - 增加设置命令客户端。
 - `src/renderer/main.ts`、`src/renderer/App.vue`
-  - 挂载前加载设置与语法运行时，提供完整浅/深主题和非阻断配置 warning。
+  - 挂载前加载设置与语法运行时，提供完整浅/深主题，并在顶部右侧统一展示会话通知。
 - `src/renderer/stores/reviewStore.ts`
   - 编码成功后原子替换 Overlay，失败保留当前视图。
 - `src/renderer/components/review/DiffViewer.vue`
@@ -855,7 +872,7 @@ settings: {
 
 `main.ts` 必须在 `createApp(...).mount('#app')` 前 `await initializeEditorSettings()`。IPC 失败使用与 Rust 相同的内置默认快照并携带 warning，不能让白屏阻断启动。
 
-`App.vue` 给 `n-config-provider` 同时传入 `darkTheme` 或 `null` 和动态 `themeOverrides`；根节点设置 `data-theme="light|dark"`。`snapshot.warning` 通过应用顶层非阻断 warning banner 显示配置路径/错误，可关闭但不写回配置文件。
+`App.vue` 给 `n-config-provider` 同时传入 `darkTheme` 或 `null` 和动态 `themeOverrides`；根节点设置 `data-theme="light|dark"`。Task 6 的顶部 warning banner 仅作为过渡实现，Task 7 按“通知中心设计勘误”原子替换；任何关闭或已读操作都不写回配置文件。
 
 - [ ] **Step 5: 更新客户端测试并运行**
 
@@ -891,9 +908,15 @@ git commit -m "feat(theme): 启动时应用统一编辑器主题"
 **Files:**
 - Create: `src/renderer/editor/editorLanguages.ts`
 - Create: `src/renderer/editor/monacoEnvironment.ts`
+- Create: `src/renderer/composables/useNotifications.ts`
+- Create: `src/renderer/components/NotificationCenter.vue`
 - Create: `tests/unit/editorLanguages.test.ts`
+- Create: `tests/unit/useNotifications.test.ts`
+- Create: `tests/unit/notificationCenter.test.ts`
 - Modify: `src/renderer/vite-env.d.ts`
 - Modify: `src/renderer/main.ts`
+- Modify: `src/renderer/App.vue`
+- Modify: `src/renderer/composables/useEditorSettings.ts`
 
 - [ ] **Step 1: 编写语言映射失败测试**
 
@@ -956,16 +979,22 @@ export async function initializeMonacoSyntax(
 2. 用确认语言列表创建一个可复用 highlighter。
 3. 用 `toShikiTheme` 生成 `revier-light` / `revier-dark`。
 4. 调用 `shikiToMonaco` 一次。
-5. 单语言加载失败时记录非阻断 warning，并让该 ID 使用 plaintext；不得影响其他语言。
+5. 单语言加载失败时向全局通知中心追加 `warning`，并让该 ID 使用 plaintext；不得影响其他语言。
 
-`main.ts` 的启动顺序固定为：`initializeEditorSettings()` → `initializeMonacoSyntax(snapshot.settings.themes)` → mount。整个 Shiki 初始化失败时仍挂载 Monaco 基础编辑器，并把 warning 加入设置 warning 区；不得回退旧 Diff。
+`useNotifications.ts` 固定使用模块级会话内队列并公开只读列表、未读数和操作函数。队列按新到旧排列、最多 100 条；打开通知面板调用 mark-all-read，删除与清空只影响当前内存。
+
+`NotificationCenter.vue` 使用现有 Naive UI Popover/Badge/Scrollbar，不增加依赖。铃铛始终渲染；无通知时显示空列表；未读徽标位于按钮右下角，数量超过 99 显示 `99+`。面板提供单条删除与清空全部。
+
+`useEditorSettings.ts` 在设置快照含 warning 或主题初始化降级时向通知中心追加对应通知，但保持设置快照只读且不写 TOML。`App.vue` 移除过渡 warning banner，在顶部右侧挂载 `NotificationCenter`。
+
+`main.ts` 的启动顺序固定为：`initializeEditorSettings()` → `initializeMonacoSyntax(snapshot.settings.themes)` → mount。整个 Shiki 初始化失败时仍挂载 Monaco 基础编辑器，并把 `error` 通知加入通知中心；不得回退旧 Diff。
 
 - [ ] **Step 5: 运行测试与构建检查**
 
 运行：
 
 ```powershell
-pnpm test -- tests/unit/editorLanguages.test.ts
+pnpm test -- tests/unit/editorLanguages.test.ts tests/unit/useNotifications.test.ts tests/unit/notificationCenter.test.ts
 pnpm typecheck
 pnpm vite:build
 ```
@@ -977,7 +1006,7 @@ pnpm vite:build
 运行：
 
 ```powershell
-git add src/renderer/editor/editorLanguages.ts src/renderer/editor/monacoEnvironment.ts tests/unit/editorLanguages.test.ts src/renderer/vite-env.d.ts src/renderer/main.ts
+git add src/renderer/editor/editorLanguages.ts src/renderer/editor/monacoEnvironment.ts src/renderer/composables/useNotifications.ts src/renderer/components/NotificationCenter.vue tests/unit/editorLanguages.test.ts tests/unit/useNotifications.test.ts tests/unit/notificationCenter.test.ts src/renderer/vite-env.d.ts src/renderer/main.ts src/renderer/App.vue src/renderer/composables/useEditorSettings.ts
 git commit -m "feat(editor): 配置 Monaco 语言高亮与 Worker"
 ```
 
@@ -1382,6 +1411,7 @@ git commit -m "feat(review): 接入草稿销毁与编码重载"
 以现有源码样式测试方式锁定：
 
 - `.review-workspace`、左栏、编辑器、AuthorRail、右栏、弹层、状态栏全部使用 CSS 变量，不再硬编码只适合浅色的面板背景。
+- 顶部右侧通知铃铛、未读徽标、空列表和滚动通知面板统一使用当前浅/深主题变量。
 - `.diff-viewer__editor-layout` 为 `minmax(0, 1fr) 112px`。
 - draft 时为单列 `minmax(0, 1fr)`。
 - 状态菜单向上，AuthorRail Popover 向左。
@@ -1492,13 +1522,14 @@ pnpm tauri dev
 - 首次编辑后 rail/真实块/归因消失，右栏显示临时草稿提示。
 - 切文件、切提交、关闭下钻和离开页面直接销毁草稿，无保存提示。
 - 状态栏语言/编码菜单原位上拉；语言立即作用于两侧，编码成功后重建，失败保留当前内容。
+- 顶部右侧通知铃铛始终显示；空列表可打开；未读红色数量徽标位于右下角且超过 99 显示 `99+`；列表可滚动并统一承载信息、警告和错误。
 - light/dark/system 覆盖整个应用；系统主题变化不清空草稿。
 - 字体计算值按 `JetBrainsMono Nerd Font Mono` → `Microsoft YaHei` → `monospace` 回落。
 - 大于 1 MiB 或 5000 行先确认，确认前无 Monaco Model。
 
 - [ ] **Step 3: 验证配置文件行为**
 
-在测试用 Tauri 数据目录验证：首次启动创建完整 `editor.toml`；修改主题后重启生效；运行中修改文件不热更新；损坏 TOML 后原文件保留、应用用默认值并显示 warning 路径。
+在测试用 Tauri 数据目录验证：首次启动创建完整 `editor.toml`；修改主题后重启生效；运行中修改文件不热更新；损坏 TOML 后原文件保留、应用用默认值，并在通知中心显示含配置路径的警告。
 
 - [ ] **Step 4: 对照设计文档复核范围**
 
