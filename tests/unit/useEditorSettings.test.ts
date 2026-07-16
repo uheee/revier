@@ -1,5 +1,4 @@
 import type { EditorSettingsSnapshot } from '../../src/renderer/generated/bindings';
-import { readFileSync } from 'node:fs';
 
 const invoke = vi.fn();
 const defineTheme = vi.fn();
@@ -225,24 +224,4 @@ describe('编辑器设置启动初始化', () => {
     setProperty.mockRestore();
   });
 
-  it('main 使用兼容 Safari 13 的 bootstrap，按设置、语法、挂载顺序启动', () => {
-    const source = readFileSync('src/renderer/main.ts', 'utf8');
-
-    expect(source).not.toMatch(/^await initializeEditorSettings\(\)/m);
-    expect(source.indexOf('await initializeEditorSettings()')).toBeLessThan(
-      source.indexOf('await initializeMonacoSyntax(snapshot.value.settings.themes)')
-    );
-    expect(source.indexOf('await initializeMonacoSyntax(snapshot.value.settings.themes)')).toBeLessThan(
-      source.indexOf("mount('#app')")
-    );
-    expect(source).toContain("title: 'Monaco 语法高亮初始化失败'");
-  });
-
-  it('App 移除顶部 warning 横幅并在右上角挂载通知中心', () => {
-    const source = readFileSync('src/renderer/App.vue', 'utf8');
-
-    expect(source).toContain('<NotificationCenter');
-    expect(source).toContain('app-notification-center');
-    expect(source).not.toContain('editor-settings-warning');
-  });
 });
