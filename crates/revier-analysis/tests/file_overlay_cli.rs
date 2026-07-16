@@ -116,6 +116,32 @@ fn file_overlay_按_gb18030_返回完整中文文本() {
     assert_eq!(value["overlay"]["resolvedEncoding"], "gb18030");
     assert_eq!(value["overlay"]["file"]["status"], "modified");
     assert_eq!(value["overlay"]["file"]["isBinary"], false);
+    assert_blocks_have_complete_attribution(&value);
+}
+
+#[test]
+fn file_overlay_utf16le_返回完整文本与归因() {
+    let fixture = fixtures::utf16le_change();
+    let output = run_file_overlay(&fixture, "src/app.txt", Some("auto"));
+    assert!(
+        output.status.success(),
+        "UTF-16LE overlay 应成功，stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("解析 JSON");
+    assert_eq!(value["overlay"]["oldContent"], "你好\n");
+    assert_eq!(value["overlay"]["newContent"], "你好，世界\n");
+    assert_eq!(value["overlay"]["resolvedEncoding"], "utf-16le");
+    assert_blocks_have_complete_attribution(&value);
+}
+
+#[test]
+fn file_overlay_auto_拒绝历史双侧冲突_bom() {
+    let fixture = fixtures::conflicting_utf16_bom_change();
+    let output = run_file_overlay(&fixture, "src/app.txt", Some("auto"));
+    assert_eq!(output.status.code(), Some(4));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("BOM") && stderr.contains("冲突"));
 }
 
 #[test]
@@ -171,6 +197,22 @@ fn run_file_overlay(
         command.args(["--encoding", encoding]);
     }
     command.output().expect("运行 file-overlay 命令")
+}
+
+fn assert_blocks_have_complete_attribution(value: &Value) {
+    let blocks = value["overlay"]["blocks"].as_array().expect("blocks 数组");
+    assert!(!blocks.is_empty(), "blocks 不应为空");
+    for block in blocks {
+        assert!(!block["authors"]
+            .as_array()
+            .expect("authors 数组")
+            .is_empty());
+        assert!(!block["relatedCommits"]
+            .as_array()
+            .expect("relatedCommits 数组")
+            .is_empty());
+        assert!(!block["attribution"].is_null(), "attribution 应存在");
+    }
 }
 
 #[test]

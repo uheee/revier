@@ -76,6 +76,28 @@ pub fn read_text_at_commit(
         })
 }
 
+pub fn read_text_at_commit_with_encoding(
+    repo: &gix::Repository,
+    commit_hash: &str,
+    path: &str,
+    encoding: crate::contracts::ResolvedTextEncoding,
+) -> Result<String, AppError> {
+    let Some(bytes) = read_blob_at_commit(repo, commit_hash, path)? else {
+        return Ok(String::new());
+    };
+    crate::text_encoding::decode_text_bytes(
+        &bytes,
+        crate::text_encoding::resolved_as_requested(encoding),
+    )
+    .map(|decoded| decoded.text)
+    .map_err(|error| match error {
+        AppError::FileNotAnalyzable(message) => {
+            AppError::FileNotAnalyzable(format!("{path}：{message}"))
+        }
+        other => other,
+    })
+}
+
 pub fn is_binary_at_commit(
     repo: &gix::Repository,
     commit_hash: &str,

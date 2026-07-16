@@ -93,6 +93,21 @@ fn 手动_utf16_不被交错_nul_启发式提前拒绝() {
 }
 
 #[test]
+fn 手动编码拒绝冲突_bom() {
+    for (bytes, encoding) in [
+        (&[0xfe, 0xff, 0x00, 0x41][..], TextEncoding::Utf16Le),
+        (&[0xff, 0xfe, 0x41, 0x00][..], TextEncoding::Utf16Be),
+        (&[0xff, 0xfe, 0x41, 0x00][..], TextEncoding::Utf8),
+        (&[0xfe, 0xff, 0x00, 0x41][..], TextEncoding::Gb18030),
+    ] {
+        let error = decode_text_bytes(bytes, encoding).expect_err("冲突 BOM 必须失败");
+        assert!(
+            matches!(error, AppError::FileNotAnalyzable(message) if message.contains("BOM") && message.contains("冲突"))
+        );
+    }
+}
+
+#[test]
 fn 解析编码仅接受已确认值() {
     assert_eq!(parse_text_encoding("auto").unwrap(), TextEncoding::Auto);
     assert_eq!(parse_text_encoding("utf-8").unwrap(), TextEncoding::Utf8);

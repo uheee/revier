@@ -698,6 +698,48 @@ pub fn gb18030_change() -> FixtureRepo {
     }
 }
 
+pub fn utf16le_change() -> FixtureRepo {
+    let repo = init_repo("utf16le-change");
+    write_file(repo.path(), ".gitattributes", "* -text\n");
+    write_bytes(repo.path(), "src/app.txt", &utf16le_bom("你好\n"));
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: 添加 UTF-16LE 文本"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_bytes(repo.path(), "src/app.txt", &utf16le_bom("你好，世界\n"));
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: 修改 UTF-16LE 文本"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "utf16le-change",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn conflicting_utf16_bom_change() -> FixtureRepo {
+    let repo = init_repo("conflicting-utf16-bom-change");
+    write_file(repo.path(), ".gitattributes", "* -text\n");
+    write_bytes(repo.path(), "src/app.txt", &utf16be_bom("旧\n"));
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: 添加 UTF-16BE 文本"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    write_bytes(repo.path(), "src/app.txt", &utf16le_bom("新\n"));
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: 改为 UTF-16LE 文本"]);
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "conflicting-utf16-bom-change",
+        repo,
+        base,
+        head,
+    }
+}
+
 pub fn exact_text_shapes() -> FixtureRepo {
     let repo = init_repo("exact-text-shapes");
     write_file(repo.path(), ".gitattributes", "* -text\n");
@@ -745,6 +787,18 @@ fn write_bytes(repo: &Path, path: &str, content: &[u8]) {
         fs::create_dir_all(parent).expect("create parent directory");
     }
     fs::write(full_path, content).expect("write fixture file");
+}
+
+fn utf16le_bom(content: &str) -> Vec<u8> {
+    let mut bytes = vec![0xff, 0xfe];
+    bytes.extend(content.encode_utf16().flat_map(u16::to_le_bytes));
+    bytes
+}
+
+fn utf16be_bom(content: &str) -> Vec<u8> {
+    let mut bytes = vec![0xfe, 0xff];
+    bytes.extend(content.encode_utf16().flat_map(u16::to_be_bytes));
+    bytes
 }
 
 fn rev_parse(repo: &Path, rev: &str) -> String {

@@ -73,6 +73,7 @@ fn decode_auto(bytes: &[u8]) -> Result<DecodedText, AppError> {
 }
 
 fn decode_utf8(bytes: &[u8]) -> Result<DecodedText, AppError> {
+    reject_utf16_bom(bytes, "UTF-8")?;
     let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
     if contains_nul(bytes) {
         return Err(binary_error());
@@ -86,6 +87,7 @@ fn decode_utf8(bytes: &[u8]) -> Result<DecodedText, AppError> {
 }
 
 fn decode_gb18030(bytes: &[u8]) -> Result<DecodedText, AppError> {
+    reject_utf16_bom(bytes, "GB18030")?;
     let text = encoding_rs::GB18030
         .decode_without_bom_handling_and_without_replacement(bytes)
         .ok_or_else(|| AppError::FileNotAnalyzable("文本不是合法 GB18030".to_string()))?;
@@ -96,6 +98,17 @@ fn decode_gb18030(bytes: &[u8]) -> Result<DecodedText, AppError> {
 }
 
 fn decode_utf16(bytes: &[u8], little_endian: bool) -> Result<DecodedText, AppError> {
+    let conflicting_bom = if little_endian {
+        [0xfe, 0xff]
+    } else {
+        [0xff, 0xfe]
+    };
+    if bytes.starts_with(&conflicting_bom) {
+        return Err(AppError::FileNotAnalyzable(format!(
+            "请求的 UTF-16{} 编码与文件 BOM 冲突",
+            if little_endian { "LE" } else { "BE" }
+        )));
+    }
     let bytes = if little_endian {
         bytes.strip_prefix(&[0xff, 0xfe]).unwrap_or(bytes)
     } else {
@@ -131,4 +144,13 @@ fn contains_nul(bytes: &[u8]) -> bool {
 
 fn binary_error() -> AppError {
     AppError::FileNotAnalyzable("文件包含明显二进制 NUL 字节".to_string())
+}
+
+fn reject_utf16_bom(bytes: &[u8], requested: &str) -> Result<(), AppError> {
+    if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
+        return Err(AppError::FileNotAnalyzable(format!(
+            "请求的 {requested} 编码与文件 UTF-16 BOM 冲突"
+        )));
+    }
+    Ok(())
 }

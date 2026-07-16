@@ -1,7 +1,8 @@
 use crate::attribution::commit_lookup;
 use crate::attribution::context::AttributionContext;
+use crate::contracts::ResolvedTextEncoding;
 use crate::error::AppError;
-use crate::git::blob::read_text_at_commit;
+use crate::git::blob::read_text_at_commit_with_encoding;
 use crate::git::commits::{author_key, IndexedCommit};
 use crate::git::diff::{commit_file_changes, CommitFileChange};
 use crate::json::{
@@ -16,6 +17,7 @@ const PATCH_INFERENCE_METHOD: &str = "patch-inference";
 pub fn attach_patch_inference(
     context: &AttributionContext<'_>,
     blocks: Vec<DiffBlockOutput>,
+    encoding: ResolvedTextEncoding,
     file_path: &str,
     old_path: Option<&str>,
     authors: &[String],
@@ -29,7 +31,8 @@ pub fn attach_patch_inference(
     for hash in &context.range_hashes {
         let commit = commit_lookup::get_commit(context, hash)?;
         let changes = commit_file_changes(context.repo, &commit.hash)?;
-        let touched_ranges = touched_ranges_for_commit(context, &commit, &changes, &active_paths)?;
+        let touched_ranges =
+            touched_ranges_for_commit(context, &commit, &changes, &active_paths, encoding)?;
         advance_active_paths(&mut active_paths, &changes);
         if touched_ranges.is_empty() {
             continue;
@@ -59,6 +62,7 @@ fn touched_ranges_for_commit(
     commit: &IndexedCommit,
     changes: &[CommitFileChange],
     active_paths: &HashSet<String>,
+    encoding: ResolvedTextEncoding,
 ) -> Result<Vec<TouchedRangeOutput>, AppError> {
     let mut touched_ranges = Vec::new();
     let mut seen = HashSet::new();
@@ -68,11 +72,18 @@ fn touched_ranges_for_commit(
         .filter(|change| change_touches_active_path(change, active_paths))
     {
         let old_text = match old_change_path(&change) {
-            Some(path) => read_text_at_commit(context.repo, &change.parent_hash, path)?,
+            Some(path) => read_text_at_commit_with_encoding(
+                context.repo,
+                &change.parent_hash,
+                path,
+                encoding,
+            )?,
             None => String::new(),
         };
         let new_text = match new_change_path(&change) {
-            Some(path) => read_text_at_commit(context.repo, &commit.hash, path)?,
+            Some(path) => {
+                read_text_at_commit_with_encoding(context.repo, &commit.hash, path, encoding)?
+            }
             None => String::new(),
         };
         if old_text == new_text {

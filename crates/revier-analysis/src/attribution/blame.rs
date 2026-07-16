@@ -2,6 +2,7 @@ use crate::attribution::commit_lookup;
 use crate::attribution::context::AttributionContext;
 use crate::attribution::merge_trace;
 use crate::attribution::patch_inference::FilterMatcher;
+use crate::contracts::ResolvedTextEncoding;
 use crate::error::AppError;
 use crate::git::blame::BlameLine;
 use crate::git::commits::{author_key, IndexedCommit};
@@ -25,12 +26,13 @@ pub fn attach_blame_attribution(
     head: &str,
     path: &str,
     blocks: Vec<DiffBlockOutput>,
+    encoding: ResolvedTextEncoding,
     authors: &[String],
     author_query: Option<&str>,
     message: Option<&str>,
 ) -> Result<Vec<DiffBlockOutput>, AppError> {
     let filter = FilterMatcher::new(authors, author_query, message);
-    let mut merge_text_cache = merge_trace::MergeTraceTextCache::new();
+    let mut merge_text_cache = merge_trace::MergeTraceTextCache::new(encoding);
 
     let mut attributed_blocks = Vec::new();
     for block in blocks {

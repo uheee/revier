@@ -1,8 +1,9 @@
 use crate::attribution::commit_lookup;
 use crate::attribution::context::AttributionContext;
 use crate::attribution::patch_inference::FilterMatcher;
+use crate::contracts::ResolvedTextEncoding;
 use crate::error::AppError;
-use crate::git::blob::read_text_at_commit;
+use crate::git::blob::read_text_at_commit_with_encoding;
 use crate::git::commits::{author_key, IndexedCommit};
 use crate::git::diff::{commit_file_changes, CommitFileChange};
 use crate::json::{
@@ -18,6 +19,7 @@ const PRECISE_CONFIDENCE: &str = "precise";
 pub fn attach_deletion_trace(
     context: &AttributionContext<'_>,
     blocks: Vec<DiffBlockOutput>,
+    encoding: ResolvedTextEncoding,
     candidate_paths: &[String],
     file_path: &str,
     old_path: Option<&str>,
@@ -36,6 +38,7 @@ pub fn attach_deletion_trace(
             file_path,
             old_path,
             &filter,
+            encoding,
         )?);
     }
 
@@ -49,6 +52,7 @@ fn attach_block_deletion_trace(
     file_path: &str,
     old_path: Option<&str>,
     filter: &FilterMatcher,
+    encoding: ResolvedTextEncoding,
 ) -> Result<DiffBlockOutput, AppError> {
     if !has_old_side_deletion(&block) {
         return Ok(block);
@@ -67,6 +71,7 @@ fn attach_block_deletion_trace(
         file_path,
         old_path,
         filter,
+        encoding,
     )?;
     if related_commits.is_empty() {
         return Ok(block);
@@ -89,6 +94,7 @@ fn find_deletion_commits(
     file_path: &str,
     old_path: Option<&str>,
     filter: &FilterMatcher,
+    encoding: ResolvedTextEncoding,
 ) -> Result<Vec<RelatedCommitOutput>, AppError> {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
@@ -109,7 +115,7 @@ fn find_deletion_commits(
             .filter(|change| change_touches_active_path(change, &active_paths))
         {
             let touched_ranges =
-                deletion_touched_ranges(context, &commit, change, block, deleted_lines)?;
+                deletion_touched_ranges(context, &commit, change, block, deleted_lines, encoding)?;
             if touched_ranges.len() != 1 {
                 continue;
             }
@@ -143,13 +149,17 @@ fn deletion_touched_ranges(
     change: &CommitFileChange,
     block: &DiffBlockOutput,
     deleted_lines: &[String],
+    encoding: ResolvedTextEncoding,
 ) -> Result<Vec<TouchedRangeOutput>, AppError> {
     let Some(old_path) = old_change_path(change) else {
         return Ok(Vec::new());
     };
-    let old_text = read_text_at_commit(context.repo, &change.parent_hash, old_path)?;
+    let old_text =
+        read_text_at_commit_with_encoding(context.repo, &change.parent_hash, old_path, encoding)?;
     let new_text = match new_change_path(change) {
-        Some(path) => read_text_at_commit(context.repo, &commit.hash, path)?,
+        Some(path) => {
+            read_text_at_commit_with_encoding(context.repo, &commit.hash, path, encoding)?
+        }
         None => String::new(),
     };
     if old_text == new_text {

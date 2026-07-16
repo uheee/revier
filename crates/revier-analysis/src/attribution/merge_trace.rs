@@ -1,8 +1,9 @@
 use crate::attribution::commit_lookup;
 use crate::attribution::context::AttributionContext;
 use crate::attribution::patch_inference::FilterMatcher;
+use crate::contracts::ResolvedTextEncoding;
 use crate::error::AppError;
-use crate::git::blob::read_text_at_commit;
+use crate::git::blob::read_text_at_commit_with_encoding;
 use crate::git::commits::IndexedCommit;
 use crate::json::{
     AttributionWarningOutput, BlockAttributionOutput, DiffBlockOutput,
@@ -21,14 +22,17 @@ pub struct MergeTraceOutcome {
     pub ambiguous: bool,
 }
 
-#[derive(Default)]
 pub(crate) struct MergeTraceTextCache {
+    encoding: ResolvedTextEncoding,
     texts: HashMap<(String, String), String>,
 }
 
 impl MergeTraceTextCache {
-    pub(crate) fn new() -> Self {
-        Self::default()
+    pub(crate) fn new(encoding: ResolvedTextEncoding) -> Self {
+        Self {
+            encoding,
+            texts: HashMap::new(),
+        }
     }
 
     fn read_text(
@@ -39,7 +43,12 @@ impl MergeTraceTextCache {
     ) -> Result<&str, AppError> {
         let key = (commit_hash.to_string(), file_path.to_string());
         if !self.texts.contains_key(&key) {
-            let text = read_text_at_commit(context.repo, commit_hash, file_path)?;
+            let text = read_text_at_commit_with_encoding(
+                context.repo,
+                commit_hash,
+                file_path,
+                self.encoding,
+            )?;
             self.texts.insert(key.clone(), text);
         }
         Ok(self.texts.get(&key).expect("缓存条目刚写入").as_str())

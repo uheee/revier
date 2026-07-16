@@ -65,38 +65,37 @@ pub fn build_file_overlay(
         )));
     }
     let diff = build_overlay_diff(&old_text, &new_text);
-    let blocks = if resolved == crate::contracts::ResolvedTextEncoding::Utf8 {
-        let blocks = crate::attribution::patch_inference::attach_patch_inference(
-            &context,
-            diff.blocks,
-            &change.path,
-            change.old_path.as_deref(),
-            &args.common.authors,
-            args.common.author_query.as_deref(),
-            args.common.message.as_deref(),
-        )?;
-        let blocks = crate::attribution::blame::attach_blame_attribution(
-            &context,
-            &args.common.head,
-            &change.path,
-            blocks,
-            &args.common.authors,
-            args.common.author_query.as_deref(),
-            args.common.message.as_deref(),
-        )?;
-        crate::attribution::deletion_trace::attach_deletion_trace(
-            &context,
-            blocks,
-            &path_candidates.paths,
-            &change.path,
-            change.old_path.as_deref(),
-            &args.common.authors,
-            args.common.author_query.as_deref(),
-            args.common.message.as_deref(),
-        )?
-    } else {
-        diff.blocks
-    };
+    let blocks = crate::attribution::patch_inference::attach_patch_inference(
+        &context,
+        diff.blocks,
+        resolved,
+        &change.path,
+        change.old_path.as_deref(),
+        &args.common.authors,
+        args.common.author_query.as_deref(),
+        args.common.message.as_deref(),
+    )?;
+    let blocks = crate::attribution::blame::attach_blame_attribution(
+        &context,
+        &args.common.head,
+        &change.path,
+        blocks,
+        resolved,
+        &args.common.authors,
+        args.common.author_query.as_deref(),
+        args.common.message.as_deref(),
+    )?;
+    let blocks = crate::attribution::deletion_trace::attach_deletion_trace(
+        &context,
+        blocks,
+        resolved,
+        &path_candidates.paths,
+        &change.path,
+        change.old_path.as_deref(),
+        &args.common.authors,
+        args.common.author_query.as_deref(),
+        args.common.message.as_deref(),
+    )?;
 
     Ok(FileOverlayCommandOutput {
         version: 1,
