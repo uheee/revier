@@ -7,16 +7,9 @@
   >
     <n-message-provider>
       <div class="app-theme-root" :data-theme="effectiveTheme">
-        <n-alert
-          v-if="snapshot.warning && warningVisible"
-          class="editor-settings-warning"
-          title="编辑器配置未能加载"
-          type="warning"
-          closable
-          @close="warningVisible = false"
-        >
-          {{ snapshot.warning }}（配置：{{ snapshot.configPath }}）
-        </n-alert>
+        <div class="app-notification-center">
+          <NotificationCenter />
+        </div>
         <RouterView />
       </div>
     </n-message-provider>
@@ -24,22 +17,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed } from 'vue';
 import { darkTheme, dateZhCN, zhCN } from 'naive-ui';
 import { RouterView } from 'vue-router';
+import NotificationCenter from './components/NotificationCenter.vue';
 import { useEditorSettings } from './composables/useEditorSettings';
 import { toNaiveThemeOverrides } from './editor/editorTheme';
 
-const { snapshot, effectiveTheme, activeColors, fontFamily } = useEditorSettings();
-const warningVisible = ref(true);
+const { effectiveTheme, activeColors, fontFamily } = useEditorSettings();
 const themeOverrides = computed(() => toNaiveThemeOverrides(activeColors.value, fontFamily.value));
-
-watch(
-  () => snapshot.value.warning,
-  (warning) => {
-    if (warning) {
-      warningVisible.value = true;
-    }
-  }
-);
 </script>
+
+<style scoped>
+.app-notification-center {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 1000;
+}
+</style>

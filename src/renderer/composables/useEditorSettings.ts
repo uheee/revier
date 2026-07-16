@@ -1,4 +1,5 @@
 import { computed, readonly, ref, type Ref } from 'vue';
+import { editor as monacoEditor } from 'monaco-editor';
 import { revierClient } from '../api/revierClient';
 import type {
   EditorSettingsSnapshot,
@@ -10,6 +11,7 @@ import {
   toFontFamily,
   toMonacoTheme
 } from '../editor/editorTheme';
+import { addNotification } from './useNotifications';
 
 function createLightColors(): EditorThemeColors {
   return {
@@ -109,11 +111,25 @@ function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function appendWarning(message: string): void {
-  snapshot.value = {
-    ...snapshot.value,
-    warning: [snapshot.value.warning, message].filter(Boolean).join('\n')
-  };
+function reportRuntimeFailure(title: string, error: unknown): void {
+  addNotification({
+    type: 'error',
+    title,
+    message: errorDetail(error),
+    source: '编辑器运行时'
+  });
+}
+
+function reportSettingsWarning(): void {
+  if (!snapshot.value.warning) {
+    return;
+  }
+  addNotification({
+    type: 'warning',
+    title: '编辑器配置未能加载',
+    message: `${snapshot.value.warning}（配置：${snapshot.value.configPath}）`,
+    source: 'editor.toml'
+  });
 }
 
 function applyCssTheme(): void {
@@ -128,23 +144,22 @@ function applyCssTheme(): void {
 }
 
 async function applyMonacoTheme(): Promise<void> {
-  const { editor } = await import('monaco-editor');
-  editor.defineTheme('revier-light', toMonacoTheme(snapshot.value.settings.themes.light));
-  editor.defineTheme('revier-dark', toMonacoTheme(snapshot.value.settings.themes.dark));
-  editor.setTheme(`revier-${effectiveTheme.value}`);
+  monacoEditor.defineTheme('revier-light', toMonacoTheme(snapshot.value.settings.themes.light));
+  monacoEditor.defineTheme('revier-dark', toMonacoTheme(snapshot.value.settings.themes.dark));
+  monacoEditor.setTheme(`revier-${effectiveTheme.value}`);
 }
 
 async function applyTheme(): Promise<void> {
   try {
     applyCssTheme();
   } catch (error) {
-    appendWarning(`应用页面主题失败：${errorDetail(error)}`);
+    reportRuntimeFailure('应用页面主题失败', error);
   }
 
   try {
     await applyMonacoTheme();
   } catch (error) {
-    appendWarning(`应用 Monaco 主题失败：${errorDetail(error)}`);
+    reportRuntimeFailure('应用 Monaco 主题失败', error);
   }
 }
 
@@ -154,7 +169,7 @@ function handleSystemThemeChange(event: MediaQueryListEvent): void {
   }
   systemDark.value = event.matches;
   void applyTheme().catch((error) => {
-    appendWarning(`响应系统主题变化失败：${errorDetail(error)}`);
+    reportRuntimeFailure('响应系统主题变化失败', error);
   });
 }
 
@@ -166,6 +181,7 @@ async function initialize(): Promise<void> {
       `读取编辑器配置失败，已使用内置默认值：${errorDetail(error)}`
     );
   }
+  reportSettingsWarning();
 
   if (snapshot.value.settings.theme === 'system') {
     try {
@@ -175,7 +191,12 @@ async function initialize(): Promise<void> {
     } catch (error) {
       colorSchemeQuery = undefined;
       systemDark.value = false;
-      appendWarning(`监听系统主题失败：${errorDetail(error)}`);
+      addNotification({
+        type: 'warning',
+        title: '监听系统主题失败',
+        message: errorDetail(error),
+        source: '编辑器运行时'
+      });
     }
   }
 
@@ -184,7 +205,7 @@ async function initialize(): Promise<void> {
 
 export async function initializeEditorSettings(): Promise<void> {
   initialization ??= initialize().catch((error) => {
-    appendWarning(`初始化编辑器设置失败：${errorDetail(error)}`);
+    reportRuntimeFailure('初始化编辑器设置失败', error);
   });
   await initialization;
 }

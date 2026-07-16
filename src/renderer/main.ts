@@ -4,13 +4,30 @@ import App from './App.vue';
 import router from './router';
 import { createPinia } from 'pinia';
 import './styles.css';
-import { initializeEditorSettings } from './composables/useEditorSettings';
+import {
+  initializeEditorSettings,
+  useEditorSettings
+} from './composables/useEditorSettings';
+import { addNotification } from './composables/useNotifications';
+import { initializeMonacoSyntax } from './editor/monacoEnvironment';
+
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 async function bootstrap(): Promise<void> {
+  await initializeEditorSettings();
+  const { snapshot } = useEditorSettings();
+
   try {
-    await initializeEditorSettings();
+    await initializeMonacoSyntax(snapshot.value.settings.themes);
   } catch (error) {
-    console.error('初始化编辑器设置失败，应用将继续启动。', error);
+    addNotification({
+      type: 'error',
+      title: 'Monaco 语法高亮初始化失败',
+      message: errorDetail(error),
+      source: 'Shiki'
+    });
   }
 
   createApp(App).use(createPinia()).use(router).use(naive).mount('#app');

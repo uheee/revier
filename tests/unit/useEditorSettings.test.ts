@@ -127,6 +127,26 @@ describe('编辑器设置启动初始化', () => {
       'monospace'
     ]);
     expect(state.snapshot.value.warning).toContain('IPC unavailable');
+    const notifications = await import('../../src/renderer/composables/useNotifications');
+    expect(notifications.useNotifications().notifications.value[0]).toMatchObject({
+      type: 'warning',
+      title: '编辑器配置未能加载',
+      source: 'editor.toml'
+    });
+  });
+
+  it('设置快照中的 warning 会连同配置路径发布到通知中心', async () => {
+    installMatchMedia(false);
+    invoke.mockResolvedValue({ ...settingsSnapshot(), warning: '颜色字段无效' });
+    const module = await loadComposable();
+    await module.initializeEditorSettings();
+
+    const notifications = await import('../../src/renderer/composables/useNotifications');
+    expect(notifications.useNotifications().notifications.value[0]).toMatchObject({
+      type: 'warning',
+      title: '编辑器配置未能加载',
+      message: '颜色字段无效（配置：C:/config/editor.toml）'
+    });
   });
 
   it('system 变化只重新应用主题而不重读配置', async () => {
@@ -152,7 +172,7 @@ describe('编辑器设置启动初始化', () => {
     expect(module.useEditorSettings().effectiveTheme.value).toBe(theme);
   });
 
-  it('Monaco 主题应用失败不会拒绝启动并写入非阻断 warning', async () => {
+  it('Monaco 主题应用失败不会拒绝启动并发布错误通知', async () => {
     installMatchMedia(false);
     invoke.mockResolvedValue(settingsSnapshot());
     defineTheme.mockImplementationOnce(() => {
@@ -162,11 +182,16 @@ describe('编辑器设置启动初始化', () => {
 
     await expect(module.initializeEditorSettings()).resolves.toBeUndefined();
 
-    expect(module.useEditorSettings().snapshot.value.warning).toContain('Monaco unavailable');
+    const notifications = await import('../../src/renderer/composables/useNotifications');
+    expect(notifications.useNotifications().notifications.value[0]).toMatchObject({
+      type: 'error',
+      title: '应用 Monaco 主题失败'
+    });
+    expect(notifications.useNotifications().notifications.value[0]?.message).toContain('Monaco unavailable');
     expect(document.documentElement.dataset.theme).toBe('light');
   });
 
-  it('matchMedia 失败仍完成启动并写入非阻断 warning', async () => {
+  it('matchMedia 失败仍完成启动并发布非阻断警告', async () => {
     vi.stubGlobal('matchMedia', vi.fn(() => {
       throw new Error('media unavailable');
     }));
@@ -175,10 +200,11 @@ describe('编辑器设置启动初始化', () => {
 
     await expect(module.initializeEditorSettings()).resolves.toBeUndefined();
 
-    expect(module.useEditorSettings().snapshot.value.warning).toContain('media unavailable');
+    const notifications = await import('../../src/renderer/composables/useNotifications');
+    expect(notifications.useNotifications().notifications.value[0]?.message).toContain('media unavailable');
   });
 
-  it('CSS 应用失败仍完成启动并写入非阻断 warning', async () => {
+  it('CSS 应用失败仍完成启动并发布错误通知', async () => {
     installMatchMedia(false);
     invoke.mockResolvedValue(settingsSnapshot());
     const setProperty = vi
@@ -190,23 +216,33 @@ describe('编辑器设置启动初始化', () => {
 
     await expect(module.initializeEditorSettings()).resolves.toBeUndefined();
 
-    expect(module.useEditorSettings().snapshot.value.warning).toContain('CSS unavailable');
+    const notifications = await import('../../src/renderer/composables/useNotifications');
+    expect(notifications.useNotifications().notifications.value[0]).toMatchObject({
+      type: 'error',
+      title: '应用页面主题失败'
+    });
+    expect(notifications.useNotifications().notifications.value[0]?.message).toContain('CSS unavailable');
     setProperty.mockRestore();
   });
 
-  it('main 使用兼容 Safari 13 的 bootstrap，并保持设置完成后挂载', () => {
+  it('main 使用兼容 Safari 13 的 bootstrap，按设置、语法、挂载顺序启动', () => {
     const source = readFileSync('src/renderer/main.ts', 'utf8');
 
     expect(source).not.toMatch(/^await initializeEditorSettings\(\)/m);
     expect(source.indexOf('await initializeEditorSettings()')).toBeLessThan(
+      source.indexOf('await initializeMonacoSyntax(snapshot.value.settings.themes)')
+    );
+    expect(source.indexOf('await initializeMonacoSyntax(snapshot.value.settings.themes)')).toBeLessThan(
       source.indexOf("mount('#app')")
     );
+    expect(source).toContain("title: 'Monaco 语法高亮初始化失败'");
   });
 
-  it('App 在 warning 内容更新后重新显示可关闭提示', () => {
+  it('App 移除顶部 warning 横幅并在右上角挂载通知中心', () => {
     const source = readFileSync('src/renderer/App.vue', 'utf8');
 
-    expect(source).toContain('() => snapshot.value.warning');
-    expect(source).toMatch(/if \(warning\) \{\s*warningVisible\.value = true;/);
+    expect(source).toContain('<NotificationCenter');
+    expect(source).toContain('app-notification-center');
+    expect(source).not.toContain('editor-settings-warning');
   });
 });
