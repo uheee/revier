@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -12,8 +12,9 @@ use revier_analysis::contracts::{
     AttributionMethod, AttributionWarning, AttributionWarningCode, AuthorFilterOption,
     AuthorSummary, BlockAttributionSummary, ChangedFile, ChangedFileStatus, CommitOverlayRequest,
     DiffBlock, DiffBlockChangeType, FileOverlay, FileOverlayMode, FileOverlayRequest, ProjectId,
-    RelatedCommit, RelatedCommitAttribution, ReviewAuthorOptionsRequest, ReviewFilters,
-    ReviewProject, SideBySideDiffRow, SideBySideDiffRowType, TaskId, TouchedRange, WordChange,
+    RelatedCommit, RelatedCommitAttribution, ResolvedTextEncoding, ReviewAuthorOptionsRequest,
+    ReviewFilters, ReviewProject, SideBySideDiffRow, SideBySideDiffRowType, TaskId, TextEncoding,
+    TouchedRange, WordChange,
 };
 use revier_analysis::error::AppError as AnalysisAppError;
 use revier_analysis::execution::AnalysisExecutionContext;
@@ -273,6 +274,8 @@ impl ReviewService {
         let output = revier_analysis::api::file_overlay(FileOverlayArgs {
             common: overlay_common_args(&context),
             file: request.file_path,
+            encoding: requested_encoding_as_str(request.encoding.unwrap_or(TextEncoding::Auto))
+                .to_string(),
         })
         .map_err(map_analysis_error)?;
 
@@ -321,28 +324,56 @@ impl ReviewService {
                     request.file_path.clone(),
                 )
             })?;
-        if change.is_binary {
+        let old_path = old_text_path(&change);
+        let new_path = new_text_path(&change);
+        let old_bytes = match old_path {
+            Some(path) => {
+                revier_analysis::git::blob::read_blob_at_commit(&repo, &parent_hash, path)
+                    .map_err(map_analysis_error)?
+                    .unwrap_or_default()
+            }
+            None => Vec::new(),
+        };
+        let new_bytes = match new_path {
+            Some(path) => {
+                revier_analysis::git::blob::read_blob_at_commit(&repo, &request.commit_hash, path)
+                    .map_err(map_analysis_error)?
+                    .unwrap_or_default()
+            }
+            None => Vec::new(),
+        };
+        let requested_encoding = request.encoding.unwrap_or(TextEncoding::Auto);
+        let preferred_bytes = if new_path.is_some() {
+            &new_bytes
+        } else {
+            &old_bytes
+        };
+        let resolved_encoding =
+            revier_analysis::text_encoding::decode_text_bytes(preferred_bytes, requested_encoding)
+                .map_err(map_analysis_error)?
+                .encoding;
+        let concrete_encoding =
+            revier_analysis::text_encoding::resolved_as_requested(resolved_encoding);
+        let old_text =
+            revier_analysis::text_encoding::decode_text_bytes(&old_bytes, concrete_encoding)
+                .map_err(map_analysis_error)?
+                .text;
+        let new_text =
+            revier_analysis::text_encoding::decode_text_bytes(&new_bytes, concrete_encoding)
+                .map_err(map_analysis_error)?
+                .text;
+        if change.is_binary
+            && !matches!(
+                resolved_encoding,
+                ResolvedTextEncoding::Utf16Le | ResolvedTextEncoding::Utf16Be
+            )
+        {
             return Err(command_error_with_detail(
                 "FILE_NOT_ANALYZABLE",
                 "文件包含二进制内容",
                 change.path,
             ));
         }
-
-        let old_text = match old_text_path(&change) {
-            Some(path) => {
-                revier_analysis::git::blob::read_text_at_commit(&repo, &parent_hash, path)
-                    .map_err(map_analysis_error)?
-            }
-            None => String::new(),
-        };
-        let new_text = match new_text_path(&change) {
-            Some(path) => {
-                revier_analysis::git::blob::read_text_at_commit(&repo, &request.commit_hash, path)
-                    .map_err(map_analysis_error)?
-            }
-            None => String::new(),
-        };
         let diff = revier_analysis::overlay::diff_builder::build_overlay_diff(&old_text, &new_text);
         let rows = adapt_rows(diff.rows)?;
         let related_commit = RelatedCommit {
@@ -359,6 +390,8 @@ impl ReviewService {
         let author = AuthorSummary {
             name: related_commit.author_name.clone(),
             email: related_commit.author_email.clone(),
+            commit_count: 1,
+            last_committed_at: related_commit.committed_at.clone(),
         };
         let mut blocks = adapt_blocks(diff.blocks)?;
         for block in &mut blocks {
@@ -375,6 +408,9 @@ impl ReviewService {
             warnings: Vec::new(),
             commit: Some(related_commit),
             parent_hash: Some(parent_hash),
+            old_content: old_text,
+            new_content: new_text,
+            resolved_encoding,
         })
     }
 
@@ -720,6 +756,7 @@ fn adapt_file_overlay_output(
     cached_range: &AnalysisRange,
 ) -> CommandResult<FileOverlay> {
     let overlay = output.overlay;
+    let resolved_encoding = adapt_resolved_text_encoding(&overlay.resolved_encoding)?;
     Ok(FileOverlay {
         mode: Some(adapt_file_overlay_mode(&overlay.mode)?),
         file: adapt_changed_file(overlay.file)?,
@@ -733,7 +770,34 @@ fn adapt_file_overlay_output(
             .collect(),
         commit: None,
         parent_hash: None,
+        old_content: overlay.old_content,
+        new_content: overlay.new_content,
+        resolved_encoding,
     })
+}
+
+fn requested_encoding_as_str(encoding: TextEncoding) -> &'static str {
+    match encoding {
+        TextEncoding::Auto => "auto",
+        TextEncoding::Utf8 => "utf-8",
+        TextEncoding::Gb18030 => "gb18030",
+        TextEncoding::Utf16Le => "utf-16le",
+        TextEncoding::Utf16Be => "utf-16be",
+    }
+}
+
+fn adapt_resolved_text_encoding(encoding: &str) -> CommandResult<ResolvedTextEncoding> {
+    match encoding {
+        "utf-8" => Ok(ResolvedTextEncoding::Utf8),
+        "gb18030" => Ok(ResolvedTextEncoding::Gb18030),
+        "utf-16le" => Ok(ResolvedTextEncoding::Utf16Le),
+        "utf-16be" => Ok(ResolvedTextEncoding::Utf16Be),
+        other => Err(command_error_with_detail(
+            "UNKNOWN_RESOLVED_TEXT_ENCODING",
+            format!("未知已解析文本编码：{other}"),
+            other,
+        )),
+    }
 }
 
 fn adapt_file_overlay_mode(mode: &str) -> CommandResult<FileOverlayMode> {
@@ -794,6 +858,7 @@ fn adapt_blocks(blocks: Vec<DiffBlockOutput>) -> CommandResult<Vec<DiffBlock>> {
 }
 
 fn adapt_block(block: DiffBlockOutput) -> CommandResult<DiffBlock> {
+    let authors = adapt_authors(block.authors, &block.related_commits);
     Ok(DiffBlock {
         id: block.id,
         old_start: block.old_start as u64,
@@ -803,7 +868,7 @@ fn adapt_block(block: DiffBlockOutput) -> CommandResult<DiffBlock> {
         row_start_index: block.row_start_index.map(|value| value as u64),
         row_end_index: block.row_end_index.map(|value| value as u64),
         change_type: adapt_block_change_type(&block.change_type)?,
-        authors: adapt_authors(block.authors),
+        authors,
         rows: adapt_rows(block.rows)?,
         related_commits: adapt_related_commits(block.related_commits)?,
         attribution: block.attribution.map(adapt_block_attribution).transpose()?,
@@ -823,14 +888,67 @@ fn adapt_block_change_type(change_type: &str) -> CommandResult<DiffBlockChangeTy
     }
 }
 
-fn adapt_authors(authors: Vec<AuthorOutput>) -> Vec<AuthorSummary> {
+fn adapt_authors(
+    authors: Vec<AuthorOutput>,
+    commits: &[RelatedCommitOutput],
+) -> Vec<AuthorSummary> {
+    let mut seen_identities = HashSet::new();
     authors
         .into_iter()
-        .map(|author| AuthorSummary {
-            name: author.name,
-            email: author.email,
+        .filter_map(|author| {
+            let identity = author_identity(&author.name, author.email.as_deref());
+            if !seen_identities.insert(identity.clone()) {
+                return None;
+            }
+
+            let related = commits.iter().filter(|commit| {
+                author_identity(&commit.author_name, commit.author_email.as_deref()) == identity
+            });
+            let mut hashes = HashSet::new();
+            let mut latest: Option<&RelatedCommitOutput> = None;
+            for commit in related {
+                hashes.insert(commit.hash.as_str());
+                if latest.is_none_or(|current| commit_is_newer(commit, current)) {
+                    latest = Some(commit);
+                }
+            }
+
+            let (name, email, last_committed_at) = latest.map_or_else(
+                || (author.name, author.email, String::new()),
+                |commit| {
+                    (
+                        commit.author_name.clone(),
+                        commit.author_email.clone(),
+                        commit.committed_at.clone(),
+                    )
+                },
+            );
+            Some(AuthorSummary {
+                name,
+                email,
+                commit_count: hashes.len() as u64,
+                last_committed_at,
+            })
         })
         .collect()
+}
+
+fn author_identity(name: &str, email: Option<&str>) -> String {
+    email
+        .map(str::trim)
+        .filter(|email| !email.is_empty())
+        .unwrap_or_else(|| name.trim())
+        .to_lowercase()
+}
+
+fn commit_is_newer(candidate: &RelatedCommitOutput, current: &RelatedCommitOutput) -> bool {
+    match (
+        DateTime::parse_from_rfc3339(&candidate.committed_at),
+        DateTime::parse_from_rfc3339(&current.committed_at),
+    ) {
+        (Ok(candidate_time), Ok(current_time)) => candidate_time > current_time,
+        _ => candidate.committed_at > current.committed_at,
+    }
 }
 
 fn adapt_related_commits(commits: Vec<RelatedCommitOutput>) -> CommandResult<Vec<RelatedCommit>> {
@@ -991,6 +1109,145 @@ mod tests {
     use tempfile::{tempdir, TempDir};
 
     use crate::services::projects::ProjectService;
+
+    #[test]
+    fn aggregates_authors_by_normalized_email_and_sorts_source_data() {
+        let authors = vec![
+            AuthorOutput {
+                name: "旧名称".to_string(),
+                email: Some(" Alice@Example.COM ".to_string()),
+            },
+            AuthorOutput {
+                name: "未匹配作者".to_string(),
+                email: Some("missing@example.com".to_string()),
+            },
+        ];
+        let commits = vec![
+            related_commit_output(
+                "newest",
+                "Alice New",
+                Some("alice@example.com"),
+                "2026-06-12T00:00:00Z",
+            ),
+            related_commit_output(
+                "oldest",
+                "Alice Old",
+                Some("ALICE@EXAMPLE.COM"),
+                "2026-06-10T00:00:00Z",
+            ),
+            related_commit_output(
+                "newest",
+                "Alice Duplicate",
+                Some(" alice@example.com "),
+                "2026-06-11T00:00:00Z",
+            ),
+        ];
+
+        let summaries = adapt_authors(authors, &commits);
+
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].name, "Alice New");
+        assert_eq!(summaries[0].email.as_deref(), Some("alice@example.com"));
+        assert_eq!(summaries[0].commit_count, 2);
+        assert_eq!(summaries[0].last_committed_at, "2026-06-12T00:00:00Z");
+        assert_eq!(summaries[1].name, "未匹配作者");
+        assert_eq!(summaries[1].commit_count, 0);
+        assert_eq!(summaries[1].last_committed_at, "");
+    }
+
+    #[test]
+    fn falls_back_to_normalized_name_without_email() {
+        let authors = vec![AuthorOutput {
+            name: " Alice ".to_string(),
+            email: None,
+        }];
+        let commits = vec![
+            related_commit_output("old", "alice", None, "2026-06-10T00:00:00Z"),
+            related_commit_output("new", "ALICE", None, "2026-06-11T00:00:00Z"),
+        ];
+
+        let summaries = adapt_authors(authors, &commits);
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].name, "ALICE");
+        assert_eq!(summaries[0].email, None);
+        assert_eq!(summaries[0].commit_count, 2);
+        assert_eq!(summaries[0].last_committed_at, "2026-06-11T00:00:00Z");
+    }
+
+    #[test]
+    fn keeps_full_contents_and_resolved_encoding_when_adapting_overlay() {
+        let output = FileOverlayCommandOutput {
+            version: 1,
+            overlay: revier_analysis::json::FileOverlayOutput {
+                mode: "range".to_string(),
+                file: ChangedFileOutput {
+                    path: "src/app.txt".to_string(),
+                    old_path: None,
+                    status: "modified".to_string(),
+                    additions: 1,
+                    deletions: 1,
+                    is_binary: false,
+                    is_previewable: true,
+                },
+                range: revier_analysis::json::AnalysisRangeOutput {
+                    branch: "ignored".to_string(),
+                    base_commit: "ignored-base".to_string(),
+                    head_commit: "ignored-head".to_string(),
+                    start_at: None,
+                    end_at: None,
+                },
+                old_content: "旧行\r\n末行\r\n".to_string(),
+                new_content: "新行\r\n末行\r\n".to_string(),
+                resolved_encoding: "gb18030".to_string(),
+                rows: Vec::new(),
+                blocks: Vec::new(),
+                warnings: Vec::new(),
+            },
+            warnings: Vec::new(),
+        };
+        let range = AnalysisRange {
+            branch: "main".to_string(),
+            base_commit: "base".to_string(),
+            head_commit: "head".to_string(),
+            start_at: None,
+            end_at: None,
+        };
+
+        let overlay = adapt_file_overlay_output(output, &range).expect("适配 overlay 失败");
+
+        assert_eq!(
+            overlay.old_content.as_bytes(),
+            "旧行\r\n末行\r\n".as_bytes()
+        );
+        assert_eq!(
+            overlay.new_content.as_bytes(),
+            "新行\r\n末行\r\n".as_bytes()
+        );
+        assert_eq!(
+            overlay.resolved_encoding,
+            revier_analysis::contracts::ResolvedTextEncoding::Gb18030
+        );
+    }
+
+    fn related_commit_output(
+        hash: &str,
+        name: &str,
+        email: Option<&str>,
+        committed_at: &str,
+    ) -> RelatedCommitOutput {
+        RelatedCommitOutput {
+            hash: hash.to_string(),
+            short_hash: hash.to_string(),
+            author_name: name.to_string(),
+            author_email: email.map(str::to_string),
+            committed_at: committed_at.to_string(),
+            subject: "测试提交".to_string(),
+            matched_by_filter: false,
+            touched_ranges: Vec::new(),
+            attribution: None,
+        }
+    }
 
     #[test]
     fn creates_and_completes_real_analysis_task() {
@@ -1343,6 +1600,7 @@ mod tests {
             .get_file_overlay(FileOverlayRequest {
                 task_id: task.task_id,
                 file_path: "src/app.txt".to_string(),
+                encoding: None,
             })
             .expect("读取文件 overlay 失败");
 
@@ -1350,6 +1608,9 @@ mod tests {
         assert_eq!(overlay.file.path, "src/app.txt");
         assert_eq!(overlay.range.branch, "main");
         assert!(!overlay.blocks.is_empty());
+        assert_eq!(overlay.old_content, "one\n");
+        assert_eq!(overlay.new_content, "one\ntwo\n");
+        assert_eq!(overlay.resolved_encoding, ResolvedTextEncoding::Utf8);
     }
 
     #[test]
@@ -1376,13 +1637,23 @@ mod tests {
                 task_id: task.task_id,
                 file_path: "src/app.txt".to_string(),
                 commit_hash: head.clone(),
+                encoding: None,
             })
             .expect("读取提交 overlay 失败");
 
         assert!(matches!(overlay.mode, Some(FileOverlayMode::Commit)));
-        assert_eq!(overlay.commit.as_ref().expect("应包含提交信息").hash, head);
+        let commit = overlay.commit.as_ref().expect("应包含提交信息");
+        assert_eq!(commit.hash, head);
         assert!(overlay.parent_hash.is_some());
         assert!(!overlay.blocks.is_empty());
+        assert_eq!(overlay.old_content, "one\n");
+        assert_eq!(overlay.new_content, "one\ntwo\n");
+        assert_eq!(overlay.resolved_encoding, ResolvedTextEncoding::Utf8);
+        assert!(overlay.blocks.iter().all(|block| {
+            block.authors.len() == 1
+                && block.authors[0].commit_count == 1
+                && block.authors[0].last_committed_at == commit.committed_at
+        }));
     }
 
     #[test]
@@ -1409,6 +1680,7 @@ mod tests {
                 task_id: task.task_id,
                 file_path: "src/app.txt".to_string(),
                 commit_hash: root,
+                encoding: None,
             })
             .expect_err("范围外提交不应返回 overlay");
 
