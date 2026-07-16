@@ -218,7 +218,7 @@ export function toShikiTheme(name: string, theme: EditorThemeColors): ThemeRegis
     type: isDarkColor(theme.workspaceBackground) ? 'dark' : 'light',
     bg: theme.editorBackground,
     fg: theme.foreground,
-    colors: shikiEditorColors(theme),
+    colors: monacoEditorColors(theme),
     settings: shikiTokenRules(theme)
   };
 }

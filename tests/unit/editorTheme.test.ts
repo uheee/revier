@@ -101,8 +101,11 @@ describe('编辑器主题转换', () => {
         'editor.foreground': colors.foreground,
         'contrastBorder': colors.border,
         'focusBorder': colors.accent,
-        'diffEditor.removedLineBackground': colors.diffRemoved,
-        'diffEditor.insertedLineBackground': colors.diffAdded
+        'editor.inactiveSelectionBackground': `${colors.selection}80`,
+        'diffEditor.removedLineBackground': `${colors.diffRemoved}99`,
+        'diffEditor.removedTextBackground': `${colors.diffRemovedWord}CC`,
+        'diffEditor.insertedLineBackground': `${colors.diffAdded}99`,
+        'diffEditor.insertedTextBackground': `${colors.diffAddedWord}CC`
       }
     });
 
