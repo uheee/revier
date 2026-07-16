@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -327,19 +328,19 @@ impl ReviewService {
         let old_path = old_text_path(&change);
         let new_path = new_text_path(&change);
         let old_bytes = match old_path {
-            Some(path) => {
-                revier_analysis::git::blob::read_blob_at_commit(&repo, &parent_hash, path)
-                    .map_err(map_analysis_error)?
-                    .unwrap_or_default()
-            }
+            Some(path) => require_blob_at_commit(
+                revier_analysis::git::blob::read_blob_at_commit(&repo, &parent_hash, path),
+                &parent_hash,
+                path,
+            )?,
             None => Vec::new(),
         };
         let new_bytes = match new_path {
-            Some(path) => {
-                revier_analysis::git::blob::read_blob_at_commit(&repo, &request.commit_hash, path)
-                    .map_err(map_analysis_error)?
-                    .unwrap_or_default()
-            }
+            Some(path) => require_blob_at_commit(
+                revier_analysis::git::blob::read_blob_at_commit(&repo, &request.commit_hash, path),
+                &request.commit_hash,
+                path,
+            )?,
             None => Vec::new(),
         };
         let requested_encoding = request.encoding.unwrap_or(TextEncoding::Auto);
@@ -724,6 +725,20 @@ fn new_text_path(change: &revier_analysis::git::diff::CommitFileChange) -> Optio
     }
 }
 
+fn require_blob_at_commit(
+    blob: Result<Option<Vec<u8>>, AnalysisAppError>,
+    commit_hash: &str,
+    path: &str,
+) -> CommandResult<Vec<u8>> {
+    blob.map_err(map_analysis_error)?.ok_or_else(|| {
+        command_error_with_detail(
+            "BLOB_NOT_FOUND",
+            "提交中的文件 Blob 不存在",
+            format!("commit={commit_hash}; path={path}"),
+        )
+    })
+}
+
 fn adapt_changed_file(file: ChangedFileOutput) -> CommandResult<ChangedFile> {
     Ok(ChangedFile {
         path: file.path,
@@ -896,13 +911,21 @@ fn adapt_authors(
     authors
         .into_iter()
         .filter_map(|author| {
-            let identity = author_identity(&author.name, author.email.as_deref());
+            let Some(identity) = author_identity(&author.name, author.email.as_deref()) else {
+                return Some(AuthorSummary {
+                    name: author.name,
+                    email: author.email,
+                    commit_count: 0,
+                    last_committed_at: String::new(),
+                });
+            };
             if !seen_identities.insert(identity.clone()) {
                 return None;
             }
 
             let related = commits.iter().filter(|commit| {
-                author_identity(&commit.author_name, commit.author_email.as_deref()) == identity
+                author_identity(&commit.author_name, commit.author_email.as_deref()).as_ref()
+                    == Some(&identity)
             });
             let mut hashes = HashSet::new();
             let mut latest: Option<&RelatedCommitOutput> = None;
@@ -933,21 +956,33 @@ fn adapt_authors(
         .collect()
 }
 
-fn author_identity(name: &str, email: Option<&str>) -> String {
-    email
-        .map(str::trim)
-        .filter(|email| !email.is_empty())
-        .unwrap_or_else(|| name.trim())
-        .to_lowercase()
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum AuthorIdentity {
+    Email(String),
+    Name(String),
+}
+
+fn author_identity(name: &str, email: Option<&str>) -> Option<AuthorIdentity> {
+    if let Some(email) = email.map(str::trim).filter(|email| !email.is_empty()) {
+        return Some(AuthorIdentity::Email(email.to_lowercase()));
+    }
+    let name = name.trim();
+    (!name.is_empty()).then(|| AuthorIdentity::Name(name.to_lowercase()))
 }
 
 fn commit_is_newer(candidate: &RelatedCommitOutput, current: &RelatedCommitOutput) -> bool {
+    compare_commit_times(&candidate.committed_at, &current.committed_at) == Ordering::Greater
+}
+
+fn compare_commit_times(candidate: &str, current: &str) -> Ordering {
     match (
-        DateTime::parse_from_rfc3339(&candidate.committed_at),
-        DateTime::parse_from_rfc3339(&current.committed_at),
+        DateTime::parse_from_rfc3339(candidate),
+        DateTime::parse_from_rfc3339(current),
     ) {
-        (Ok(candidate_time), Ok(current_time)) => candidate_time > current_time,
-        _ => candidate.committed_at > current.committed_at,
+        (Ok(candidate_time), Ok(current_time)) => candidate_time.cmp(&current_time),
+        (Ok(_), Err(_)) => Ordering::Greater,
+        (Err(_), Ok(_)) => Ordering::Less,
+        (Err(_), Err(_)) => candidate.cmp(current),
     }
 }
 
@@ -1173,6 +1208,126 @@ mod tests {
         assert_eq!(summaries[0].email, None);
         assert_eq!(summaries[0].commit_count, 2);
         assert_eq!(summaries[0].last_committed_at, "2026-06-11T00:00:00Z");
+    }
+
+    #[test]
+    fn separates_email_and_name_identities_and_keeps_empty_identities_distinct() {
+        let authors = vec![
+            AuthorOutput {
+                name: "邮箱作者".to_string(),
+                email: Some("alice".to_string()),
+            },
+            AuthorOutput {
+                name: "Alice".to_string(),
+                email: None,
+            },
+            AuthorOutput {
+                name: " ".to_string(),
+                email: Some(" ".to_string()),
+            },
+            AuthorOutput {
+                name: String::new(),
+                email: None,
+            },
+        ];
+        let commits = vec![
+            related_commit_output("email", "邮箱提交", Some("ALICE"), "2026-06-10T00:00:00Z"),
+            related_commit_output("name", "alice", None, "2026-06-11T00:00:00Z"),
+            related_commit_output("empty", "", None, "2026-06-12T00:00:00Z"),
+        ];
+
+        let summaries = adapt_authors(authors, &commits);
+
+        assert_eq!(summaries.len(), 4);
+        assert_eq!(summaries[0].commit_count, 1);
+        assert_eq!(summaries[1].commit_count, 1);
+        assert_eq!(summaries[2].commit_count, 0);
+        assert_eq!(summaries[3].commit_count, 0);
+    }
+
+    #[test]
+    fn prefers_valid_rfc3339_over_invalid_timestamp() {
+        let summaries = adapt_authors(
+            vec![AuthorOutput {
+                name: "Alice".to_string(),
+                email: Some("alice@example.com".to_string()),
+            }],
+            &[
+                related_commit_output(
+                    "invalid",
+                    "Alice Invalid",
+                    Some("alice@example.com"),
+                    "not-a-time",
+                ),
+                related_commit_output(
+                    "valid",
+                    "Alice Valid",
+                    Some("alice@example.com"),
+                    "2026-06-10T00:00:00Z",
+                ),
+            ],
+        );
+
+        assert_eq!(summaries[0].name, "Alice Valid");
+        assert_eq!(summaries[0].last_committed_at, "2026-06-10T00:00:00Z");
+    }
+
+    #[test]
+    fn keeps_first_commit_for_equivalent_instants_and_uses_stable_invalid_fallback() {
+        let equivalent = adapt_authors(
+            vec![AuthorOutput {
+                name: "Alice".to_string(),
+                email: Some("alice@example.com".to_string()),
+            }],
+            &[
+                related_commit_output(
+                    "first",
+                    "Alice First",
+                    Some("alice@example.com"),
+                    "2026-06-10T00:00:00Z",
+                ),
+                related_commit_output(
+                    "second",
+                    "Alice Second",
+                    Some("alice@example.com"),
+                    "2026-06-10T08:00:00+08:00",
+                ),
+            ],
+        );
+        let invalid = adapt_authors(
+            vec![AuthorOutput {
+                name: "Bob".to_string(),
+                email: Some("bob@example.com".to_string()),
+            }],
+            &[
+                related_commit_output("z", "Bob Z", Some("bob@example.com"), "zulu"),
+                related_commit_output("a", "Bob A", Some("bob@example.com"), "alpha"),
+            ],
+        );
+
+        assert_eq!(equivalent[0].name, "Alice First");
+        assert_eq!(invalid[0].name, "Bob Z");
+        assert_eq!(invalid[0].last_committed_at, "zulu");
+    }
+
+    #[test]
+    fn required_blob_reports_commit_and_path_when_tree_entry_is_missing() {
+        let fixture = create_linear_repo();
+        let head = git_output(fixture.path(), ["rev-parse", "HEAD"]);
+        let repo = revier_analysis::git::repository::open_repository(fixture.path())
+            .expect("打开测试仓库失败");
+
+        let error = require_blob_at_commit(
+            revier_analysis::git::blob::read_blob_at_commit(&repo, &head, "src/missing.txt"),
+            &head,
+            "src/missing.txt",
+        )
+        .expect_err("缺失 Blob 不应伪装为空文本");
+
+        assert_eq!(error.code, "BLOB_NOT_FOUND");
+        let detail = error.detail.expect("应包含缺失 Blob 详情");
+        assert!(detail.contains(&head));
+        assert!(detail.contains("src/missing.txt"));
     }
 
     #[test]
@@ -1657,6 +1812,110 @@ mod tests {
     }
 
     #[test]
+    fn get_commit_overlay_handles_added_deleted_and_renamed_empty_sides() {
+        let fixture = create_commit_boundary_repo();
+        let root = git_output(fixture.path(), ["rev-list", "--max-parents=0", "HEAD"]);
+        let commits = git_output(fixture.path(), ["rev-list", "--reverse", "HEAD"])
+            .lines()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let head = commits.last().expect("应包含提交").clone();
+        let (service, task_id) = completed_review_service(
+            fixture.path(),
+            root,
+            head,
+            vec![
+                changed_file("src/added.txt", None, ChangedFileStatus::Added),
+                changed_file("src/deleted.txt", None, ChangedFileStatus::Deleted),
+                changed_file(
+                    "src/renamed.txt",
+                    Some("src/old.txt"),
+                    ChangedFileStatus::Renamed,
+                ),
+            ],
+        );
+
+        let added = service
+            .get_commit_overlay(CommitOverlayRequest {
+                task_id: task_id.clone(),
+                file_path: "src/added.txt".to_string(),
+                commit_hash: commits[1].clone(),
+                encoding: None,
+            })
+            .expect("读取新增文件提交失败");
+        let deleted = service
+            .get_commit_overlay(CommitOverlayRequest {
+                task_id: task_id.clone(),
+                file_path: "src/deleted.txt".to_string(),
+                commit_hash: commits[2].clone(),
+                encoding: None,
+            })
+            .expect("读取删除文件提交失败");
+        let renamed = service
+            .get_commit_overlay(CommitOverlayRequest {
+                task_id,
+                file_path: "src/renamed.txt".to_string(),
+                commit_hash: commits[3].clone(),
+                encoding: None,
+            })
+            .expect("读取重命名文件提交失败");
+
+        assert_eq!(added.old_content, "");
+        assert_eq!(added.new_content, "added\n");
+        assert_eq!(deleted.old_content, "deleted\n");
+        assert_eq!(deleted.new_content, "");
+        assert_eq!(renamed.old_content, "rename me\n");
+        assert_eq!(renamed.new_content, "rename me\n");
+    }
+
+    #[test]
+    fn get_commit_overlay_honors_utf16_encoding_and_rejects_conflict_and_binary() {
+        let fixture = create_encoding_boundary_repo();
+        let root = git_output(fixture.path(), ["rev-list", "--max-parents=0", "HEAD"]);
+        let head = git_output(fixture.path(), ["rev-parse", "HEAD"]);
+        let (service, task_id) = completed_review_service(
+            fixture.path(),
+            root,
+            head.clone(),
+            vec![
+                changed_file("src/utf16.txt", None, ChangedFileStatus::Modified),
+                changed_file("src/binary.bin", None, ChangedFileStatus::Modified),
+            ],
+        );
+
+        let utf16 = service
+            .get_commit_overlay(CommitOverlayRequest {
+                task_id: task_id.clone(),
+                file_path: "src/utf16.txt".to_string(),
+                commit_hash: head.clone(),
+                encoding: Some(TextEncoding::Utf16Le),
+            })
+            .expect("显式 UTF-16LE 应成功");
+        let conflict = service
+            .get_commit_overlay(CommitOverlayRequest {
+                task_id: task_id.clone(),
+                file_path: "src/utf16.txt".to_string(),
+                commit_hash: head.clone(),
+                encoding: Some(TextEncoding::Utf16Be),
+            })
+            .expect_err("冲突 BOM 应失败");
+        let binary = service
+            .get_commit_overlay(CommitOverlayRequest {
+                task_id,
+                file_path: "src/binary.bin".to_string(),
+                commit_hash: head,
+                encoding: None,
+            })
+            .expect_err("明显二进制文件应失败");
+
+        assert_eq!(utf16.old_content, "旧\n");
+        assert_eq!(utf16.new_content, "新\n");
+        assert_eq!(utf16.resolved_encoding, ResolvedTextEncoding::Utf16Le);
+        assert_eq!(conflict.code, "FILE_NOT_ANALYZABLE");
+        assert_eq!(binary.code, "FILE_NOT_ANALYZABLE");
+    }
+
+    #[test]
     fn get_commit_overlay_rejects_commit_outside_cached_range() {
         let fixture = create_linear_repo();
         let root = git_output(fixture.path(), ["rev-list", "--max-parents=0", "HEAD"]);
@@ -1768,6 +2027,134 @@ mod tests {
         repo
     }
 
+    fn create_commit_boundary_repo() -> TempDir {
+        let repo = tempdir().expect("创建临时仓库失败");
+        git(repo.path(), ["init", "-b", "main"]);
+        write_file(repo.path(), "src/deleted.txt", "deleted\n");
+        write_file(repo.path(), "src/old.txt", "rename me\n");
+        git_commit_with_author(
+            repo.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-10T00:00:00Z",
+            "feat: initial boundaries",
+        );
+        write_file(repo.path(), "src/added.txt", "added\n");
+        git_commit_with_author(
+            repo.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-11T00:00:00Z",
+            "feat: add file",
+        );
+        std::fs::remove_file(repo.path().join("src/deleted.txt")).expect("删除测试文件失败");
+        git_commit_with_author(
+            repo.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-12T00:00:00Z",
+            "feat: delete file",
+        );
+        git(repo.path(), ["mv", "src/old.txt", "src/renamed.txt"]);
+        git_commit_with_author(
+            repo.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-13T00:00:00Z",
+            "feat: rename file",
+        );
+        repo
+    }
+
+    fn create_encoding_boundary_repo() -> TempDir {
+        let repo = tempdir().expect("创建临时仓库失败");
+        git(repo.path(), ["init", "-b", "main"]);
+        write_bytes(repo.path(), "src/utf16.txt", &utf16_le_bytes("旧\n"));
+        write_bytes(repo.path(), "src/binary.bin", &[0, 1, 0, 2, 0, 3]);
+        git_commit_with_author(
+            repo.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-10T00:00:00Z",
+            "feat: initial encodings",
+        );
+        write_bytes(repo.path(), "src/utf16.txt", &utf16_le_bytes("新\n"));
+        write_bytes(repo.path(), "src/binary.bin", &[0, 4, 0, 5, 0, 6]);
+        git_commit_with_author(
+            repo.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-11T00:00:00Z",
+            "feat: update encodings",
+        );
+        repo
+    }
+
+    fn completed_review_service(
+        repo_path: &Path,
+        base_commit: String,
+        head_commit: String,
+        files: Vec<ChangedFile>,
+    ) -> (ReviewService, TaskId) {
+        let service = ReviewService::default();
+        let task = service.create_task("project-1".to_string());
+        service
+            .files_by_task
+            .lock()
+            .expect("文件缓存锁被污染")
+            .insert(task.task_id.clone(), files);
+        service
+            .contexts_by_task
+            .lock()
+            .expect("任务上下文锁被污染")
+            .insert(
+                task.task_id.clone(),
+                ReviewTaskContext {
+                    project: ReviewProject {
+                        id: "project-1".to_string(),
+                        name: "fixture".to_string(),
+                        repo_path: repo_path.to_string_lossy().to_string(),
+                        pinned: false,
+                        last_opened_at: None,
+                        preferences: ProjectPreferences {
+                            default_branch: None,
+                            default_days: None,
+                            default_glob_rules: Vec::new(),
+                            review_filters: None,
+                        },
+                    },
+                    filters: review_filters("project-1".to_string()),
+                    range: AnalysisRange {
+                        branch: "main".to_string(),
+                        base_commit,
+                        head_commit,
+                        start_at: None,
+                        end_at: None,
+                    },
+                },
+            );
+        service.mark_completed(&task.task_id);
+        (service, task.task_id)
+    }
+
+    fn changed_file(path: &str, old_path: Option<&str>, status: ChangedFileStatus) -> ChangedFile {
+        ChangedFile {
+            path: path.to_string(),
+            old_path: old_path.map(str::to_string),
+            status,
+            additions: 0,
+            deletions: 0,
+            is_binary: false,
+            is_previewable: true,
+        }
+    }
+
+    fn utf16_le_bytes(text: &str) -> Vec<u8> {
+        let mut bytes = vec![0xff, 0xfe];
+        bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+        bytes
+    }
+
     fn build_default_index(repo_path: &Path) {
         let repo =
             revier_analysis::git::repository::open_repository(repo_path).expect("打开测试仓库失败");
@@ -1794,6 +2181,14 @@ mod tests {
             std::fs::create_dir_all(parent).expect("创建父目录失败");
         }
         std::fs::write(full_path, content).expect("写入测试文件失败");
+    }
+
+    fn write_bytes(repo_path: &Path, path: &str, content: &[u8]) {
+        let full_path = repo_path.join(path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).expect("创建父目录失败");
+        }
+        std::fs::write(full_path, content).expect("写入测试字节失败");
     }
 
     fn git<const N: usize>(repo_path: &Path, args: [&str; N]) {
