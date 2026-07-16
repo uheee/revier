@@ -4,5 +4,8 @@ import App from './App.vue';
 import router from './router';
 import { createPinia } from 'pinia';
 import './styles.css';
+import { initializeEditorSettings } from './composables/useEditorSettings';
+
+await initializeEditorSettings();
 
 createApp(App).use(createPinia()).use(router).use(naive).mount('#app');

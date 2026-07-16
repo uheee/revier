@@ -6,6 +6,7 @@ import type {
   ChangedFile,
   CommitOverlayRequest,
   DirectorySelection,
+  EditorSettingsSnapshot,
   FileOverlay,
   FileOverlayRequest,
   GitBranch,
@@ -18,6 +19,9 @@ import type {
 type Unsubscribe = () => void;
 
 export const revierClient = {
+  settings: {
+    getEditorSettings: () => invoke<EditorSettingsSnapshot>('editor_settings_get')
+  },
   projects: {
     list: () => invoke<ReviewProject[]>('projects_list'),
     add: (repoPath: string, options?: Partial<ReviewProject>) =>

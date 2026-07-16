@@ -62,13 +62,24 @@ const overlay: FileOverlay = {
   },
   rows: [],
   blocks: [],
-  warnings: []
+  warnings: [],
+  oldContent: '',
+  newContent: '',
+  resolvedEncoding: 'utf-8'
 };
 
 describe('revierClient', () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();
     vi.mocked(listen).mockReset();
+  });
+
+  it('invokes editor settings command without a payload', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    await revierClient.settings.getEditorSettings();
+
+    expect(invoke).toHaveBeenCalledWith('editor_settings_get');
   });
 
   it('invokes project commands with Tauri payload names', async () => {
