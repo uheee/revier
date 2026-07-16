@@ -96,6 +96,44 @@ describe('MonacoDiffSurface', () => {
     expect(createSession).toHaveBeenCalledTimes(3);
   });
 
+  it('块引用变化触发重建，同一 tick 的多项上下文变化只重建一次', async () => {
+    const first = sessionMock();
+    const second = sessionMock();
+    const order: string[] = [];
+    first.dispose.mockImplementation(() => order.push('dispose'));
+    createSession
+      .mockReturnValueOnce(first)
+      .mockImplementation(() => { order.push('create'); return second; });
+    const wrapper = mountSurface();
+    const nextBlock = { ...block, id: 'b2' };
+
+    await wrapper.setProps({ blocks: [nextBlock] });
+    expect(order).toEqual(['dispose', 'create']);
+    expect(createSession).toHaveBeenCalledTimes(2);
+
+    order.length = 0;
+    const third = sessionMock();
+    second.dispose.mockImplementation(() => order.push('dispose'));
+    createSession.mockImplementation(() => { order.push('create'); return third; });
+
+    await wrapper.setProps({
+      path: 'src/next.ts',
+      oldContent: 'next old',
+      newContent: 'next new',
+      contextKey: 'file-next',
+      blocks: [{ ...nextBlock }]
+    });
+
+    expect(order).toEqual(['dispose', 'create']);
+    expect(createSession).toHaveBeenCalledTimes(3);
+    expect(createSession.mock.calls[2][0]).toEqual(expect.objectContaining({
+      path: 'src/next.ts',
+      oldContent: 'next old',
+      newContent: 'next new',
+      blocks: [{ ...nextBlock }]
+    }));
+  });
+
   it('尺寸变化触发布局，卸载时断开观察并销毁', () => {
     const session = sessionMock();
     createSession.mockReturnValue(session);

@@ -31,16 +31,14 @@ export interface MonacoDiffSessionOptions {
 }
 
 type DiffSide = 'old' | 'new';
-type ReleasableDecorationsCollection = editor.IEditorDecorationsCollection & {
-  dispose?: () => void;
-};
+let nextSessionId = 0;
 
-function modelUri(side: 'original' | 'modified', path: string): monaco.Uri {
+function modelUri(sessionId: number, side: 'original' | 'modified', path: string): monaco.Uri {
   const normalizedPath = path.replaceAll('\\', '/').replace(/^\/+/, '');
   return monaco.Uri.from({
     scheme: 'inmemory',
     authority: 'revier',
-    path: `/${side}/${normalizedPath}`
+    path: `/session-${sessionId}/${side}/${normalizedPath}`
   });
 }
 
@@ -93,40 +91,66 @@ export function createMonacoDiffSession(
   let originalModel: editor.ITextModel | undefined;
   let modifiedModel: editor.ITextModel | undefined;
   let diffEditor: editor.IStandaloneDiffEditor | undefined;
-  let originalDecorations: ReleasableDecorationsCollection | undefined;
-  let modifiedDecorations: ReleasableDecorationsCollection | undefined;
+  let originalDecorations: editor.IEditorDecorationsCollection | undefined;
+  let modifiedDecorations: editor.IEditorDecorationsCollection | undefined;
   const listeners: monaco.IDisposable[] = [];
   let draft = false;
   let disposed = false;
 
-  const disposeResources = (): void => {
+  const cleanupResources = (): unknown[] => {
     if (disposed) {
-      return;
+      return [];
     }
     disposed = true;
+    const errors: unknown[] = [];
+    const cleanup = (action: (() => void) | undefined): void => {
+      if (!action) {
+        return;
+      }
+      try {
+        action();
+      } catch (error) {
+        errors.push(error);
+      }
+    };
     for (const listener of listeners.splice(0)) {
-      listener.dispose();
+      cleanup(() => listener.dispose());
     }
-    originalDecorations?.clear();
-    modifiedDecorations?.clear();
-    originalDecorations?.dispose?.();
-    modifiedDecorations?.dispose?.();
-    diffEditor?.dispose();
-    originalModel?.dispose();
-    modifiedModel?.dispose();
+    const originalDecorationsToClean = originalDecorations;
+    const modifiedDecorationsToClean = modifiedDecorations;
+    const diffEditorToClean = diffEditor;
+    const originalModelToClean = originalModel;
+    const modifiedModelToClean = modifiedModel;
+    cleanup(originalDecorationsToClean ? () => originalDecorationsToClean.clear() : undefined);
+    cleanup(modifiedDecorationsToClean ? () => modifiedDecorationsToClean.clear() : undefined);
+    cleanup(diffEditorToClean ? () => diffEditorToClean.dispose() : undefined);
+    cleanup(originalModelToClean ? () => originalModelToClean.dispose() : undefined);
+    cleanup(modifiedModelToClean ? () => modifiedModelToClean.dispose() : undefined);
+    return errors;
+  };
+
+  const reportCleanupErrors = (errors: unknown[], message: string): void => {
+    if (errors.length > 0) {
+      console.error(message, new AggregateError(errors, message));
+    }
+  };
+
+  const disposeResources = (): void => {
+    reportCleanupErrors(cleanupResources(), 'Monaco Diff 会话资源清理失败');
   };
 
   try {
+    const sessionId = ++nextSessionId;
     const languageId = resolveInitializedLanguage(options.languageId);
     originalModel = monaco.editor.createModel(
       options.oldContent,
       languageId,
-      modelUri('original', options.path)
+      modelUri(sessionId, 'original', options.path)
     );
     modifiedModel = monaco.editor.createModel(
       options.newContent,
       languageId,
-      modelUri('modified', options.path)
+      modelUri(sessionId, 'modified', options.path)
     );
     const editorOptions: editor.IStandaloneDiffEditorConstructionOptions & {
       largeFileOptimizations: true;
@@ -195,14 +219,23 @@ export function createMonacoDiffSession(
       originalEditor,
       modifiedEditor,
       setLanguage(nextLanguageId) {
+        if (disposed) {
+          return;
+        }
         const resolvedLanguage = resolveInitializedLanguage(nextLanguageId);
         monaco.editor.setModelLanguage(originalModel!, resolvedLanguage);
         monaco.editor.setModelLanguage(modifiedModel!, resolvedLanguage);
       },
       setTheme(themeName) {
+        if (disposed) {
+          return;
+        }
         monaco.editor.setTheme(themeName);
       },
       setSelectedBlock(block) {
+        if (disposed) {
+          return;
+        }
         if (draft || !block) {
           originalDecorations?.clear();
           modifiedDecorations?.clear();
@@ -212,12 +245,14 @@ export function createMonacoDiffSession(
         modifiedDecorations?.set(blockDecorations(block, 'new'));
       },
       layout() {
-        diffEditor?.layout();
+        if (!disposed) {
+          diffEditor?.layout();
+        }
       },
       dispose: disposeResources
     };
   } catch (error) {
-    disposeResources();
+    reportCleanupErrors(cleanupResources(), 'Monaco Diff 会话创建失败后的资源清理失败');
     throw error;
   }
 }

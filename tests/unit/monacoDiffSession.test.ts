@@ -71,7 +71,6 @@ function createCodeEditorMock() {
   const collections: Array<{
     set: ReturnType<typeof vi.fn>;
     clear: ReturnType<typeof vi.fn>;
-    dispose: ReturnType<typeof vi.fn>;
   }> = [];
   const editor = {
     onMouseDown: vi.fn((listener: (typeof mouseListeners)[number]) => {
@@ -87,7 +86,7 @@ function createCodeEditorMock() {
       return value;
     }),
     createDecorationsCollection: vi.fn(() => {
-      const collection = { set: vi.fn(), clear: vi.fn(), dispose: vi.fn() };
+      const collection = { set: vi.fn(), clear: vi.fn() };
       collections.push(collection);
       return collection;
     })
@@ -205,6 +204,19 @@ describe('createMonacoDiffSession', () => {
     );
   });
 
+  it('相同路径的并存会话仍为四个 Model 生成全局唯一 URI', () => {
+    const first = setup();
+    const firstUris = mocks.createModel.mock.calls.map((call) => call[2].toString());
+    const second = setup();
+    const allUris = mocks.createModel.mock.calls.map((call) => call[2].toString());
+
+    expect(new Set(allUris).size).toBe(4);
+    expect(firstUris.every((uri) => uri.endsWith('/src/组件/app.test.ts'))).toBe(true);
+    expect(allUris.slice(2).every((uri) => uri.endsWith('/src/组件/app.test.ts'))).toBe(true);
+    first.session.dispose();
+    second.session.dispose();
+  });
+
   it('首次编辑只进入一次草稿并清除装饰、禁用块命中', () => {
     const { originalModel, modifiedModel, original, modified, callbacks } = setup();
     original.mouse(2);
@@ -270,8 +282,8 @@ describe('createMonacoDiffSession', () => {
     expect(result.diffEditor.dispose).toHaveBeenCalledTimes(1);
     expect(result.originalModel.model.dispose).toHaveBeenCalledTimes(1);
     expect(result.modifiedModel.model.dispose).toHaveBeenCalledTimes(1);
-    expect(result.original.collections[0].dispose).toHaveBeenCalledTimes(1);
-    expect(result.modified.collections[0].dispose).toHaveBeenCalledTimes(1);
+    expect(result.original.collections[0].clear).toHaveBeenCalledTimes(1);
+    expect(result.modified.collections[0].clear).toHaveBeenCalledTimes(1);
     for (const listener of [
       ...result.originalModel.listenerDisposables,
       ...result.modifiedModel.listenerDisposables,
@@ -280,6 +292,48 @@ describe('createMonacoDiffSession', () => {
     ]) {
       expect(listener.dispose).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it('清理项抛错时仍继续释放后续资源并保持幂等', () => {
+    const result = setup();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    result.originalModel.listenerDisposables[0].dispose.mockImplementation(() => {
+      throw new Error('监听器清理失败');
+    });
+    result.original.collections[0].clear.mockImplementation(() => {
+      throw new Error('装饰清理失败');
+    });
+    result.diffEditor.dispose.mockImplementation(() => {
+      throw new Error('编辑器清理失败');
+    });
+
+    expect(() => result.session.dispose()).not.toThrow();
+    result.session.dispose();
+
+    expect(result.modified.collections[0].clear).toHaveBeenCalledTimes(1);
+    expect(result.originalModel.model.dispose).toHaveBeenCalledTimes(1);
+    expect(result.modifiedModel.model.dispose).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(consoleError.mock.calls[0][1]).toBeInstanceOf(AggregateError);
+    consoleError.mockRestore();
+  });
+
+  it('销毁后所有公开操作都安全 no-op', () => {
+    const result = setup();
+    result.session.dispose();
+    vi.clearAllMocks();
+
+    expect(() => {
+      result.session.setLanguage('rust');
+      result.session.setTheme('revier-light');
+      result.session.setSelectedBlock(blocks[0]);
+      result.session.layout();
+    }).not.toThrow();
+    expect(mocks.setModelLanguage).not.toHaveBeenCalled();
+    expect(mocks.setTheme).not.toHaveBeenCalled();
+    expect(result.original.collections[0].set).not.toHaveBeenCalled();
+    expect(result.original.collections[0].clear).not.toHaveBeenCalled();
+    expect(result.diffEditor.layout).not.toHaveBeenCalled();
   });
 
   it('创建中异常时释放已经创建的资源', () => {
@@ -303,5 +357,40 @@ describe('createMonacoDiffSession', () => {
     expect(diffEditor.dispose).toHaveBeenCalledTimes(1);
     expect(originalModel.model.dispose).toHaveBeenCalledTimes(1);
     expect(modifiedModel.model.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('创建错误不被清理错误覆盖，且继续清理所有 Model', () => {
+    const originalModel = createModelMock();
+    const modifiedModel = createModelMock();
+    const createError = new Error('原始创建错误');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    originalModel.model.dispose.mockImplementation(() => {
+      throw new Error('原始 Model 清理失败');
+    });
+    const diffEditor = {
+      setModel: vi.fn(),
+      dispose: vi.fn(() => { throw new Error('编辑器清理失败'); }),
+      getOriginalEditor: vi.fn(() => { throw createError; })
+    };
+    mocks.createModel
+      .mockReturnValueOnce(originalModel.model)
+      .mockReturnValueOnce(modifiedModel.model);
+    mocks.createDiffEditor.mockReturnValue(diffEditor);
+
+    let thrown: unknown;
+    try {
+      createMonacoDiffSession({
+        container: document.createElement('div'), path: 'x.ts', oldContent: '', newContent: '',
+        languageId: 'typescript', settings, themeName: 'revier-light', blocks,
+        onDraftChange: vi.fn(), onBlockSelected: vi.fn(), onCursorChange: vi.fn(),
+        onEditorsReady: vi.fn()
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBe(createError);
+    expect(modifiedModel.model.dispose).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    consoleError.mockRestore();
   });
 });

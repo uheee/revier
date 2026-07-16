@@ -32,8 +32,11 @@ let session: MonacoDiffSession | undefined;
 let resizeObserver: ResizeObserver | undefined;
 
 function disposeSession(): void {
-  session?.dispose();
-  session = undefined;
+  try {
+    session?.dispose();
+  } finally {
+    session = undefined;
+  }
 }
 
 function createSession(): void {
@@ -65,10 +68,13 @@ function createSession(): void {
   }
 }
 
-watch(
-  () => [props.path, props.oldContent, props.newContent, props.contextKey] as const,
-  createSession
-);
+watch([
+  () => props.path,
+  () => props.oldContent,
+  () => props.newContent,
+  () => props.contextKey,
+  () => props.blocks
+], createSession);
 watch(() => props.languageId, (languageId) => session?.setLanguage(languageId));
 watch(() => props.themeName, (themeName) => session?.setTheme(themeName));
 watch(() => props.selectedBlock, (block) => session?.setSelectedBlock(block));
