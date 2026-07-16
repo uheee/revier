@@ -102,6 +102,8 @@ Task 编号与章节位置保持不变，以维持既有提交、审查记录和
   - 输出完整文本与实际编码。
 - `crates/revier-analysis/tests/fixtures.rs`
   - 为共享 `FileOverlayArgs` 测试夹具补充 `auto` 编码。
+- `crates/revier-analysis/tests/index_git_diff.rs`
+  - 将二进制夹具的内部 status 断言同步为真实变更类型，同时保留二进制与不可预览断言。
 - `src-tauri/src/state.rs`、`src-tauri/src/lib.rs`、`src-tauri/src/services/mod.rs`、`src-tauri/src/commands/mod.rs`
   - 启动时加载一次设置并注册命令。
 - `src-tauri/src/services/review.rs`
@@ -593,6 +595,7 @@ git commit -m "feat(settings): 从 TOML 加载编辑器设置"
 - Modify: `crates/revier-analysis/src/overlay/file_overlay.rs`
 - Modify: `crates/revier-analysis/tests/fixtures.rs`
 - Modify: `crates/revier-analysis/tests/file_overlay_cli.rs`
+- Modify: `crates/revier-analysis/tests/index_git_diff.rs`
 
 - [ ] **Step 1: 编写解码失败测试**
 
@@ -634,6 +637,8 @@ manual: 按指定编码严格解码；任何 malformed sequence 都返回错误
 GB18030 使用 `encoding_rs::GB18030.decode_without_bom_handling_and_without_replacement`；UTF-16 先检查偶数字节，再以指定端序构造 `u16` 并调用 `String::from_utf16`。不得使用 `from_utf8_lossy` 或带替换字符的解码。
 
 把 `CommitFileChange.status` 改为始终保存真实的 `added|modified|deleted|renamed`，`is_binary` 单独保存启发式结果。只有 `query_files` 输出初始文件列表时才把 `is_binary=true` 映射为公开 `binary` 状态。UTF-16 BOM 不视为二进制；无法自动解码但没有 NUL 的文件在行数统计阶段保留 `0/0`，不得让整个 Review 分析失败，以便用户通过 `default_encoding` 再次加载。
+
+同步更新 `tests/index_git_diff.rs` 的二进制夹具断言：内部 `status` 使用该夹具真实的 `added`，并继续断言 `is_binary=true`、`is_previewable=false`；不得削弱二进制检测覆盖。
 
 - [ ] **Step 4: 让 file-overlay 接收编码并返回完整文本**
 
@@ -689,7 +694,7 @@ cargo test -p revier-analysis
 运行：
 
 ```powershell
-git add crates/revier-analysis/src/text_encoding.rs crates/revier-analysis/tests/text_encoding.rs crates/revier-analysis/src/lib.rs crates/revier-analysis/src/cli.rs crates/revier-analysis/src/commands/trace_block.rs crates/revier-analysis/src/git/blob.rs crates/revier-analysis/src/git/diff.rs crates/revier-analysis/src/commands/query_files.rs crates/revier-analysis/src/json.rs crates/revier-analysis/src/overlay/file_overlay.rs crates/revier-analysis/tests/fixtures.rs crates/revier-analysis/tests/file_overlay_cli.rs
+git add crates/revier-analysis/src/text_encoding.rs crates/revier-analysis/tests/text_encoding.rs crates/revier-analysis/src/lib.rs crates/revier-analysis/src/cli.rs crates/revier-analysis/src/commands/trace_block.rs crates/revier-analysis/src/git/blob.rs crates/revier-analysis/src/git/diff.rs crates/revier-analysis/src/commands/query_files.rs crates/revier-analysis/src/json.rs crates/revier-analysis/src/overlay/file_overlay.rs crates/revier-analysis/tests/fixtures.rs crates/revier-analysis/tests/file_overlay_cli.rs crates/revier-analysis/tests/index_git_diff.rs
 git commit -m "feat(overlay): 按指定编码返回完整文件文本"
 ```
 
