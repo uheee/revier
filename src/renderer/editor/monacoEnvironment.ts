@@ -66,45 +66,65 @@ async function initialize(themes: {
   light: EditorThemeColors;
   dark: EditorThemeColors;
 }): Promise<void> {
-  const highlighter = await createHighlighter({
-    engine: createJavaScriptRegexEngine(),
-    themes: [
-      toShikiTheme('revier-light', themes.light),
-      toShikiTheme('revier-dark', themes.dark)
-    ],
-    langs: []
-  });
+  let highlighter: Awaited<ReturnType<typeof createHighlighter>> | undefined;
+  const nextFailedLanguages = new Set<string>();
 
-  for (const language of EDITOR_LANGUAGES) {
-    if (!language.shikiLanguage) {
-      continue;
-    }
-    try {
-      const loader = languageLoaders[language.shikiLanguage];
-      if (!loader) {
-        throw new Error(`Shiki 不包含 ${language.shikiLanguage} 语言资源`);
+  try {
+    highlighter = await createHighlighter({
+      engine: createJavaScriptRegexEngine(),
+      themes: [
+        toShikiTheme('revier-light', themes.light),
+        toShikiTheme('revier-dark', themes.dark)
+      ],
+      langs: []
+    });
+
+    for (const language of EDITOR_LANGUAGES) {
+      if (!language.shikiLanguage) {
+        continue;
       }
-      const registration = await loader();
-      await highlighter.loadLanguage(registration.default);
-    } catch (error) {
-      failedLanguages.add(language.id);
-      addNotification({
-        type: 'warning',
-        title: `${language.label} 语法高亮加载失败`,
-        message: `${errorDetail(error)}；已降级为纯文本。`,
-        source: 'Shiki'
-      });
+      try {
+        const loader = languageLoaders[language.shikiLanguage];
+        if (!loader) {
+          throw new Error(`Shiki 不包含 ${language.shikiLanguage} 语言资源`);
+        }
+        const registration = await loader();
+        await highlighter.loadLanguage(registration.default);
+      } catch (error) {
+        nextFailedLanguages.add(language.id);
+        addNotification({
+          type: 'warning',
+          title: `${language.label} 语法高亮加载失败`,
+          message: `${errorDetail(error)}；已降级为纯文本。`,
+          source: 'Shiki'
+        });
+      }
     }
-  }
 
-  shikiToMonaco(highlighter, monaco);
+    shikiToMonaco(highlighter, monaco);
+    failedLanguages.clear();
+    for (const languageId of nextFailedLanguages) {
+      failedLanguages.add(languageId);
+    }
+  } catch (error) {
+    highlighter?.dispose();
+    throw error;
+  }
 }
 
 export function initializeMonacoSyntax(themes: {
   light: EditorThemeColors;
   dark: EditorThemeColors;
 }): Promise<void> {
-  syntaxInitialization ??= initialize(themes);
+  if (!syntaxInitialization) {
+    const attempt = initialize(themes);
+    syntaxInitialization = attempt;
+    void attempt.catch(() => {
+      if (syntaxInitialization === attempt) {
+        syntaxInitialization = undefined;
+      }
+    });
+  }
   return syntaxInitialization;
 }
 

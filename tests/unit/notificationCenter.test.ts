@@ -52,7 +52,9 @@ describe('通知中心', () => {
 
     const panel = document.body.querySelector('.notification-center__list');
     expect(panel).not.toBeNull();
+    expect(panel?.classList.contains('n-scrollbar')).toBe(true);
     expect(panel?.classList.contains('notification-center__list--scrollable')).toBe(true);
+    expect(getComputedStyle(panel as Element).maxHeight).not.toBe('none');
     const removeButton = document.body.querySelector<HTMLButtonElement>('[aria-label="删除通知：运行错误"]');
     removeButton?.click();
     await nextTick();

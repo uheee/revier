@@ -1,12 +1,24 @@
 export interface EditorLanguageDefinition {
-  id: string;
-  label: string;
-  extensions: string[];
-  filenames?: string[];
-  shikiLanguage?: string;
+  readonly id: string;
+  readonly label: string;
+  readonly extensions: readonly string[];
+  readonly filenames?: readonly string[];
+  readonly shikiLanguage?: string;
 }
 
-export const EDITOR_LANGUAGES: readonly EditorLanguageDefinition[] = [
+function freezeLanguage(
+  language: EditorLanguageDefinition
+): EditorLanguageDefinition {
+  return Object.freeze({
+    ...language,
+    extensions: Object.freeze([...language.extensions]),
+    filenames: language.filenames
+      ? Object.freeze([...language.filenames])
+      : undefined
+  });
+}
+
+export const EDITOR_LANGUAGES: readonly EditorLanguageDefinition[] = Object.freeze([
   { id: 'plaintext', label: '纯文本', extensions: [] },
   { id: 'javascript', label: 'JavaScript', extensions: ['.js', '.jsx', '.mjs', '.cjs'], shikiLanguage: 'javascript' },
   { id: 'typescript', label: 'TypeScript', extensions: ['.d.ts', '.ts', '.tsx', '.mts', '.cts'], shikiLanguage: 'typescript' },
@@ -27,7 +39,7 @@ export const EDITOR_LANGUAGES: readonly EditorLanguageDefinition[] = [
   { id: 'toml', label: 'TOML', extensions: ['.toml'], shikiLanguage: 'toml' },
   { id: 'shell', label: 'Shell', extensions: ['.sh', '.bash'], filenames: ['Makefile'], shikiLanguage: 'shellscript' },
   { id: 'powershell', label: 'PowerShell', extensions: ['.ps1', '.psm1'], shikiLanguage: 'powershell' }
-];
+].map(freezeLanguage));
 
 const filenameLanguages = new Map(
   EDITOR_LANGUAGES.flatMap((language) =>

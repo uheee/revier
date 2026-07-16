@@ -10,7 +10,7 @@ describe('会话通知队列', () => {
     const module = await loadNotifications();
     const center = module.useNotifications();
 
-    module.addNotification({ type: 'info', title: '信息' });
+    expect(module.addNotification({ type: 'info', title: '信息' })).toBeUndefined();
     module.addNotification({ type: 'warning', title: '警告' });
     module.addNotification({ type: 'error', title: '错误' });
 
@@ -44,7 +44,8 @@ describe('会话通知队列', () => {
   it('全部已读保留历史，并支持删除单条和清空全部', async () => {
     const module = await loadNotifications();
     const center = module.useNotifications();
-    const first = module.addNotification({ type: 'info', title: '第一条' });
+    module.addNotification({ type: 'info', title: '第一条' });
+    const firstId = center.notifications.value[0]?.id;
     module.addNotification({ type: 'warning', title: '第二条' });
 
     center.markAllRead();
@@ -52,7 +53,7 @@ describe('会话通知队列', () => {
     expect(center.unreadBadge.value).toBeUndefined();
     expect(center.notifications.value).toHaveLength(2);
 
-    center.remove(first.id);
+    center.remove(firstId ?? -1);
     expect(center.notifications.value.map((item) => item.title)).toEqual(['第二条']);
     center.clear();
     expect(center.notifications.value).toEqual([]);

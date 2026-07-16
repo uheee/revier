@@ -26,7 +26,7 @@ const unreadBadge = computed(() => {
 });
 let nextId = 1;
 
-export function addNotification(input: NewNotification): AppNotification {
+export function addNotification(input: NewNotification): void {
   const notification: AppNotification = {
     ...input,
     id: nextId,
@@ -35,7 +35,6 @@ export function addNotification(input: NewNotification): AppNotification {
   };
   nextId += 1;
   notifications.value = [notification, ...notifications.value].slice(0, MAX_NOTIFICATIONS);
-  return notification;
 }
 
 function markAllRead(): void {

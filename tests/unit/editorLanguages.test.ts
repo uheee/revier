@@ -3,6 +3,7 @@ import { detectEditorLanguage, EDITOR_LANGUAGES } from '../../src/renderer/edito
 const syntaxMocks = vi.hoisted(() => ({
   createHighlighter: vi.fn(),
   loadLanguage: vi.fn(),
+  disposeHighlighter: vi.fn(),
   shikiToMonaco: vi.fn(),
   createJavaScriptRegexEngine: vi.fn(() => 'javascript-regex-engine'),
   workerKinds: [] as string[]
@@ -56,16 +57,37 @@ describe('编辑器语言注册表', () => {
   it('扩展名按最长项匹配', () => {
     expect(detectEditorLanguage('src/env.d.ts')).toBe('typescript');
   });
+
+  it('注册表及嵌套文件名和扩展名在运行时不可变', () => {
+    const originalIds = EDITOR_LANGUAGES.map((item) => item.id);
+    const vue = EDITOR_LANGUAGES.find((item) => item.id === 'vue');
+    const shell = EDITOR_LANGUAGES.find((item) => item.id === 'shell');
+
+    expect(() => (EDITOR_LANGUAGES as unknown as EditorLanguageMutation[]).push({ id: 'fake' }))
+      .toThrow();
+    expect(() => (vue?.extensions as string[]).push('.fake')).toThrow();
+    expect(() => (shell?.filenames as string[]).push('Fakefile')).toThrow();
+
+    expect(EDITOR_LANGUAGES.map((item) => item.id)).toEqual(originalIds);
+    expect(detectEditorLanguage('example.fake')).toBe('plaintext');
+    expect(detectEditorLanguage('Fakefile')).toBe('plaintext');
+  });
 });
+
+type EditorLanguageMutation = { id: string };
 
 describe('Monaco 语法与 Worker 环境', () => {
   beforeEach(() => {
     vi.resetModules();
     syntaxMocks.createHighlighter.mockReset();
     syntaxMocks.loadLanguage.mockReset();
+    syntaxMocks.disposeHighlighter.mockReset();
     syntaxMocks.shikiToMonaco.mockReset();
     syntaxMocks.workerKinds.length = 0;
-    syntaxMocks.createHighlighter.mockResolvedValue({ loadLanguage: syntaxMocks.loadLanguage });
+    syntaxMocks.createHighlighter.mockResolvedValue({
+      loadLanguage: syntaxMocks.loadLanguage,
+      dispose: syntaxMocks.disposeHighlighter
+    });
     syntaxMocks.loadLanguage.mockResolvedValue(undefined);
   });
 
@@ -125,4 +147,70 @@ describe('Monaco 语法与 Worker 环境', () => {
       source: 'Shiki'
     });
   });
+
+  it('整体创建失败后清除缓存并允许第二次成功', async () => {
+    syntaxMocks.createHighlighter
+      .mockRejectedValueOnce(new Error('engine unavailable'))
+      .mockResolvedValueOnce({
+        loadLanguage: syntaxMocks.loadLanguage,
+        dispose: syntaxMocks.disposeHighlighter
+      });
+    const environment = await import('../../src/renderer/editor/monacoEnvironment');
+    const colors = createSyntaxColors();
+
+    await expect(environment.initializeMonacoSyntax({ light: colors, dark: colors }))
+      .rejects.toThrow('engine unavailable');
+    await expect(environment.initializeMonacoSyntax({ light: colors, dark: colors }))
+      .resolves.toBeUndefined();
+
+    expect(syntaxMocks.createHighlighter).toHaveBeenCalledTimes(2);
+    expect(syntaxMocks.shikiToMonaco).toHaveBeenCalledTimes(1);
+  });
+
+  it('集成失败会释放半成品且重试不继承失败语言状态', async () => {
+    const firstHighlighter = {
+      loadLanguage: syntaxMocks.loadLanguage,
+      dispose: syntaxMocks.disposeHighlighter
+    };
+    const secondHighlighter = {
+      loadLanguage: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn()
+    };
+    syntaxMocks.createHighlighter
+      .mockResolvedValueOnce(firstHighlighter)
+      .mockResolvedValueOnce(secondHighlighter);
+    syntaxMocks.loadLanguage.mockImplementation(async () => {
+      if (syntaxMocks.loadLanguage.mock.calls.length === 3) {
+        throw new Error('Vue grammar unavailable');
+      }
+    });
+    syntaxMocks.shikiToMonaco
+      .mockImplementationOnce(() => { throw new Error('Monaco integration unavailable'); })
+      .mockImplementationOnce(() => undefined);
+    const environment = await import('../../src/renderer/editor/monacoEnvironment');
+    const colors = createSyntaxColors();
+
+    await expect(environment.initializeMonacoSyntax({ light: colors, dark: colors }))
+      .rejects.toThrow('Monaco integration unavailable');
+    expect(syntaxMocks.disposeHighlighter).toHaveBeenCalledTimes(1);
+    expect(environment.resolveInitializedLanguage('vue')).toBe('vue');
+
+    await environment.initializeMonacoSyntax({ light: colors, dark: colors });
+    expect(environment.resolveInitializedLanguage('vue')).toBe('vue');
+    expect(secondHighlighter.dispose).not.toHaveBeenCalled();
+    expect(syntaxMocks.shikiToMonaco).toHaveBeenCalledTimes(2);
+  });
 });
+
+function createSyntaxColors() {
+  return {
+    workspaceBackground: '#111111', panelBackground: '#222222', editorBackground: '#111111',
+    border: '#333333', foreground: '#eeeeee', muted: '#999999', accent: '#00aaaa',
+    selection: '#004444', diffRemoved: '#440000', diffRemovedStrong: '#aa0000',
+    diffRemovedWord: '#660000', diffAdded: '#003300', diffAddedStrong: '#00aa00',
+    diffAddedWord: '#006600', syntax: {
+      comment: '#999999', keyword: '#cc99ff', string: '#99ddaa', number: '#ffbb77',
+      type: '#88bbff', function: '#88bbff', variable: '#eeeeee'
+    }
+  };
+}
