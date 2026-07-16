@@ -24,6 +24,7 @@ interface VisibleLineRange {
 export interface DiffBlockGeometryEditor {
   getVisibleRanges(): readonly VisibleLineRange[];
   getTopForLineNumber(lineNumber: number): number;
+  getBottomForLineNumber(lineNumber: number): number;
   getScrolledVisiblePosition(position: { lineNumber: number; column: number }): { top: number; height: number } | null;
   getScrollTop(): number;
   getOption(option: editor.EditorOption.lineHeight): number;
@@ -65,19 +66,8 @@ function lineTop(editorInstance: DiffBlockGeometryEditor, lineNumber: number): n
   return Number.isFinite(visiblePosition?.top) ? visiblePosition!.top : fallback;
 }
 
-function lineBottom(
-  editorInstance: DiffBlockGeometryEditor,
-  lineNumber: number,
-  lineHeight: number
-): number {
-  const visiblePosition = editorInstance.getScrolledVisiblePosition({ lineNumber, column: 1 });
-  const top = Number.isFinite(visiblePosition?.top)
-    ? visiblePosition!.top
-    : editorInstance.getTopForLineNumber(lineNumber) - editorInstance.getScrollTop();
-  const height = Number.isFinite(visiblePosition?.height) && visiblePosition!.height > 0
-    ? visiblePosition!.height
-    : lineHeight;
-  return top + height;
+function lineBottom(editorInstance: DiffBlockGeometryEditor, lineNumber: number): number {
+  return editorInstance.getBottomForLineNumber(lineNumber) - editorInstance.getScrollTop();
 }
 
 export function getDiffBlockGeometry(
@@ -111,7 +101,7 @@ export function getDiffBlockGeometry(
   }
 
   const rawTop = Math.min(...intersections.map((range) => lineTop(editorInstance, range.start)));
-  const rawBottom = Math.max(...intersections.map((range) => lineBottom(editorInstance, range.end, lineHeight)));
+  const rawBottom = Math.max(...intersections.map((range) => lineBottom(editorInstance, range.end)));
   if (!Number.isFinite(rawTop) || !Number.isFinite(rawBottom) || rawBottom <= 0 || rawTop >= layoutHeight) {
     return undefined;
   }

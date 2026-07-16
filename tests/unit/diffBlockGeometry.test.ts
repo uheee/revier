@@ -40,14 +40,17 @@ function geometryEditor(options: {
   layoutHeight?: number;
   nullPositions?: number[];
   topForLine?: (lineNumber: number) => number;
+  bottomForLine?: (lineNumber: number) => number;
 } = {}): DiffBlockGeometryEditor {
   const scrollTop = options.scrollTop ?? 0;
   const lineHeight = options.lineHeight ?? 20;
   const nullPositions = new Set(options.nullPositions ?? []);
   const topForLine = options.topForLine ?? ((lineNumber: number) => (lineNumber - 1) * lineHeight);
+  const bottomForLine = options.bottomForLine ?? ((lineNumber: number) => topForLine(lineNumber) + lineHeight);
   return {
     getVisibleRanges: vi.fn(() => options.visibleRanges ?? [{ startLineNumber: 1, endLineNumber: 100 }]),
     getTopForLineNumber: vi.fn(topForLine),
+    getBottomForLineNumber: vi.fn(bottomForLine),
     getScrolledVisiblePosition: vi.fn((position: { lineNumber: number }) => (
       nullPositions.has(position.lineNumber)
         ? null
@@ -130,5 +133,33 @@ describe('diffBlockGeometry', () => {
 
     expect(getDiffBlockGeometry(block(), editor, editor, LINE_HEIGHT_OPTION)).toEqual({ top: 0, height: 40 });
     expect(editor.getScrollTop).toHaveBeenCalled();
+  });
+
+  it('单个模型行自动换行时使用整行底边而不是首个 visual line 高度', () => {
+    const wrapped = geometryEditor({
+      visibleRanges: [{ startLineNumber: 20, endLineNumber: 20 }],
+      layoutHeight: 100,
+      topForLine: () => 0,
+      bottomForLine: () => 60
+    });
+    const singleLineBlock = { ...block(), newStart: 20, newEnd: 20 };
+
+    expect(getDiffBlockGeometry(singleLineBlock, wrapped, wrapped, LINE_HEIGHT_OPTION))
+      .toEqual({ top: 0, height: 60 });
+  });
+
+  it('多行自动换行且首段滚出视口时仍保留当前可见块高度', () => {
+    const wrapped = geometryEditor({
+      visibleRanges: [{ startLineNumber: 20, endLineNumber: 21 }],
+      scrollTop: 30,
+      layoutHeight: 60,
+      nullPositions: [20],
+      topForLine: (lineNumber) => lineNumber === 20 ? 0 : 60,
+      bottomForLine: (lineNumber) => lineNumber === 21 ? 100 : 60
+    });
+    const multilineBlock = { ...block(), newStart: 20, newEnd: 21 };
+
+    expect(getDiffBlockGeometry(multilineBlock, wrapped, wrapped, LINE_HEIGHT_OPTION))
+      .toEqual({ top: 0, height: 60 });
   });
 });

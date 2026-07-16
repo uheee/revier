@@ -13,11 +13,14 @@ const NPopoverStub = defineComponent({
   name: 'NPopover',
   inheritAttrs: false,
   props: { show: Boolean, placement: String },
-  emits: ['update:show'],
-  setup(props, { attrs, slots }) {
+  emits: ['update:show', 'clickoutside'],
+  setup(props, { attrs, emit, slots }) {
     return () => h('div', { class: 'popover-stub', ...attrs, 'data-placement': props.placement }, [
       slots.trigger?.(),
-      props.show ? h('div', { class: 'popover-content' }, slots.default?.()) : undefined
+      props.show ? h('div', { class: 'popover-content' }, [
+        slots.default?.(),
+        h('button', { class: 'popover-clickoutside', onClick: () => emit('clickoutside') }, '模拟外部点击')
+      ]) : undefined
     ]);
   }
 });
@@ -33,7 +36,8 @@ function diffBlock(id = 'block-1'): DiffBlock {
     authors: [
       { name: '低频', email: 'low@example.com', commitCount: 1, lastCommittedAt: '' },
       { name: '高频', email: 'high@example.com', commitCount: 3, lastCommittedAt: '2026-07-01T08:00:00Z' },
-      { name: '次高频', commitCount: 2, lastCommittedAt: '2026-06-01T08:00:00Z' }
+      { name: '次高频', commitCount: 2, lastCommittedAt: '2026-06-01T08:00:00Z' },
+      { name: '时间异常', commitCount: 1, lastCommittedAt: 'not-a-date' }
     ],
     rows: [],
     relatedCommits: []
@@ -56,6 +60,7 @@ function mockEditor() {
   const value = {
     getVisibleRanges,
     getTopForLineNumber: vi.fn((line: number) => (line - 1) * 20),
+    getBottomForLineNumber: vi.fn((line: number) => line * 20),
     getScrolledVisiblePosition: vi.fn((position: { lineNumber: number }) => ({ top: (position.lineNumber - 1) * 20, left: 0, height: 20 })),
     getScrollTop: vi.fn(() => 0),
     getOption: vi.fn(() => 20),
@@ -73,11 +78,11 @@ function mockEditor() {
   };
 }
 
-function mountRail(options: { draft?: boolean; original?: editor.ICodeEditor; modified?: editor.ICodeEditor } = {}) {
+function mountRail(options: { draft?: boolean; blocks?: DiffBlock[]; original?: editor.ICodeEditor; modified?: editor.ICodeEditor } = {}) {
   const original = options.original ?? mockEditor().value;
   const modified = options.modified ?? mockEditor().value;
   return mount(DiffAuthorRail, {
-    props: { blocks: [diffBlock()], draft: options.draft ?? false, originalEditor: original, modifiedEditor: modified },
+    props: { blocks: options.blocks ?? [diffBlock()], draft: options.draft ?? false, originalEditor: original, modifiedEditor: modified },
     global: { stubs: { NPopover: NPopoverStub, Popover: NPopoverStub, 'n-popover': NPopoverStub } }
   });
 }
@@ -118,6 +123,35 @@ describe('DiffAuthorRail', () => {
     expect(content.text()).toContain('3 次提交');
     expect(content.text()).toContain('2026-07-01T08:00:00Z');
     expect(content.text()).toContain('未知');
+    expect(content.text()).not.toContain('not-a-date');
+  });
+
+  it('外部点击、普通块选择和删除当前块都会关闭 Popover', async () => {
+    const second = { ...diffBlock('block-2'), oldStart: 6, oldEnd: 8, newStart: 6, newEnd: 8 };
+    const wrapper = mountRail({ blocks: [diffBlock(), second] });
+
+    await wrapper.findAll('.diff-author-rail__more')[0].trigger('click');
+    expect(wrapper.find('.popover-content').exists()).toBe(true);
+    await wrapper.get('.popover-clickoutside').trigger('click');
+    expect(wrapper.find('.popover-content').exists()).toBe(false);
+
+    await wrapper.findAll('.diff-author-rail__more')[0].trigger('click');
+    await wrapper.findAll('.diff-author-rail__block')[1].trigger('click');
+    expect(wrapper.find('.popover-content').exists()).toBe(false);
+
+    await wrapper.findAll('.diff-author-rail__more')[0].trigger('click');
+    await wrapper.setProps({ blocks: [second] });
+    await wrapper.setProps({ blocks: [diffBlock(), second] });
+    expect(wrapper.find('.popover-content').exists()).toBe(false);
+  });
+
+  it('作者块可由键盘聚焦和激活', async () => {
+    const wrapper = mountRail();
+    const authorBlock = wrapper.get('.diff-author-rail__block');
+    expect(authorBlock.attributes('role')).toBe('button');
+    expect(authorBlock.attributes('tabindex')).toBe('0');
+    await authorBlock.trigger('keydown', { key: 'Enter' });
+    expect(wrapper.emitted('selected')).toHaveLength(1);
   });
 
   it('草稿态不渲染轨道且不订阅编辑器事件', () => {
@@ -181,5 +215,20 @@ describe('DiffAuthorRail', () => {
     wrapper.unmount();
     expect(cancelAnimationFrame).toHaveBeenCalledOnce();
     expect([...original.disposes, ...modified.disposes].every((dispose) => dispose.mock.calls.length === 1)).toBe(true);
+  });
+
+  it('同一编辑器实例只订阅一次，单个清理异常不阻断其余监听释放', async () => {
+    const shared = mockEditor();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const wrapper = mountRail({ original: shared.value, modified: shared.value });
+    expect(shared.value.onDidScrollChange).toHaveBeenCalledOnce();
+    expect(shared.value.onDidLayoutChange).toHaveBeenCalledOnce();
+    expect(shared.value.onDidChangeHiddenAreas).toHaveBeenCalledOnce();
+
+    shared.disposes[0].mockImplementation(() => { throw new Error('清理失败'); });
+    await expect(wrapper.setProps({ draft: true })).resolves.toBeUndefined();
+    expect(shared.disposes.every((dispose) => dispose.mock.calls.length === 1)).toBe(true);
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 });

@@ -2,7 +2,7 @@
 import { NPopover } from 'naive-ui';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { editor } from 'monaco-editor';
-import type { DiffBlock } from '../../generated/bindings';
+import type { AuthorSummary, DiffBlock } from '../../generated/bindings';
 import {
   AUTHOR_POPOVER_MAX_HEIGHT,
   AUTHOR_RAIL_WIDTH,
@@ -26,6 +26,9 @@ const emit = defineEmits<{
 interface PositionedBlock {
   block: DiffBlock;
   geometry: DiffBlockGeometry;
+  authors: AuthorSummary[];
+  visibleAuthors: AuthorSummary[];
+  hasMore: boolean;
 }
 
 const positionedBlocks = ref<PositionedBlock[]>([]);
@@ -47,7 +50,12 @@ function recomputeLayout(): void {
       props.modifiedEditor!,
       editor.EditorOption.lineHeight
     );
-    return geometry ? [{ block, geometry }] : [];
+    if (!geometry) {
+      return [];
+    }
+    const authors = sortBlockAuthors(block.authors);
+    const fitted = fitAuthors(geometry.height, authors);
+    return [{ block, geometry, authors, visibleAuthors: fitted.visible, hasMore: fitted.hasMore }];
   });
 }
 
@@ -71,7 +79,11 @@ function scheduleLayout(): void {
 
 function disposeListeners(): void {
   for (const listener of listeners.splice(0)) {
-    listener.dispose();
+    try {
+      listener.dispose();
+    } catch (error) {
+      console.error('AuthorRail 编辑器监听清理失败', error);
+    }
   }
 }
 
@@ -87,17 +99,39 @@ function resetSubscriptions(): void {
   openBlockId.value = undefined;
   if (!props.draft && props.originalEditor && props.modifiedEditor) {
     bindEditor(props.originalEditor);
-    bindEditor(props.modifiedEditor);
+    if (props.modifiedEditor !== props.originalEditor) {
+      bindEditor(props.modifiedEditor);
+    }
   }
   recomputeLayout();
 }
 
-function fittedAuthors(item: PositionedBlock) {
-  return fitAuthors(item.geometry.height, sortBlockAuthors(item.block.authors));
+function selectBlock(block: DiffBlock): void {
+  openBlockId.value = undefined;
+  emit('selected', block);
 }
 
 function setPopoverOpen(blockId: string, show: boolean): void {
   openBlockId.value = show ? blockId : undefined;
+}
+
+function activateBlock(event: KeyboardEvent, block: DiffBlock): void {
+  if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
+    return;
+  }
+  event.preventDefault();
+  selectBlock(block);
+}
+
+function displayCommittedAt(value: string): string {
+  return value && Number.isFinite(Date.parse(value)) ? value : '未知';
+}
+
+function handleBlocksChanged(): void {
+  if (openBlockId.value && !props.blocks.some((block) => block.id === openBlockId.value)) {
+    openBlockId.value = undefined;
+  }
+  recomputeLayout();
 }
 
 watch(
@@ -105,7 +139,7 @@ watch(
   resetSubscriptions,
   { immediate: true }
 );
-watch(() => props.blocks, recomputeLayout, { deep: true });
+watch(() => props.blocks, handleBlocksChanged, { deep: true });
 
 onBeforeUnmount(() => {
   cancelScheduledLayout();
@@ -119,21 +153,25 @@ onBeforeUnmount(() => {
       v-for="item in positionedBlocks"
       :key="item.block.id"
       class="diff-author-rail__block"
+      role="button"
+      tabindex="0"
       :style="{ top: `${item.geometry.top}px`, height: `${item.geometry.height}px` }"
-      @click="emit('selected', item.block)"
+      @click="selectBlock(item.block)"
+      @keydown="activateBlock($event, item.block)"
     >
       <span
-        v-for="author in fittedAuthors(item).visible"
+        v-for="author in item.visibleAuthors"
         :key="`${author.name}:${author.email ?? ''}`"
         class="diff-author-rail__author"
         :title="author.email ? `${author.name} <${author.email}>` : author.name"
       >{{ author.name }}</span>
       <NPopover
-        v-if="fittedAuthors(item).hasMore"
+        v-if="item.hasMore"
         trigger="manual"
         placement="left"
         :show="openBlockId === item.block.id"
         @update:show="setPopoverOpen(item.block.id, $event)"
+        @clickoutside="setPopoverOpen(item.block.id, false)"
       >
         <template #trigger>
           <button
@@ -145,14 +183,14 @@ onBeforeUnmount(() => {
         </template>
         <div class="diff-author-rail__popover" :style="popoverStyle">
           <article
-            v-for="author in sortBlockAuthors(item.block.authors)"
+            v-for="author in item.authors"
             :key="`${author.name}:${author.email ?? ''}`"
             class="diff-author-rail__popover-author"
           >
             <strong>{{ author.name }}</strong>
             <span>{{ author.email ?? '未知' }}</span>
             <span>{{ author.commitCount }} 次提交</span>
-            <time>{{ author.lastCommittedAt || '未知' }}</time>
+            <time>{{ displayCommittedAt(author.lastCommittedAt) }}</time>
           </article>
         </div>
       </NPopover>
