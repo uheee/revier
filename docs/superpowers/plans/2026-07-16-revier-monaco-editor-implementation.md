@@ -98,6 +98,8 @@ Task 编号与章节位置保持不变，以维持既有提交、审查记录和
   - 从 Blob 字节进入严格解码。
 - `crates/revier-analysis/src/git/diff.rs`、`crates/revier-analysis/src/commands/query_files.rs`
   - 内部保留真实变更类型，并让非 UTF-8 文本仍可出现在文件列表中。
+- `crates/revier-analysis/src/attribution/patch_inference.rs`、`blame.rs`、`merge_trace.rs`、`deletion_trace.rs`
+  - 将同一 resolved encoding 贯穿所有历史 Blob 读取，保证非 UTF-8 继续执行完整归因链。
 - `crates/revier-analysis/src/overlay/file_overlay.rs`、`crates/revier-analysis/src/json.rs`
   - 输出完整文本与实际编码。
 - `crates/revier-analysis/tests/fixtures.rs`
@@ -591,6 +593,10 @@ git commit -m "feat(settings): 从 TOML 加载编辑器设置"
 - Modify: `crates/revier-analysis/src/git/blob.rs`
 - Modify: `crates/revier-analysis/src/git/diff.rs`
 - Modify: `crates/revier-analysis/src/commands/query_files.rs`
+- Modify: `crates/revier-analysis/src/attribution/patch_inference.rs`
+- Modify: `crates/revier-analysis/src/attribution/blame.rs`
+- Modify: `crates/revier-analysis/src/attribution/merge_trace.rs`
+- Modify: `crates/revier-analysis/src/attribution/deletion_trace.rs`
 - Modify: `crates/revier-analysis/src/json.rs`
 - Modify: `crates/revier-analysis/src/overlay/file_overlay.rs`
 - Modify: `crates/revier-analysis/tests/fixtures.rs`
@@ -636,6 +642,8 @@ manual: 按指定编码严格解码；任何 malformed sequence 都返回错误
 
 GB18030 使用 `encoding_rs::GB18030.decode_without_bom_handling_and_without_replacement`；UTF-16 先检查偶数字节，再以指定端序构造 `u16` 并调用 `String::from_utf16`。不得使用 `from_utf8_lossy` 或带替换字符的解码。
 
+严格解码还必须拒绝与请求/resolved encoding 冲突的 BOM：UTF-16 LE 不得接受 BE BOM，UTF-16 BE 不得接受 LE BOM，UTF-8/GB18030 不得把 UTF-16 BOM 当普通字符继续解码。历史两侧 BOM 冲突时 Overlay 返回明确错误。
+
 把 `CommitFileChange.status` 改为始终保存真实的 `added|modified|deleted|renamed`，`is_binary` 单独保存启发式结果。只有 `query_files` 输出初始文件列表时才把 `is_binary=true` 映射为公开 `binary` 状态。UTF-16 BOM 不视为二进制；无法自动解码但没有 NUL 的文件在行数统计阶段保留 `0/0`，不得让整个 Review 分析失败，以便用户通过 `default_encoding` 再次加载。
 
 同步更新 `tests/index_git_diff.rs` 的二进制夹具断言：内部 `status` 使用该夹具真实的 `added`，并继续断言 `is_binary=true`、`is_previewable=false`；不得削弱二进制检测覆盖。
@@ -654,6 +662,8 @@ pub encoding: String,
 在 `build_file_overlay` 中解析为 `TextEncoding`。对同一历史文件使用一个解析后编码：优先以新侧 Blob（删除文件用旧侧）解析 `auto`，再用该 `ResolvedTextEncoding` 严格解码左右两侧；这样 `FileOverlay.resolvedEncoding` 始终有唯一含义。编码发生历史切换时要求用户手动选择，不偷偷让两侧使用不同编码。
 
 `build_file_overlay` 不得仅因 `change.is_binary` 提前返回；先按请求编码尝试严格解码。解码成功时 Overlay 的 `file.status` 使用内部真实变更类型，`isBinary=false`、`isPreviewable=true`；解码仍呈现明显二进制或失败时才返回不可分析错误。这样 BOM UTF-16 和通过 TOML 指定的 BOM-less UTF-16 能进入编辑器，真实二进制仍不可预览。
+
+同一 `ResolvedTextEncoding` 必须继续传入 `patch_inference`、`blame`、`merge_trace` 与 `deletion_trace` 的历史 Blob 读取路径；所有路径使用严格解码后的文本，GB18030/UTF-16 不得直接返回未归因的 `diff.blocks`。新增 GB18030 与 UTF-16 Overlay 测试必须断言作者、related commits 和 attribution，另加历史两侧冲突 BOM 的失败测试。
 
 `FileOverlayOutput` 新增：
 
@@ -694,7 +704,7 @@ cargo test -p revier-analysis
 运行：
 
 ```powershell
-git add crates/revier-analysis/src/text_encoding.rs crates/revier-analysis/tests/text_encoding.rs crates/revier-analysis/src/lib.rs crates/revier-analysis/src/cli.rs crates/revier-analysis/src/commands/trace_block.rs crates/revier-analysis/src/git/blob.rs crates/revier-analysis/src/git/diff.rs crates/revier-analysis/src/commands/query_files.rs crates/revier-analysis/src/json.rs crates/revier-analysis/src/overlay/file_overlay.rs crates/revier-analysis/tests/fixtures.rs crates/revier-analysis/tests/file_overlay_cli.rs crates/revier-analysis/tests/index_git_diff.rs
+git add crates/revier-analysis/src/text_encoding.rs crates/revier-analysis/tests/text_encoding.rs crates/revier-analysis/src/lib.rs crates/revier-analysis/src/cli.rs crates/revier-analysis/src/commands/trace_block.rs crates/revier-analysis/src/git/blob.rs crates/revier-analysis/src/git/diff.rs crates/revier-analysis/src/commands/query_files.rs crates/revier-analysis/src/attribution/patch_inference.rs crates/revier-analysis/src/attribution/blame.rs crates/revier-analysis/src/attribution/merge_trace.rs crates/revier-analysis/src/attribution/deletion_trace.rs crates/revier-analysis/src/json.rs crates/revier-analysis/src/overlay/file_overlay.rs crates/revier-analysis/tests/fixtures.rs crates/revier-analysis/tests/file_overlay_cli.rs crates/revier-analysis/tests/index_git_diff.rs
 git commit -m "feat(overlay): 按指定编码返回完整文件文本"
 ```
 
