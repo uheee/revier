@@ -26,6 +26,17 @@ function expectSelectorNeverDeclares(styles: string, selector: string, declarati
   }
 }
 
+function selectorClassSpecificity(selector: string): number {
+  return selector.match(/\.[a-z0-9_-]+/gi)?.length ?? 0;
+}
+
+function readNarrowViewportStyles(styles: string): string {
+  const marker = '@media (max-width: 860px)';
+  const start = styles.indexOf(marker);
+  expect(start, `缺少 ${marker}`).toBeGreaterThanOrEqual(0);
+  return styles.slice(start);
+}
+
 describe('review diff pane layout', () => {
   it('keeps the outer diff pane fixed while individual viewers scroll internally', () => {
     const styles = readStyles();
@@ -100,6 +111,29 @@ describe('review diff pane layout', () => {
       'overflow-y: auto;'
     ]);
     expectRule(styles, '.editor-status-menu--upward', ['bottom: calc(100% + 4px);']);
+  });
+
+  it('生产样式以高于 scoped 组件规则的特异性锁定编辑器网格', () => {
+    const styles = readStyles();
+    const layoutSelector = '.app-theme-root .diff-viewer .diff-viewer__editor-layout';
+    const draftSelector = `${layoutSelector}:not(:has(.diff-author-rail))`;
+
+    expect(selectorClassSpecificity(layoutSelector)).toBeGreaterThan(2);
+    expect(selectorClassSpecificity(draftSelector)).toBeGreaterThan(2);
+    expectRule(styles, layoutSelector, ['display: grid;']);
+    expectRule(styles, draftSelector, ['grid-template-columns: minmax(0, 1fr);']);
+  });
+
+  it('窄窗口覆盖内联桌面列宽并把所有可见区域放入同一列', () => {
+    const styles = readNarrowViewportStyles(readStyles());
+
+    expectRule(styles, '.review-workspace', [
+      'grid-template-columns: minmax(0, 1fr) !important;'
+    ]);
+    expectRule(styles, '.review-sidebar', ['grid-column: 1;']);
+    expectRule(styles, '.review-diff-pane', ['grid-column: 1;']);
+    expectRule(styles, '.review-detail-pane', ['grid-column: 1;']);
+    expectRule(styles, '.review-resizer', ['display: none;']);
   });
 
   it('通知入口与可滚动面板沿用主题变量', () => {

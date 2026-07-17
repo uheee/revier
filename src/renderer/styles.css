@@ -478,12 +478,16 @@ textarea {
   background: var(--editor-background);
 }
 
-/* 组件局部样式在全局样式之后注入，需要提高层级确保实际采用双列网格。 */
-.app-theme-root .diff-viewer__editor-layout {
+/* 组件局部样式在全局样式之后注入，需要更高特异性确保实际采用双列网格。 */
+.app-theme-root .diff-viewer .diff-viewer__editor-layout {
   display: grid;
 }
 
 .diff-viewer__editor-layout:not(:has(.diff-author-rail)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-theme-root .diff-viewer .diff-viewer__editor-layout:not(:has(.diff-author-rail)) {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -834,7 +838,7 @@ textarea {
   }
 
   .review-workspace {
-    grid-template-columns: minmax(280px, 1fr);
+    grid-template-columns: minmax(0, 1fr) !important;
     min-width: 0;
     height: auto;
     min-height: 100vh;
@@ -843,6 +847,18 @@ textarea {
 
   .review-resizer {
     display: none;
+  }
+
+  .review-sidebar {
+    grid-column: 1;
+  }
+
+  .review-diff-pane {
+    grid-column: 1;
+  }
+
+  .review-detail-pane {
+    grid-column: 1;
   }
 
   .review-sidebar,
