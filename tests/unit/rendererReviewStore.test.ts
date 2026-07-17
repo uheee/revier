@@ -312,6 +312,59 @@ describe('renderer reviewStore', () => {
     expect(store.selectedCommitHash).toBeUndefined();
   });
 
+  it('提交初载失败时清除当前选择并保留错误状态', async () => {
+    vi.mocked(revierClient.review.getCommitOverlay).mockRejectedValue(new Error('提交加载失败'));
+    const store = useReviewStore();
+    store.task = task;
+
+    expect(await store.loadCommitOverlay(file.path, 'broken', 'utf-8')).toBe(false);
+    expect(store.selectedCommitHash).toBeUndefined();
+    expect(store.drilldownOverlay).toBeUndefined();
+    expect(store.drilldownLoading).toBe(false);
+    expect(store.error).toBe('提交加载失败');
+  });
+
+  it('切换提交时立即清除旧 overlay，旧成功不得覆盖新提交', async () => {
+    const oldOverlay = { ...overlay, mode: 'commit' as const, parentHash: 'old-parent' };
+    const newOverlay = { ...overlay, mode: 'commit' as const, parentHash: 'new-parent' };
+    let resolveOld!: (value: FileOverlay) => void;
+    vi.mocked(revierClient.review.getCommitOverlay)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce(newOverlay);
+    const store = useReviewStore();
+    store.task = task;
+    store.drilldownOverlay = oldOverlay;
+
+    const oldRequest = store.loadCommitOverlay(file.path, 'old', 'utf-8');
+    expect(store.drilldownOverlay).toBeUndefined();
+    expect(store.selectedCommitHash).toBe('old');
+    expect(await store.loadCommitOverlay(file.path, 'new', 'gb18030')).toBe(true);
+    resolveOld(oldOverlay);
+
+    expect(await oldRequest).toBe(false);
+    expect(store.selectedCommitHash).toBe('new');
+    expect(store.drilldownOverlay).toStrictEqual(newOverlay);
+  });
+
+  it('旧提交请求后到达的失败不得清除新提交选择', async () => {
+    let rejectOld!: (reason: unknown) => void;
+    const newOverlay = { ...overlay, mode: 'commit' as const, parentHash: 'new-parent' };
+    vi.mocked(revierClient.review.getCommitOverlay)
+      .mockReturnValueOnce(new Promise((_, reject) => { rejectOld = reject; }))
+      .mockResolvedValueOnce(newOverlay);
+    const store = useReviewStore();
+    store.task = task;
+
+    const oldRequest = store.loadCommitOverlay(file.path, 'old', 'utf-8');
+    expect(await store.loadCommitOverlay(file.path, 'new', 'utf-8')).toBe(true);
+    rejectOld(new Error('旧请求失败'));
+
+    expect(await oldRequest).toBe(false);
+    expect(store.selectedCommitHash).toBe('new');
+    expect(store.drilldownOverlay).toStrictEqual(newOverlay);
+    expect(store.error).toBeUndefined();
+  });
+
   it('提交编码重载保留旧 overlay，后到达的旧请求不能覆盖新请求', async () => {
     const commitOverlay = { ...overlay, mode: 'commit' as const, parentHash: 'parent' };
     const latestOverlay = { ...commitOverlay, resolvedEncoding: 'utf-16le' as const };

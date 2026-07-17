@@ -25,7 +25,7 @@ vi.mock('../../src/renderer/components/review/DiffViewer.vue', () => ({
     name: 'DiffViewer',
     props: ['overlay', 'loading', 'selectedBlockId', 'settings', 'themeName', 'requestedEncoding', 'contextKey'],
     emits: ['selected', 'draftChange', 'encodingChange'],
-    template: '<div data-testid="diff-viewer-stub"><button data-test="select-block" @click="$emit(\'selected\', overlay.blocks[0])"/><button data-test="draft" @click="$emit(\'draftChange\', true)"/><button data-test="encoding" @click="$emit(\'encodingChange\', \'gb18030\')"/></div>'
+    template: '<div data-testid="diff-viewer-stub" :data-context-key="contextKey"><span v-if="overlay" :key="contextKey" data-test="editor-session"/><button v-if="overlay" data-test="select-block" @click="$emit(\'selected\', overlay.blocks[0])"/><button v-if="overlay" data-test="draft" @click="$emit(\'draftChange\', true)"/><button v-if="overlay" data-test="encoding" @click="$emit(\'encodingChange\', \'gb18030\')"/></div>'
   }
 }));
 
@@ -95,10 +95,13 @@ describe('ReviewWorkspace', () => {
     vi.mocked(revierClient.projects.listBranches).mockReset();
     vi.mocked(revierClient.review.listAuthors).mockReset();
     vi.mocked(revierClient.review.onTaskUpdate).mockReset();
+    vi.mocked(revierClient.review.getFileOverlay).mockReset();
+    vi.mocked(revierClient.review.getCommitOverlay).mockReset();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('筛选条件变化后防抖异步保存到项目配置', async () => {
@@ -160,34 +163,37 @@ describe('ReviewWorkspace', () => {
     );
   });
 
-  it('接入设置、草稿销毁、编码原子更新并保留完整左栏', async () => {
+  it('草稿中直接切换文件会替换编辑器上下文且不弹确认，并保留真实筛选栏和文件列表', async () => {
     vi.mocked(revierClient.projects.list).mockResolvedValue([project]);
     vi.mocked(revierClient.projects.listBranches).mockResolvedValue([{ name: 'develop', current: true }]);
     vi.mocked(revierClient.review.listAuthors).mockResolvedValue([]);
     vi.mocked(revierClient.review.onTaskUpdate).mockResolvedValue(vi.fn());
+    let resolveOther!: (value: FileOverlay) => void;
     vi.mocked(revierClient.review.getFileOverlay)
       .mockResolvedValueOnce(overlay)
-      .mockResolvedValueOnce({ ...overlay, resolvedEncoding: 'gb18030', newContent: '新内容' })
-      .mockRejectedValueOnce(new Error('解码失败'))
-      .mockResolvedValueOnce({ ...overlay, file: { ...overlay.file, path: 'src/other.ts' } });
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOther = resolve; }));
+    const confirm = vi.spyOn(window, 'confirm');
 
     const store = useReviewStore();
     store.task = { taskId: 'task-1', projectId: project.id, status: 'completed', stage: 'ready' };
     store.files = [overlay.file, { ...overlay.file, path: 'src/other.ts' }];
     const wrapper = mount(ReviewWorkspace, {
       global: { stubs: {
-        FilterPanel: { template: '<section data-test="filters"><i data-filter="branch"/><i data-filter="author"/><i data-filter="time"/><i data-filter="message"/><i data-filter="glob"/></section>' },
         TaskProgress: true,
-        ChangedFileList: { emits: ['selected'], template: '<div><button data-test="app-file" @click="$emit(\'selected\', \'src/app.ts\')">主文件</button><button data-test="other-file" @click="$emit(\'selected\', \'src/other.ts\')">其他文件</button></div>' },
         DiffDrilldownOverlay: true,
         BlockDetailPanel: { name: 'BlockDetailPanel', props: ['block', 'draft'], template: '<aside data-test="detail" />' },
         ReviewLayoutResizer: true,
-        'n-button': { template: '<button><slot /></button>' }
+        'n-button': { template: '<button type="button"><slot /></button>' },
+        'n-select': true,
+        'n-date-picker': true,
+        'n-input': true,
+        'n-tag': { template: '<span><slot /></span>' },
+        'n-empty': true
       } }
     });
     await flushPromises();
 
-    await wrapper.get('[data-test="app-file"]').trigger('click');
+    await wrapper.findAll('.changed-file-row')[0].trigger('click');
     await flushPromises();
     expect(revierClient.review.getFileOverlay).toHaveBeenNthCalledWith(1, {
       taskId: 'task-1', filePath: 'src/app.ts', encoding: 'utf-8'
@@ -201,22 +207,61 @@ describe('ReviewWorkspace', () => {
     expect(store.selectedBlock).toBeUndefined();
     expect(wrapper.getComponent({ name: 'BlockDetailPanel' }).props()).toMatchObject({ draft: true, block: undefined });
 
-    await wrapper.get('[data-test="encoding"]').trigger('click');
-    await flushPromises();
-    viewer = wrapper.getComponent({ name: 'DiffViewer' });
-    expect(viewer.props('requestedEncoding')).toBe('gb18030');
-    expect(viewer.props('overlay').newContent).toBe('新内容');
-
-    await wrapper.get('[data-test="encoding"]').trigger('click');
-    await flushPromises();
-    expect(wrapper.getComponent({ name: 'DiffViewer' }).props('overlay').newContent).toBe('新内容');
-    expect(wrapper.getComponent({ name: 'DiffViewer' }).props('requestedEncoding')).toBe('gb18030');
-
-    await wrapper.get('[data-test="other-file"]').trigger('click');
-    await flushPromises();
+    const previousContextKey = viewer.props('contextKey');
+    const previousSession = wrapper.get('[data-test="editor-session"]').element;
+    await wrapper.findAll('.changed-file-row')[1].trigger('click');
+    await wrapper.vm.$nextTick();
     expect(revierClient.review.getFileOverlay).toHaveBeenLastCalledWith(expect.objectContaining({ filePath: 'src/other.ts', encoding: 'utf-8' }));
+    expect(wrapper.getComponent({ name: 'DiffViewer' }).props('overlay')).toBeUndefined();
+    expect(wrapper.getComponent({ name: 'DiffViewer' }).props('contextKey')).not.toBe(previousContextKey);
+    expect(wrapper.find('[data-test="editor-session"]').exists()).toBe(false);
+    expect(previousSession.isConnected).toBe(false);
     expect(wrapper.getComponent({ name: 'BlockDetailPanel' }).props('draft')).toBe(false);
-    expect(wrapper.findAll('[data-test="filters"] [data-filter]')).toHaveLength(5);
-    expect(wrapper.find('[data-test="other-file"]').exists()).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+    resolveOther({ ...overlay, file: { ...overlay.file, path: 'src/other.ts' } });
+    await flushPromises();
+    expect(wrapper.getComponent({ name: 'DiffViewer' }).props('overlay').file.path).toBe('src/other.ts');
+    expect(wrapper.get('[data-test="editor-session"]').element).not.toBe(previousSession);
+
+    const filterPanel = wrapper.get('.filter-panel');
+    expect(filterPanel.text()).toContain('分支');
+    expect(filterPanel.text()).toContain('时间范围');
+    expect(filterPanel.text()).toContain('作者');
+    expect(filterPanel.text()).toContain('提交信息');
+    expect(filterPanel.text()).toContain('文件规则');
+    expect(wrapper.get('.changed-file-list').text()).toContain('src/app.ts');
+    expect(wrapper.get('.changed-file-list').text()).toContain('src/other.ts');
+  });
+
+  it('编码重载仅在成功后更新请求编码，失败时保留当前内容', async () => {
+    vi.mocked(revierClient.projects.list).mockResolvedValue([project]);
+    vi.mocked(revierClient.projects.listBranches).mockResolvedValue([]);
+    vi.mocked(revierClient.review.listAuthors).mockResolvedValue([]);
+    vi.mocked(revierClient.review.onTaskUpdate).mockResolvedValue(vi.fn());
+    vi.mocked(revierClient.review.getFileOverlay)
+      .mockResolvedValueOnce(overlay)
+      .mockResolvedValueOnce({ ...overlay, resolvedEncoding: 'gb18030', newContent: '新内容' })
+      .mockRejectedValueOnce(new Error('解码失败'));
+    const store = useReviewStore();
+    store.task = { taskId: 'task-1', projectId: project.id, status: 'completed', stage: 'ready' };
+    store.files = [overlay.file];
+    const wrapper = mount(ReviewWorkspace, { global: { stubs: {
+      FilterPanel: true, TaskProgress: true,
+      ChangedFileList: { emits: ['selected'], template: '<button data-test="app-file" @click="$emit(\'selected\', \'src/app.ts\')" />' },
+      DiffDrilldownOverlay: true, BlockDetailPanel: true, ReviewLayoutResizer: true,
+      'n-button': { template: '<button><slot /></button>' }
+    } } });
+    await flushPromises();
+    await wrapper.get('[data-test="app-file"]').trigger('click');
+    await flushPromises();
+    await wrapper.get('[data-test="encoding"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.getComponent({ name: 'DiffViewer' }).props('requestedEncoding')).toBe('gb18030');
+    expect(wrapper.getComponent({ name: 'DiffViewer' }).props('overlay').newContent).toBe('新内容');
+
+    await wrapper.get('[data-test="encoding"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.getComponent({ name: 'DiffViewer' }).props('requestedEncoding')).toBe('gb18030');
+    expect(wrapper.getComponent({ name: 'DiffViewer' }).props('overlay').newContent).toBe('新内容');
   });
 });

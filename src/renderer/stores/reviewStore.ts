@@ -243,7 +243,10 @@ export const useReviewStore = defineStore('review', {
         this.drilldownOverlay = overlay;
         return true;
       } catch (error) {
-        if (requestId === this.drilldownRequestId) this.error = toErrorMessage(error);
+        if (requestId === this.drilldownRequestId) {
+          this.selectedCommitHash = undefined;
+          this.error = toErrorMessage(error);
+        }
         return false;
       } finally {
         if (requestId === this.drilldownRequestId) {
