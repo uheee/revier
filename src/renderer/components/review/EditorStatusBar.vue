@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { ResolvedTextEncoding, TextEncoding } from '../../generated/bindings';
 import { EDITOR_LANGUAGES } from '../../editor/editorLanguages';
 
@@ -31,6 +31,9 @@ const emit = defineEmits<{
 }>();
 
 const openMenu = ref<'encoding' | 'language'>();
+const statusBar = ref<HTMLElement>();
+const encodingTrigger = ref<HTMLButtonElement>();
+const languageTrigger = ref<HTMLButtonElement>();
 const languageLabel = computed(() =>
   EDITOR_LANGUAGES.find((language) => language.id === props.languageId)?.label ?? props.languageId
 );
@@ -48,10 +51,68 @@ function selectLanguage(languageId: string): void {
   openMenu.value = undefined;
   emit('languageChange', languageId);
 }
+
+function closeMenu(restoreFocus = false): void {
+  const menu = openMenu.value;
+  if (!menu) {
+    return;
+  }
+  openMenu.value = undefined;
+  if (restoreFocus) {
+    void nextTick(() => {
+      (menu === 'encoding' ? encodingTrigger.value : languageTrigger.value)?.focus();
+    });
+  }
+}
+
+function handleDocumentPointerDown(event: PointerEvent): void {
+  if (event.target instanceof Node && !statusBar.value?.contains(event.target)) {
+    closeMenu();
+  }
+}
+
+function handleDocumentKeyDown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && openMenu.value) {
+    event.preventDefault();
+    closeMenu(true);
+  }
+}
+
+function handleMenuKeyDown(event: KeyboardEvent): void {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    return;
+  }
+  const menu = event.currentTarget as HTMLElement;
+  const items = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
+  if (items.length === 0) {
+    return;
+  }
+  const current = items.indexOf(document.activeElement as HTMLButtonElement);
+  let next = 0;
+  if (event.key === 'ArrowDown') {
+    next = current < 0 ? 0 : (current + 1) % items.length;
+  } else if (event.key === 'ArrowUp') {
+    next = current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length;
+  } else if (event.key === 'End') {
+    next = items.length - 1;
+  }
+  event.preventDefault();
+  items[next].focus();
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', handleDocumentPointerDown);
+  document.addEventListener('keydown', handleDocumentKeyDown);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleDocumentPointerDown);
+  document.removeEventListener('keydown', handleDocumentKeyDown);
+});
 </script>
 
 <template>
-  <footer class="editor-status-bar">
+  <footer ref="statusBar" class="editor-status-bar">
     <div class="editor-status-bar__left">
       <span>{{ mode === 'draft' ? '临时草稿' : '原始 Diff' }}</span>
       <span v-if="mode === 'original' && selectedBlockIndex !== undefined">
@@ -62,8 +123,10 @@ function selectLanguage(languageId: string): void {
       <span>Ln {{ line }}, Col {{ column }}</span>
       <div v-if="!binary" class="editor-status-control">
         <button
+          ref="encodingTrigger"
           type="button"
           data-testid="encoding-trigger"
+          aria-haspopup="menu"
           :aria-expanded="openMenu === 'encoding'"
           @click="toggleMenu('encoding')"
         >{{ resolvedEncoding }}</button>
@@ -72,6 +135,7 @@ function selectLanguage(languageId: string): void {
           class="editor-status-menu editor-status-menu--upward"
           data-testid="encoding-menu"
           role="menu"
+          @keydown="handleMenuKeyDown"
         >
           <button
             v-for="encoding in ENCODINGS"
@@ -85,8 +149,10 @@ function selectLanguage(languageId: string): void {
       </div>
       <div class="editor-status-control">
         <button
+          ref="languageTrigger"
           type="button"
           data-testid="language-trigger"
+          aria-haspopup="menu"
           :aria-expanded="openMenu === 'language'"
           @click="toggleMenu('language')"
         >{{ languageLabel }}</button>
@@ -95,6 +161,7 @@ function selectLanguage(languageId: string): void {
           class="editor-status-menu editor-status-menu--upward"
           data-testid="language-menu"
           role="menu"
+          @keydown="handleMenuKeyDown"
         >
           <button
             v-for="language in EDITOR_LANGUAGES"

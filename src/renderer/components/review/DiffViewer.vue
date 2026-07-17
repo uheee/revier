@@ -50,6 +50,8 @@ const emit = defineEmits<{
   selected: [block: DiffBlock];
   draftChange: [draft: boolean];
   encodingChange: [encoding: TextEncoding];
+  cursorChange: [line: number, column: number];
+  editorsReady: [original: editor.ICodeEditor, modified: editor.ICodeEditor];
 }>();
 
 const mode = ref<DiffViewerMode>('original');
@@ -140,6 +142,13 @@ function loadLargeFile(): void {
 function setEditors(original: editor.ICodeEditor, modified: editor.ICodeEditor): void {
   originalEditor.value = original;
   modifiedEditor.value = modified;
+  emit('editorsReady', original, modified);
+}
+
+function setCursor(line: number, column: number): void {
+  cursorLine.value = line;
+  cursorColumn.value = column;
+  emit('cursorChange', line, column);
 }
 
 function selectBlock(block: DiffBlock): void {
@@ -148,10 +157,25 @@ function selectBlock(block: DiffBlock): void {
   }
 }
 
-watch(() => props.overlay, resetForOverlay, { immediate: true });
-watch(() => props.overlay?.file.path, () => {
-  manualLanguage.value = undefined;
-});
+let contextInitialized = false;
+watch(
+  [() => props.overlay, () => props.contextKey],
+  ([overlay, contextKey], [previousOverlay, previousContextKey]) => {
+    if (contextInitialized && mode.value === 'draft') {
+      emit('draftChange', false);
+    }
+    if (
+      !contextInitialized
+      || overlay?.file.path !== previousOverlay?.file.path
+      || contextKey !== previousContextKey
+    ) {
+      manualLanguage.value = undefined;
+    }
+    resetForOverlay(overlay);
+    contextInitialized = true;
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
@@ -212,7 +236,7 @@ watch(() => props.overlay?.file.path, () => {
               :selected-block="selectedBlock"
               @draft-change="enterDraft"
               @selected="selectBlock"
-              @cursor-change="(line, column) => { cursorLine = line; cursorColumn = column; }"
+              @cursor-change="setCursor"
               @editors-ready="setEditors"
             />
             <DiffAuthorRail

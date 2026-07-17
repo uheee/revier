@@ -2,7 +2,10 @@
 import { mount } from '@vue/test-utils';
 import EditorStatusBar from '../../src/renderer/components/review/EditorStatusBar.vue';
 
-function mountStatus(overrides: Record<string, unknown> = {}) {
+function mountStatus(
+  overrides: Record<string, unknown> = {},
+  options: { attachTo?: HTMLElement } = {}
+) {
   return mount(EditorStatusBar, {
     props: {
       mode: 'original',
@@ -13,7 +16,8 @@ function mountStatus(overrides: Record<string, unknown> = {}) {
       languageId: 'typescript',
       binary: false,
       ...overrides
-    }
+    },
+    ...options
   });
 }
 
@@ -58,5 +62,55 @@ describe('EditorStatusBar', () => {
 
   it('二进制状态不显示编码按钮', () => {
     expect(mountStatus({ binary: true }).find('[data-testid="encoding-trigger"]').exists()).toBe(false);
+  });
+
+  it('点击组件外部或按 Escape 会关闭菜单', async () => {
+    const wrapper = mountStatus({}, { attachTo: document.body });
+    await wrapper.get('[data-testid="language-trigger"]').trigger('click');
+    expect(wrapper.find('[data-testid="language-menu"]').exists()).toBe(true);
+
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="language-menu"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="encoding-trigger"]').trigger('click');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="encoding-menu"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('语言菜单支持方向键循环以及 Home 和 End 导航', async () => {
+    const wrapper = mountStatus({}, { attachTo: document.body });
+    await wrapper.get('[data-testid="language-trigger"]').trigger('click');
+    const menu = wrapper.get('[data-testid="language-menu"]');
+    const buttons = menu.findAll('button');
+    buttons[0].element.focus();
+
+    await menu.trigger('keydown', { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(buttons.at(-1)!.element);
+    await menu.trigger('keydown', { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(buttons[0].element);
+    await menu.trigger('keydown', { key: 'End' });
+    expect(document.activeElement).toBe(buttons.at(-1)!.element);
+    await menu.trigger('keydown', { key: 'Home' });
+    expect(document.activeElement).toBe(buttons[0].element);
+    wrapper.unmount();
+  });
+
+  it('卸载时清理全局菜单监听器', () => {
+    const add = vi.spyOn(document, 'addEventListener');
+    const remove = vi.spyOn(document, 'removeEventListener');
+    const wrapper = mountStatus();
+    const pointerHandler = add.mock.calls.find(([type]) => type === 'pointerdown')?.[1];
+    const keyHandler = add.mock.calls.find(([type]) => type === 'keydown')?.[1];
+
+    expect(pointerHandler).toBeDefined();
+    expect(keyHandler).toBeDefined();
+    wrapper.unmount();
+    expect(remove).toHaveBeenCalledWith('pointerdown', pointerHandler);
+    expect(remove).toHaveBeenCalledWith('keydown', keyHandler);
+    add.mockRestore();
+    remove.mockRestore();
   });
 });

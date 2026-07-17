@@ -18,7 +18,7 @@ const statusStub = vi.hoisted(() => ({
   name: 'EditorStatusBar',
   props: ['mode', 'line', 'column', 'resolvedEncoding', 'requestedEncoding', 'languageId', 'binary', 'selectedBlockIndex', 'blockCount'],
   emits: ['encodingChange', 'languageChange'],
-  template: '<footer data-testid="status" :data-mode="mode" :data-language="languageId" />'
+  template: '<footer data-testid="status" :data-mode="mode" :data-language="languageId" :data-line="line" :data-column="column" />'
 }));
 
 vi.mock('../../src/renderer/components/review/MonacoDiffSurface.vue', () => ({ default: surfaceStub }));
@@ -147,5 +147,84 @@ describe('DiffViewer', () => {
       overlay: makeOverlay({ file: { ...makeOverlay().file, path: 'src/main.py' } })
     });
     expect(wrapper.get('[data-testid="surface"]').attributes('data-language')).toBe('python');
+  });
+
+  it('同路径 contextKey 变化会销毁草稿并重置光标、编辑器引用和手动语言', async () => {
+    const wrapper = mountViewer();
+    const surface = wrapper.findComponent(surfaceStub);
+    surface.vm.$emit('draftChange', true);
+    surface.vm.$emit('cursorChange', 12, 8);
+    surface.vm.$emit('editorsReady', { side: 'old' }, { side: 'new' });
+    wrapper.findComponent(statusStub).vm.$emit('languageChange', 'rust');
+    await wrapper.vm.$nextTick();
+    const previousSurface = wrapper.get('[data-testid="surface"]').element;
+    expect(wrapper.get('[data-testid="status"]').attributes()).toMatchObject({
+      'data-mode': 'draft', 'data-language': 'rust', 'data-line': '12', 'data-column': '8'
+    });
+
+    await wrapper.setProps({ contextKey: 'range:file:next' });
+
+    expect(wrapper.get('[data-testid="surface"]').element).not.toBe(previousSurface);
+    expect(wrapper.get('[data-testid="status"]').attributes()).toMatchObject({
+      'data-mode': 'original', 'data-language': 'typescript', 'data-line': '1', 'data-column': '1'
+    });
+    expect(wrapper.findComponent(railStub).props('originalEditor')).toBeUndefined();
+    expect(wrapper.findComponent(railStub).props('modifiedEditor')).toBeUndefined();
+    expect(wrapper.emitted('draftChange')).toEqual([[true], [false]]);
+  });
+
+  it('透传块选择、光标、编辑器实例和编码变更事件', async () => {
+    const wrapper = mountViewer();
+    const block = makeOverlay().blocks[0];
+    const original = { side: 'old' };
+    const modified = { side: 'new' };
+    const surface = wrapper.findComponent(surfaceStub);
+
+    surface.vm.$emit('selected', block);
+    surface.vm.$emit('cursorChange', 7, 4);
+    surface.vm.$emit('editorsReady', original, modified);
+    wrapper.findComponent(statusStub).vm.$emit('encodingChange', 'gb18030');
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.emitted('selected')).toEqual([[block]]);
+    expect(wrapper.emitted('cursorChange')).toEqual([[7, 4]]);
+    expect(wrapper.emitted('editorsReady')).toEqual([[original, modified]]);
+    expect(wrapper.emitted('encodingChange')).toEqual([['gb18030']]);
+    expect(wrapper.findComponent(railStub).props()).toMatchObject({
+      originalEditor: original,
+      modifiedEditor: modified
+    });
+  });
+
+  it('阈值恰等时直接加载，并按 UTF-8 字节、空文本和 CRLF 计算指标', () => {
+    const exactSettings = {
+      ...settings,
+      largeFile: { maxBytes: 6, maxLines: 1 }
+    } as EditorSettings;
+    expect(mountViewer(
+      makeOverlay({ oldContent: '你好', newContent: '' }),
+      { settings: exactSettings }
+    ).find('[data-testid="surface"]').exists()).toBe(true);
+
+    const emptySettings = {
+      ...settings,
+      largeFile: { maxBytes: 0, maxLines: 0 }
+    } as EditorSettings;
+    expect(mountViewer(
+      makeOverlay({ oldContent: '', newContent: '' }),
+      { settings: emptySettings }
+    ).find('[data-testid="surface"]').exists()).toBe(true);
+
+    const unicode = mountViewer(
+      makeOverlay({ oldContent: '你好', newContent: '' }),
+      { settings: { ...settings, largeFile: { maxBytes: 5, maxLines: 100 } } }
+    );
+    expect(unicode.text()).toContain('6 字节');
+
+    const crlf = mountViewer(
+      makeOverlay({ oldContent: '甲\r\n乙', newContent: '' }),
+      { settings: { ...settings, largeFile: { maxBytes: 1_000, maxLines: 1 } } }
+    );
+    expect(crlf.text()).toContain('2 行');
   });
 });
