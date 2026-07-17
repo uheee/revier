@@ -176,15 +176,71 @@ describe('renderer reviewStore', () => {
 
     const store = useReviewStore();
     store.task = task;
-    await store.loadOverlay(file.path);
+    expect(await store.loadOverlay(file.path, 'gb18030')).toBe(true);
     store.selectBlock(block);
 
     expect(revierClient.review.getFileOverlay).toHaveBeenCalledWith({
       taskId: task.taskId,
-      filePath: file.path
+      filePath: file.path,
+      encoding: 'gb18030'
     });
     expect(store.overlay).toEqual(overlay);
     expect(store.selectedBlock).toEqual(block);
+  });
+
+  it('切换文件时立即清除旧 overlay，且旧请求不得覆盖新请求', async () => {
+    let resolveOld!: (value: FileOverlay) => void;
+    const newOverlay = { ...overlay, file: { ...file, path: 'src/new.ts' } };
+    vi.mocked(revierClient.review.getFileOverlay)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce(newOverlay);
+
+    const store = useReviewStore();
+    store.task = task;
+    store.overlay = overlay;
+    const oldRequest = store.loadOverlay(file.path, 'utf-8');
+    expect(store.overlay).toBeUndefined();
+
+    expect(await store.loadOverlay('src/new.ts', 'utf-16le')).toBe(true);
+    resolveOld(overlay);
+    expect(await oldRequest).toBe(false);
+    expect(store.overlay).toEqual(newOverlay);
+  });
+
+  it('编码重载在成功前保留旧 overlay，成功后原子替换', async () => {
+    let resolveReload!: (value: FileOverlay) => void;
+    const reloaded = { ...overlay, resolvedEncoding: 'gb18030' as const, newContent: '新内容' };
+    vi.mocked(revierClient.review.getFileOverlay).mockReturnValue(
+      new Promise((resolve) => { resolveReload = resolve; })
+    );
+
+    const store = useReviewStore();
+    store.task = task;
+    store.overlay = overlay;
+    const request = store.reloadOverlayEncoding(file.path, 'gb18030');
+    expect(store.overlay).toStrictEqual(overlay);
+    resolveReload(reloaded);
+
+    expect(await request).toBe(true);
+    expect(store.overlay).toEqual(reloaded);
+    expect(revierClient.review.getFileOverlay).toHaveBeenCalledWith({
+      taskId: task.taskId,
+      filePath: file.path,
+      encoding: 'gb18030'
+    });
+  });
+
+  it('编码重载失败时保留旧 overlay、选中块并记录错误', async () => {
+    vi.mocked(revierClient.review.getFileOverlay).mockRejectedValue(new Error('解码失败'));
+    const store = useReviewStore();
+    store.task = task;
+    store.overlay = overlay;
+    store.selectedBlock = block;
+
+    expect(await store.reloadOverlayEncoding(file.path, 'utf-16be')).toBe(false);
+    expect(store.overlay).toStrictEqual(overlay);
+    expect(store.selectedBlock).toStrictEqual(block);
+    expect(store.error).toBe('解码失败');
   });
 
   it('stores structured Tauri errors as readable messages', async () => {
@@ -240,12 +296,13 @@ describe('renderer reviewStore', () => {
 
     const store = useReviewStore();
     store.task = task;
-    await store.loadCommitOverlay(file.path, 'abc123');
+    expect(await store.loadCommitOverlay(file.path, 'abc123', 'utf-8')).toBe(true);
 
     expect(revierClient.review.getCommitOverlay).toHaveBeenCalledWith({
       taskId: task.taskId,
       filePath: file.path,
-      commitHash: 'abc123'
+      commitHash: 'abc123',
+      encoding: 'utf-8'
     });
     expect(store.drilldownOverlay).toEqual(commitOverlay);
     expect(store.selectedCommitHash).toBe('abc123');
@@ -253,5 +310,39 @@ describe('renderer reviewStore', () => {
     store.closeCommitDrilldown();
     expect(store.drilldownOverlay).toBeUndefined();
     expect(store.selectedCommitHash).toBeUndefined();
+  });
+
+  it('提交编码重载保留旧 overlay，后到达的旧请求不能覆盖新请求', async () => {
+    const commitOverlay = { ...overlay, mode: 'commit' as const, parentHash: 'parent' };
+    const latestOverlay = { ...commitOverlay, resolvedEncoding: 'utf-16le' as const };
+    let resolveOld!: (value: FileOverlay) => void;
+    vi.mocked(revierClient.review.getCommitOverlay)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce(latestOverlay);
+
+    const store = useReviewStore();
+    store.task = task;
+    store.drilldownOverlay = commitOverlay;
+    store.selectedCommitHash = 'abc123';
+    const oldRequest = store.reloadCommitOverlayEncoding(file.path, 'abc123', 'gb18030');
+    expect(store.drilldownOverlay).toStrictEqual(commitOverlay);
+
+    expect(await store.reloadCommitOverlayEncoding(file.path, 'abc123', 'utf-16le')).toBe(true);
+    resolveOld(commitOverlay);
+    expect(await oldRequest).toBe(false);
+    expect(store.drilldownOverlay).toEqual(latestOverlay);
+  });
+
+  it('提交编码重载失败时保留旧 overlay 并记录错误', async () => {
+    const commitOverlay = { ...overlay, mode: 'commit' as const, parentHash: 'parent' };
+    vi.mocked(revierClient.review.getCommitOverlay).mockRejectedValue(new Error('提交解码失败'));
+    const store = useReviewStore();
+    store.task = task;
+    store.drilldownOverlay = commitOverlay;
+    store.selectedCommitHash = 'abc123';
+
+    expect(await store.reloadCommitOverlayEncoding(file.path, 'abc123', 'gb18030')).toBe(false);
+    expect(store.drilldownOverlay).toStrictEqual(commitOverlay);
+    expect(store.error).toBe('提交解码失败');
   });
 });

@@ -8,7 +8,8 @@ import type {
   DiffBlock,
   FileOverlay,
   ReviewAuthorOptionsRequest,
-  ReviewFilters
+  ReviewFilters,
+  TextEncoding
 } from '../generated/bindings';
 
 interface ReviewState {
@@ -142,27 +143,61 @@ export const useReviewStore = defineStore('review', {
       }
     },
 
-    async loadOverlay(filePath: string): Promise<void> {
+    async loadOverlay(filePath: string, encoding?: TextEncoding): Promise<boolean> {
       if (!this.task) {
         this.error = 'No active analysis task';
-        return;
+        return false;
       }
 
       const requestId = ++this.overlayRequestId;
       this.loading = true;
       this.activeOverlayPath = filePath;
       this.error = undefined;
+      this.overlay = undefined;
       this.selectedBlock = undefined;
       this.closeCommitDrilldown();
       try {
         const overlay = await revierClient.review.getFileOverlay({
           taskId: this.task.taskId,
-          filePath
+          filePath,
+          encoding
         });
-        if (requestId !== this.overlayRequestId) return;
+        if (requestId !== this.overlayRequestId) return false;
         this.overlay = overlay;
+        return true;
       } catch (error) {
         if (requestId === this.overlayRequestId) this.error = toErrorMessage(error);
+        return false;
+      } finally {
+        if (requestId === this.overlayRequestId) {
+          this.loading = false;
+          this.activeOverlayPath = undefined;
+        }
+      }
+    },
+
+    async reloadOverlayEncoding(filePath: string, encoding: TextEncoding): Promise<boolean> {
+      if (!this.task || this.overlay?.file.path !== filePath) {
+        return false;
+      }
+
+      const requestId = ++this.overlayRequestId;
+      this.loading = true;
+      this.activeOverlayPath = filePath;
+      this.error = undefined;
+      try {
+        const overlay = await revierClient.review.getFileOverlay({
+          taskId: this.task.taskId,
+          filePath,
+          encoding
+        });
+        if (requestId !== this.overlayRequestId) return false;
+        this.overlay = overlay;
+        this.selectedBlock = undefined;
+        return true;
+      } catch (error) {
+        if (requestId === this.overlayRequestId) this.error = toErrorMessage(error);
+        return false;
       } finally {
         if (requestId === this.overlayRequestId) {
           this.loading = false;
@@ -181,10 +216,14 @@ export const useReviewStore = defineStore('review', {
       this.selectedBlock = block;
     },
 
-    async loadCommitOverlay(filePath: string, commitHash: string): Promise<void> {
+    async loadCommitOverlay(
+      filePath: string,
+      commitHash: string,
+      encoding?: TextEncoding
+    ): Promise<boolean> {
       if (!this.task) {
         this.error = 'No active analysis task';
-        return;
+        return false;
       }
 
       const requestId = ++this.drilldownRequestId;
@@ -197,12 +236,53 @@ export const useReviewStore = defineStore('review', {
         const overlay = await revierClient.review.getCommitOverlay({
           taskId: this.task.taskId,
           filePath,
-          commitHash
+          commitHash,
+          encoding
         });
-        if (requestId !== this.drilldownRequestId) return;
+        if (requestId !== this.drilldownRequestId) return false;
         this.drilldownOverlay = overlay;
+        return true;
       } catch (error) {
         if (requestId === this.drilldownRequestId) this.error = toErrorMessage(error);
+        return false;
+      } finally {
+        if (requestId === this.drilldownRequestId) {
+          this.drilldownLoading = false;
+          this.activeCommitHash = undefined;
+        }
+      }
+    },
+
+    async reloadCommitOverlayEncoding(
+      filePath: string,
+      commitHash: string,
+      encoding: TextEncoding
+    ): Promise<boolean> {
+      if (
+        !this.task
+        || this.selectedCommitHash !== commitHash
+        || this.drilldownOverlay?.file.path !== filePath
+      ) {
+        return false;
+      }
+
+      const requestId = ++this.drilldownRequestId;
+      this.drilldownLoading = true;
+      this.activeCommitHash = commitHash;
+      this.error = undefined;
+      try {
+        const overlay = await revierClient.review.getCommitOverlay({
+          taskId: this.task.taskId,
+          filePath,
+          commitHash,
+          encoding
+        });
+        if (requestId !== this.drilldownRequestId) return false;
+        this.drilldownOverlay = overlay;
+        return true;
+      } catch (error) {
+        if (requestId === this.drilldownRequestId) this.error = toErrorMessage(error);
+        return false;
       } finally {
         if (requestId === this.drilldownRequestId) {
           this.drilldownLoading = false;

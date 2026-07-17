@@ -2,12 +2,12 @@
 import { LoaderCircle, OctagonX } from 'lucide-vue-next';
 import type { DiffBlock, RelatedCommit } from '../../generated/bindings';
 import NotificationCenter from '../NotificationCenter.vue';
-import DiffBlockAuthors from './DiffBlockAuthors.vue';
 
 defineProps<{
   block?: DiffBlock;
   selectedCommitHash?: string;
   activeCommitHash?: string;
+  draft?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -37,16 +37,12 @@ function commitKey(commit: RelatedCommit): string {
       <NotificationCenter />
     </header>
 
-    <n-empty v-if="!block" size="small" description="未选择变更块" />
+    <n-empty v-if="draft" size="small" description="临时草稿不提供归因" />
+    <n-empty v-else-if="!block" size="small" description="未选择变更块" />
     <template v-else>
       <section class="detail-section">
         <span class="detail-kicker">行区间</span>
         <strong>Lines {{ block.newStart || block.oldStart }}-{{ block.newEnd || block.oldEnd }}</strong>
-      </section>
-
-      <section class="detail-section">
-        <span class="detail-kicker">作者</span>
-        <DiffBlockAuthors :authors="block.authors" :attribution="block.attribution" />
       </section>
 
       <section v-if="block.attribution?.warnings.length" class="detail-section">

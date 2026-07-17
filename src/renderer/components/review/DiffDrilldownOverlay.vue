@@ -1,16 +1,21 @@
 <script setup lang="ts">
 import { ArrowLeft, LoaderCircle, OctagonX } from 'lucide-vue-next';
-import type { FileOverlay } from '../../generated/bindings';
+import type { EditorSettings, FileOverlay, TextEncoding } from '../../generated/bindings';
 import DiffViewer from './DiffViewer.vue';
 
 defineProps<{
   overlay?: FileOverlay;
   loading?: boolean;
+  settings: EditorSettings;
+  themeName: 'revier-light' | 'revier-dark';
+  requestedEncoding: TextEncoding;
 }>();
 
 const emit = defineEmits<{
   close: [];
   cancel: [];
+  draftChange: [draft: boolean];
+  encodingChange: [encoding: TextEncoding];
 }>();
 </script>
 
@@ -31,6 +36,15 @@ const emit = defineEmits<{
         <span>取消</span>
       </n-button>
     </header>
-    <DiffViewer :overlay="overlay" :loading="loading" />
+    <DiffViewer
+      :overlay="overlay"
+      :loading="loading"
+      :settings="settings"
+      :theme-name="themeName"
+      :requested-encoding="requestedEncoding"
+      :context-key="`${overlay?.commit?.hash ?? ''}:${overlay?.parentHash ?? ''}`"
+      @draft-change="emit('draftChange', $event)"
+      @encoding-change="emit('encodingChange', $event)"
+    />
   </section>
 </template>

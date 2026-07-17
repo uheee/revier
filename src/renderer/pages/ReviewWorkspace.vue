@@ -11,6 +11,7 @@ import ReviewLayoutResizer from '../components/review/ReviewLayoutResizer.vue';
 import TaskProgress from '../components/review/TaskProgress.vue';
 import { revierClient } from '../api/revierClient';
 import { useReviewLayoutSizes } from '../composables/useReviewLayoutSizes';
+import { useEditorSettings } from '../composables/useEditorSettings';
 import { useProjectStore } from '../stores/projectStore';
 import { useReviewStore } from '../stores/reviewStore';
 import type {
@@ -18,13 +19,19 @@ import type {
   GitBranch,
   ProjectReviewFilters,
   RelatedCommit,
-  ReviewFilters
+  ReviewFilters,
+  TextEncoding
 } from '../generated/bindings';
 
 const route = useRoute();
 const router = useRouter();
 const projectStore = useProjectStore();
 const reviewStore = useReviewStore();
+const { snapshot: editorSettingsSnapshot, effectiveTheme } = useEditorSettings();
+const editorSettings = computed(() => editorSettingsSnapshot.value.settings);
+const editorThemeName = computed<'revier-light' | 'revier-dark'>(
+  () => `revier-${effectiveTheme.value}`
+);
 const {
   task,
   files,
@@ -42,6 +49,9 @@ const {
 } = storeToRefs(reviewStore);
 const projectId = computed(() => String(route.params.projectId ?? ''));
 const selectedFilePath = ref<string>();
+const requestedEncoding = ref<TextEncoding>(editorSettingsSnapshot.value.settings.defaultEncoding);
+const commitRequestedEncoding = ref<TextEncoding>(editorSettingsSnapshot.value.settings.defaultEncoding);
+const isEditorDraft = ref(false);
 const branches = ref<GitBranch[]>([]);
 const workspaceEl = ref<HTMLElement>();
 const layout = useReviewLayoutSizes();
@@ -146,7 +156,11 @@ function toProjectReviewFilters(filters: ReviewFilters): ProjectReviewFilters {
 
 async function selectFile(filePath: string): Promise<void> {
   selectedFilePath.value = filePath;
-  await reviewStore.loadOverlay(filePath);
+  isEditorDraft.value = false;
+  requestedEncoding.value = editorSettingsSnapshot.value.settings.defaultEncoding;
+  if (await reviewStore.loadOverlay(filePath, requestedEncoding.value)) {
+    isEditorDraft.value = false;
+  }
 }
 
 async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
@@ -154,7 +168,46 @@ async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
     return;
   }
 
-  await reviewStore.loadCommitOverlay(selectedFilePath.value, commit.hash);
+  isEditorDraft.value = false;
+  commitRequestedEncoding.value = editorSettingsSnapshot.value.settings.defaultEncoding;
+  if (await reviewStore.loadCommitOverlay(
+    selectedFilePath.value,
+    commit.hash,
+    commitRequestedEncoding.value
+  )) {
+    isEditorDraft.value = false;
+  }
+}
+
+function handleDraftChange(draft: boolean): void {
+  isEditorDraft.value = draft;
+  if (draft) {
+    reviewStore.selectBlock(undefined);
+  }
+}
+
+async function changeOverlayEncoding(encoding: TextEncoding): Promise<void> {
+  const filePath = selectedFilePath.value;
+  if (!filePath) return;
+  if (await reviewStore.reloadOverlayEncoding(filePath, encoding)) {
+    requestedEncoding.value = encoding;
+    isEditorDraft.value = false;
+  }
+}
+
+async function changeCommitOverlayEncoding(encoding: TextEncoding): Promise<void> {
+  const filePath = selectedFilePath.value;
+  const commitHash = reviewStore.selectedCommitHash;
+  if (!filePath || !commitHash) return;
+  if (await reviewStore.reloadCommitOverlayEncoding(filePath, commitHash, encoding)) {
+    commitRequestedEncoding.value = encoding;
+    isEditorDraft.value = false;
+  }
+}
+
+function closeCommitDrilldown(): void {
+  reviewStore.closeCommitDrilldown();
+  isEditorDraft.value = false;
 }
 </script>
 
@@ -204,13 +257,24 @@ async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
         :overlay="overlay"
         :loading="loading"
         :selected-block-id="selectedBlock?.id"
+        :settings="editorSettings"
+        :theme-name="editorThemeName"
+        :requested-encoding="requestedEncoding"
+        :context-key="`${selectedFilePath ?? ''}:${selectedCommitHash ?? ''}`"
         @selected="reviewStore.selectBlock"
+        @draft-change="handleDraftChange"
+        @encoding-change="changeOverlayEncoding"
       />
       <DiffDrilldownOverlay
         :overlay="drilldownOverlay"
         :loading="drilldownLoading"
-        @close="reviewStore.closeCommitDrilldown"
-        @cancel="reviewStore.closeCommitDrilldown"
+        :settings="editorSettings"
+        :theme-name="editorThemeName"
+        :requested-encoding="commitRequestedEncoding"
+        @draft-change="handleDraftChange"
+        @encoding-change="changeCommitOverlayEncoding"
+        @close="closeCommitDrilldown"
+        @cancel="closeCommitDrilldown"
       />
     </section>
 
@@ -221,8 +285,9 @@ async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
       :block="selectedBlock"
       :selected-commit-hash="selectedCommitHash"
       :active-commit-hash="activeCommitHash"
+      :draft="isEditorDraft"
       @commit-selected="openCommitDrilldown"
-      @cancel-commit="reviewStore.closeCommitDrilldown"
+      @cancel-commit="closeCommitDrilldown"
     />
   </main>
 </template>

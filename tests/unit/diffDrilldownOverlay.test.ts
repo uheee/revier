@@ -7,8 +7,9 @@ import type { FileOverlay } from '../../src/renderer/generated/bindings';
 vi.mock('../../src/renderer/components/review/DiffViewer.vue', () => ({
   default: {
     name: 'DiffViewer',
-    props: ['overlay', 'loading'],
-    template: '<div data-testid="diff-viewer-stub" />'
+    props: ['overlay', 'loading', 'settings', 'themeName', 'requestedEncoding', 'contextKey'],
+    emits: ['draftChange', 'encodingChange'],
+    template: '<button data-testid="diff-viewer-stub" @click="$emit(\'draftChange\', true)" @contextmenu.prevent="$emit(\'encodingChange\', \'gb18030\')" />'
   }
 }));
 
@@ -52,9 +53,12 @@ describe('DiffDrilldownOverlay', () => {
       components: { DiffDrilldownOverlay },
       data: () => ({
         loading: true,
-        overlay: undefined as FileOverlay | undefined
+        overlay: undefined as FileOverlay | undefined,
+        settings: { defaultEncoding: 'auto' },
+        themeName: 'revier-light',
+        requestedEncoding: 'auto'
       }),
-      template: '<DiffDrilldownOverlay :loading="loading" :overlay="overlay" />'
+      template: '<DiffDrilldownOverlay :loading="loading" :overlay="overlay" :settings="settings" :theme-name="themeName" :requested-encoding="requestedEncoding" />'
     });
 
     const wrapper = mount(Harness, {
@@ -79,5 +83,24 @@ describe('DiffDrilldownOverlay', () => {
 
     expect(wrapper.get('.diff-drilldown').element).toBe(initialContainer);
     expect(wrapper.text()).toContain('fix: 修复下钻闪烁');
+  });
+
+  it('向编辑器透传编码和提交上下文，并转发草稿与编码事件', async () => {
+    const settings = { defaultEncoding: 'utf-8' } as never;
+    const wrapper = mount(DiffDrilldownOverlay, {
+      props: { overlay: commitOverlay, settings, themeName: 'revier-dark', requestedEncoding: 'utf-16le' },
+      global: { stubs: { 'n-button': { template: '<button><slot /></button>' } } }
+    });
+    const viewer = wrapper.getComponent({ name: 'DiffViewer' });
+    expect(viewer.props()).toMatchObject({
+      settings,
+      themeName: 'revier-dark',
+      requestedEncoding: 'utf-16le',
+      contextKey: 'abc123:parent'
+    });
+    await wrapper.get('[data-testid="diff-viewer-stub"]').trigger('click');
+    await wrapper.get('[data-testid="diff-viewer-stub"]').trigger('contextmenu');
+    expect(wrapper.emitted('draftChange')).toEqual([[true]]);
+    expect(wrapper.emitted('encodingChange')).toEqual([['gb18030']]);
   });
 });

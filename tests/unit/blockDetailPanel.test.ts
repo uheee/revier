@@ -36,6 +36,21 @@ const block: DiffBlock = {
 };
 
 describe('BlockDetailPanel', () => {
+  it('临时草稿只显示提示，不渲染作者和提交', () => {
+    const wrapper = mount(BlockDetailPanel, {
+      props: { block, draft: true },
+      global: { stubs: {
+        NotificationCenter: true,
+        'n-empty': { props: ['description'], template: '<div>{{ description }}</div>' },
+        'n-alert': true,
+        'n-tag': true
+      } }
+    });
+    expect(wrapper.text()).toContain('临时草稿不提供归因');
+    expect(wrapper.text()).not.toContain('作者');
+    expect(wrapper.find('.commit-list').exists()).toBe(false);
+  });
+
   it('在详情标题右端渲染唯一通知入口', () => {
     const wrapper = mount(BlockDetailPanel, {
       global: {
