@@ -4,6 +4,15 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() })
 }));
 
+vi.mock('../../src/renderer/components/review/DiffViewer.vue', () => ({
+  default: {
+    name: 'DiffViewer',
+    props: ['overlay', 'loading', 'selectedBlockId'],
+    emits: ['selected'],
+    template: '<div data-testid="diff-viewer-stub" />'
+  }
+}));
+
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import ReviewWorkspace from '../../src/renderer/pages/ReviewWorkspace.vue';

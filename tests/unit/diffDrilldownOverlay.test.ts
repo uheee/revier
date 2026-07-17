@@ -4,6 +4,14 @@ import { defineComponent, nextTick } from 'vue';
 import DiffDrilldownOverlay from '../../src/renderer/components/review/DiffDrilldownOverlay.vue';
 import type { FileOverlay } from '../../src/renderer/generated/bindings';
 
+vi.mock('../../src/renderer/components/review/DiffViewer.vue', () => ({
+  default: {
+    name: 'DiffViewer',
+    props: ['overlay', 'loading'],
+    template: '<div data-testid="diff-viewer-stub" />'
+  }
+}));
+
 const commitOverlay: FileOverlay = {
   mode: 'commit',
   file: {

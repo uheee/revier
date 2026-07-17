@@ -1,168 +1,40 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-type CssRule = {
-  selectors: string[];
-  declarations: Map<string, string>;
-};
-
-function readStyles(): string {
-  return readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
+function componentSource(): string {
+  return readFileSync(
+    resolve(process.cwd(), 'src/renderer/components/review/DiffViewer.vue'),
+    'utf8'
+  );
 }
 
-function parseRules(css: string): CssRule[] {
-  const rules: CssRule[] = [];
-  const cleanCss = css.replace(/\/\*[\s\S]*?\*\//g, '');
-
-  for (const match of cleanCss.matchAll(/(?<selectors>[^{}]+)\{(?<body>[^{}]*)\}/g)) {
-    const selectors =
-      match.groups?.selectors
-        .split(',')
-        .map((selector) => selector.trim())
-        .filter((selector) => selector.length > 0) ?? [];
-    const body = match.groups?.body ?? '';
-    const declarations = parseDeclarations(body);
-
-    if (selectors.length > 0 && declarations.size > 0) {
-      rules.push({ selectors, declarations });
-    }
-  }
-
-  return rules;
+function declarationBody(source: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = source.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]*)\\}`));
+  expect(match?.groups?.body, `缺少 ${selector} 样式规则`).toBeDefined();
+  return match!.groups!.body;
 }
 
-function parseDeclarations(body: string): Map<string, string> {
-  const declarations = new Map<string, string>();
-
-  for (const rawDeclaration of body.split(';')) {
-    const declaration = rawDeclaration.trim();
-    if (declaration.length === 0) {
-      continue;
-    }
-
-    const separatorIndex = declaration.indexOf(':');
-    if (separatorIndex === -1) {
-      continue;
-    }
-
-    const property = declaration.slice(0, separatorIndex).trim();
-    const value = declaration.slice(separatorIndex + 1).trim();
-    declarations.set(property, value);
-  }
-
-  return declarations;
-}
-
-function parseDeclaration(declaration: string): [string, string] {
-  const normalizedDeclaration = declaration.trim().replace(/;$/, '');
-  const separatorIndex = normalizedDeclaration.indexOf(':');
-
-  expect(separatorIndex, `声明格式错误：${declaration}`).toBeGreaterThan(0);
-
-  const property = normalizedDeclaration.slice(0, separatorIndex).trim();
-  const value = normalizedDeclaration.slice(separatorIndex + 1).trim();
-  return [property, value];
-}
-
-function expectRule(styles: string, selector: string, declarations: string[]): void {
-  const rules = parseRules(styles).filter((candidate) => candidate.selectors.includes(selector));
-  expect(rules.length, `缺少 ${selector} 样式规则`).toBeGreaterThan(0);
-
-  const mergedDeclarations = new Map<string, string>();
-  for (const rule of rules) {
-    for (const [property, value] of rule.declarations) {
-      mergedDeclarations.set(property, value);
-    }
-  }
-
-  for (const declaration of declarations) {
-    const [property, value] = parseDeclaration(declaration);
-    expect(
-      mergedDeclarations.get(property),
-      `${selector} 缺少声明 ${declaration}`
-    ).toBe(value);
-  }
-}
-
-function expectRuleDoesNotDeclare(styles: string, selector: string, property: string): void {
-  const rules = parseRules(styles).filter((candidate) => candidate.selectors.includes(selector));
-
-  for (const rule of rules) {
-    expect(
-      rule.declarations.has(property),
-      `${selector} 不应声明 ${property}`
-    ).toBe(false);
-  }
-}
-
-describe('diff 选中态红绿侧样式', () => {
-  it.each([
-    {
-      selector: '.diff-row.is-selected',
-      declarations: ['box-shadow: none;']
-    },
-    {
-      selector: '.diff-row.is-selected.diff-row--modified .code-cell--old',
-      declarations: ['position: relative;']
-    },
-    {
-      selector: '.diff-row.is-selected.diff-row--modified .code-cell--new',
-      declarations: ['position: relative;']
-    },
-    {
-      selector: '.diff-row.is-selected.diff-row--modified::before',
-      declarations: ['background: #9f1d18;', 'left: 0;', 'width: 6px;']
-    },
-    {
-      selector: '.diff-row.is-selected.diff-row--deleted::before',
-      declarations: ['background: #9f1d18;', 'left: 0;', 'width: 6px;']
-    },
-    {
-      selector: '.diff-row.is-selected.diff-row--added::before',
-      declarations: ['background: #155f34;', 'left: 0;', 'width: 6px;']
-    },
-    {
-      selector: '.diff-row.is-selected.diff-row--modified .code-cell--new::after',
-      declarations: ['background: #155f34;', 'right: 0;', 'width: 6px;']
-    },
-    {
-      selector: '.diff-row.is-selected.diff-row--added .code-cell--new::after',
-      declarations: ['background: #155f34;', 'right: 0;', 'width: 6px;']
-    },
-    {
-      selector: '.diff-row.is-selected.is-block-start.diff-row--modified::before',
-      declarations: ['border-top-left-radius: 4px;', 'border-top-right-radius: 4px;']
-    },
-    {
-      selector: '.diff-row.is-selected.is-block-end.diff-row--modified .code-cell--new::after',
-      declarations: ['border-bottom-left-radius: 4px;', 'border-bottom-right-radius: 4px;']
-    }
-  ])('要求 $selector 包含指定声明', ({ selector, declarations }) => {
-    expectRule(readStyles(), selector, declarations);
+describe('Monaco Diff 真实块选中边界', () => {
+  it('旧侧使用深红外缘，新侧使用深绿外缘', () => {
+    const source = componentSource();
+    expect(declarationBody(source, ':global(.revier-selected-block--old)'))
+      .toContain('box-shadow: inset 6px 0 0 var(--diff-removed-strong);');
+    expect(declarationBody(source, ':global(.revier-selected-block--new)'))
+      .toContain('box-shadow: inset -6px 0 0 var(--diff-added-strong);');
   });
 
-  it('仅未选中可点击行 hover 显示左侧提示', () => {
-    const styles = readStyles();
-
-    expectRuleDoesNotDeclare(styles, '.diff-row.is-clickable:hover', 'box-shadow');
-    expectRule(styles, '.diff-row.is-clickable:not(.is-selected):hover', [
-      'box-shadow: inset 3px 0 0 var(--rv-faint);'
-    ]);
+  it('仅首行绘制 teal 上边界、尾行绘制 teal 下边界', () => {
+    const source = componentSource();
+    expect(declarationBody(source, ':global(.revier-selected-block--top)'))
+      .toContain('border-top: 2px solid var(--accent-color);');
+    expect(declarationBody(source, ':global(.revier-selected-block--bottom)'))
+      .toContain('border-bottom: 2px solid var(--accent-color);');
   });
 
-  it('相关提交选中态使用深绿色左右条', () => {
-    const styles = readStyles();
-
-    expectRule(styles, '.commit-row', ['position: relative;', 'overflow: hidden;']);
-    expectRule(styles, '.commit-row.is-selected::before', [
-      'background: #155f34;',
-      'left: 0;',
-      'width: 6px;'
-    ]);
-    expectRule(styles, '.commit-row.is-selected::after', [
-      'background: #155f34;',
-      'right: 0;',
-      'width: 6px;'
-    ]);
+  it('中间 Decoration class 不绘制横线', () => {
+    const source = componentSource();
+    const exactMiddleRule = source.match(/:global\(\.revier-selected-block\)\s*\{(?<body>[^}]*)\}/);
+    expect(exactMiddleRule?.groups?.body ?? '').not.toMatch(/border-(?:top|bottom)/);
   });
 });
