@@ -6,7 +6,11 @@
     :theme-overrides="themeOverrides"
   >
     <n-message-provider>
-      <div class="app-theme-root" :data-theme="effectiveTheme">
+      <div
+        class="app-theme-root"
+        :data-theme="effectiveTheme"
+        :style="{ fontFamily }"
+      >
         <RouterView />
       </div>
     </n-message-provider>

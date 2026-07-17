@@ -8,6 +8,10 @@ function componentSource(): string {
   );
 }
 
+function applicationStyles(): string {
+  return readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
+}
+
 function declarationBody(source: string, selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = source.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]*)\\}`));
@@ -36,5 +40,14 @@ describe('Monaco Diff 真实块选中边界', () => {
     const source = componentSource();
     const exactMiddleRule = source.match(/:global\(\.revier-selected-block\)\s*\{(?<body>[^}]*)\}/);
     expect(exactMiddleRule?.groups?.body ?? '').not.toMatch(/border-(?:top|bottom)/);
+  });
+
+  it('应用级样式不覆盖 Monaco 真实块边界，也不恢复旧行间横线', () => {
+    const styles = applicationStyles();
+
+    expect(styles).not.toMatch(/\.revier-selected-block(?!-)[^{]*\{[^}]*(?:border-top|border-bottom)/s);
+    expect(styles).not.toContain('.diff-row.is-selected');
+    expect(styles).not.toContain('.is-block-start');
+    expect(styles).not.toContain('.is-block-end');
   });
 });
