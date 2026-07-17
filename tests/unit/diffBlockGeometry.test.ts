@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { editor } from 'monaco-editor';
 import type { AuthorSummary, DiffBlock } from '../../src/renderer/generated/bindings';
 import {
   AUTHOR_POPOVER_MAX_HEIGHT,
@@ -17,8 +16,6 @@ const authors: AuthorSummary[] = [
   { name: '高频但较旧', email: 'old@example.com', commitCount: 3, lastCommittedAt: '2026-01-01T00:00:00Z' },
   { name: '高频且较新', email: 'new@example.com', commitCount: 3, lastCommittedAt: '2026-01-02T00:00:00Z' }
 ];
-const LINE_HEIGHT_OPTION = 67 as editor.EditorOption.lineHeight;
-
 function block(changeType: DiffBlock['changeType'] = 'modified'): DiffBlock {
   return {
     id: 'block-1',
@@ -57,7 +54,6 @@ function geometryEditor(options: {
         : { top: topForLine(position.lineNumber) - scrollTop, left: 0, height: lineHeight }
     )),
     getScrollTop: vi.fn(() => scrollTop),
-    getOption: vi.fn(() => lineHeight),
     getLayoutInfo: vi.fn(() => ({ height: options.layoutHeight ?? 200 }))
   };
 }
@@ -97,9 +93,9 @@ describe('diffBlockGeometry', () => {
     const original = geometryEditor({ scrollTop: 180 });
     const modified = geometryEditor({ scrollTop: 380 });
 
-    expect(getDiffBlockGeometry(block('modified'), original, modified, LINE_HEIGHT_OPTION)).toEqual({ top: 0, height: 80 });
-    expect(getDiffBlockGeometry(block('added'), original, modified, LINE_HEIGHT_OPTION)).toEqual({ top: 0, height: 80 });
-    expect(getDiffBlockGeometry(block('deleted'), original, modified, LINE_HEIGHT_OPTION)).toEqual({ top: 0, height: 80 });
+    expect(getDiffBlockGeometry(block('modified'), original, modified)).toEqual({ top: 0, height: 80 });
+    expect(getDiffBlockGeometry(block('added'), original, modified)).toEqual({ top: 0, height: 80 });
+    expect(getDiffBlockGeometry(block('deleted'), original, modified)).toEqual({ top: 0, height: 80 });
     expect(modified.getTopForLineNumber).toHaveBeenCalledWith(20);
     expect(original.getTopForLineNumber).toHaveBeenCalledWith(10);
   });
@@ -108,18 +104,18 @@ describe('diffBlockGeometry', () => {
     const original = geometryEditor();
     const modified = geometryEditor({ scrollTop: 410, layoutHeight: 60 });
 
-    expect(getDiffBlockGeometry(block(), original, modified, LINE_HEIGHT_OPTION)).toEqual({ top: 0, height: 50 });
+    expect(getDiffBlockGeometry(block(), original, modified)).toEqual({ top: 0, height: 50 });
   });
 
   it('完全出视口、零行范围或完全折叠时隐藏', () => {
     const editor = geometryEditor({ visibleRanges: [{ startLineNumber: 1, endLineNumber: 8 }] });
-    expect(getDiffBlockGeometry(block(), editor, editor, LINE_HEIGHT_OPTION)).toBeUndefined();
+    expect(getDiffBlockGeometry(block(), editor, editor)).toBeUndefined();
 
     const zeroRange = { ...block('added'), newStart: 0, newEnd: 0 };
-    expect(getDiffBlockGeometry(zeroRange, editor, editor, LINE_HEIGHT_OPTION)).toBeUndefined();
+    expect(getDiffBlockGeometry(zeroRange, editor, editor)).toBeUndefined();
 
     const folded = geometryEditor({ visibleRanges: [{ startLineNumber: 1, endLineNumber: 19 }, { startLineNumber: 24, endLineNumber: 30 }] });
-    expect(getDiffBlockGeometry(block(), folded, folded, LINE_HEIGHT_OPTION)).toBeUndefined();
+    expect(getDiffBlockGeometry(block(), folded, folded)).toBeUndefined();
   });
 
   it('跨折叠区时只使用公开可见行坐标，并为边界空位置回退到公开滚动坐标', () => {
@@ -131,7 +127,7 @@ describe('diffBlockGeometry', () => {
       topForLine: (lineNumber) => ({ 20: 380, 23: 400 }[lineNumber] ?? 0)
     });
 
-    expect(getDiffBlockGeometry(block(), editor, editor, LINE_HEIGHT_OPTION)).toEqual({ top: 0, height: 40 });
+    expect(getDiffBlockGeometry(block(), editor, editor)).toEqual({ top: 0, height: 40 });
     expect(editor.getScrollTop).toHaveBeenCalled();
   });
 
@@ -144,7 +140,7 @@ describe('diffBlockGeometry', () => {
     });
     const singleLineBlock = { ...block(), newStart: 20, newEnd: 20 };
 
-    expect(getDiffBlockGeometry(singleLineBlock, wrapped, wrapped, LINE_HEIGHT_OPTION))
+    expect(getDiffBlockGeometry(singleLineBlock, wrapped, wrapped))
       .toEqual({ top: 0, height: 60 });
   });
 
@@ -159,7 +155,7 @@ describe('diffBlockGeometry', () => {
     });
     const multilineBlock = { ...block(), newStart: 20, newEnd: 21 };
 
-    expect(getDiffBlockGeometry(multilineBlock, wrapped, wrapped, LINE_HEIGHT_OPTION))
+    expect(getDiffBlockGeometry(multilineBlock, wrapped, wrapped))
       .toEqual({ top: 0, height: 60 });
   });
 });

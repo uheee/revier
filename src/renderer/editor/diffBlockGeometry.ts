@@ -1,4 +1,3 @@
-import type { editor } from 'monaco-editor';
 import type { AuthorSummary, DiffBlock } from '../generated/bindings';
 
 export const AUTHOR_RAIL_WIDTH = 112;
@@ -27,7 +26,6 @@ export interface DiffBlockGeometryEditor {
   getBottomForLineNumber(lineNumber: number): number;
   getScrolledVisiblePosition(position: { lineNumber: number; column: number }): { top: number; height: number } | null;
   getScrollTop(): number;
-  getOption(option: editor.EditorOption.lineHeight): number;
   getLayoutInfo(): { height: number };
 }
 
@@ -73,8 +71,7 @@ function lineBottom(editorInstance: DiffBlockGeometryEditor, lineNumber: number)
 export function getDiffBlockGeometry(
   block: DiffBlock,
   originalEditor: DiffBlockGeometryEditor,
-  modifiedEditor: DiffBlockGeometryEditor,
-  lineHeightOption: editor.EditorOption.lineHeight
+  modifiedEditor: DiffBlockGeometryEditor
 ): DiffBlockGeometry | undefined {
   const usesOriginal = block.changeType === 'deleted';
   const editorInstance = usesOriginal ? originalEditor : modifiedEditor;
@@ -94,9 +91,8 @@ export function getDiffBlockGeometry(
     return undefined;
   }
 
-  const lineHeight = finiteNonNegative(editorInstance.getOption(lineHeightOption));
   const layoutHeight = finiteNonNegative(editorInstance.getLayoutInfo().height);
-  if (lineHeight === 0 || layoutHeight === 0) {
+  if (layoutHeight === 0) {
     return undefined;
   }
 

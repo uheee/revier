@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NPopover } from 'naive-ui';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { editor } from 'monaco-editor';
+import type { editor } from 'monaco-editor';
 import type { AuthorSummary, DiffBlock } from '../../generated/bindings';
 import {
   AUTHOR_POPOVER_MAX_HEIGHT,
@@ -47,8 +47,7 @@ function recomputeLayout(): void {
     const geometry = getDiffBlockGeometry(
       block,
       props.originalEditor!,
-      props.modifiedEditor!,
-      editor.EditorOption.lineHeight
+      props.modifiedEditor!
     );
     if (!geometry) {
       return [];

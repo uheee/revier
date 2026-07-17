@@ -5,10 +5,6 @@ import type { editor } from 'monaco-editor';
 import type { DiffBlock } from '../../src/renderer/generated/bindings';
 import DiffAuthorRail from '../../src/renderer/components/review/DiffAuthorRail.vue';
 
-vi.mock('monaco-editor', () => ({
-  editor: { EditorOption: { lineHeight: 67 } }
-}));
-
 const NPopoverStub = defineComponent({
   name: 'NPopover',
   inheritAttrs: false,
@@ -63,7 +59,6 @@ function mockEditor() {
     getBottomForLineNumber: vi.fn((line: number) => line * 20),
     getScrolledVisiblePosition: vi.fn((position: { lineNumber: number }) => ({ top: (position.lineNumber - 1) * 20, left: 0, height: 20 })),
     getScrollTop: vi.fn(() => 0),
-    getOption: vi.fn(() => 20),
     getLayoutInfo: vi.fn(() => ({ height: layoutHeight })),
     onDidScrollChange: vi.fn((callback: () => void) => subscribe('scroll', callback)),
     onDidLayoutChange: vi.fn((callback: () => void) => subscribe('layout', callback)),
