@@ -34,6 +34,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import ReviewWorkspace from '../../src/renderer/pages/ReviewWorkspace.vue';
 import { revierClient } from '../../src/renderer/api/revierClient';
 import { useReviewStore } from '../../src/renderer/stores/reviewStore';
+import { useNotifications } from '../../src/renderer/composables/useNotifications';
 import type { DiffBlock, FileOverlay, ReviewProject } from '../../src/renderer/generated/bindings';
 
 vi.mock('../../src/renderer/api/revierClient', () => ({
@@ -97,6 +98,7 @@ describe('ReviewWorkspace', () => {
     vi.mocked(revierClient.review.onTaskUpdate).mockReset();
     vi.mocked(revierClient.review.getFileOverlay).mockReset();
     vi.mocked(revierClient.review.getCommitOverlay).mockReset();
+    useNotifications().clear();
   });
 
   afterEach(() => {
@@ -161,6 +163,56 @@ describe('ReviewWorkspace', () => {
         })
       })
     );
+  });
+
+  it('分支元数据加载失败时通知且继续加载作者筛选', async () => {
+    vi.mocked(revierClient.projects.list).mockResolvedValue([project]);
+    vi.mocked(revierClient.projects.listBranches).mockRejectedValue(new Error('分支读取失败'));
+    vi.mocked(revierClient.review.listAuthors).mockResolvedValue([]);
+    vi.mocked(revierClient.review.onTaskUpdate).mockResolvedValue(vi.fn());
+
+    mount(ReviewWorkspace, { global: { stubs: {
+      FilterPanel: true, TaskProgress: true, ChangedFileList: true, DiffViewer: true,
+      DiffDrilldownOverlay: true, BlockDetailPanel: true, ReviewLayoutResizer: true,
+      'n-button': { template: '<button><slot /></button>' }
+    } } });
+    await flushPromises();
+
+    expect(revierClient.review.listAuthors).toHaveBeenCalledWith({
+      projectId: project.id,
+      branch: 'develop'
+    });
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '项目分支加载失败',
+        message: 'project-1：分支读取失败',
+        source: 'Review'
+      })
+    ]);
+  });
+
+  it('任务事件订阅失败时记录可追溯通知', async () => {
+    vi.mocked(revierClient.projects.list).mockResolvedValue([project]);
+    vi.mocked(revierClient.projects.listBranches).mockResolvedValue([]);
+    vi.mocked(revierClient.review.listAuthors).mockResolvedValue([]);
+    vi.mocked(revierClient.review.onTaskUpdate).mockRejectedValue(new Error('事件通道不可用'));
+
+    mount(ReviewWorkspace, { global: { stubs: {
+      FilterPanel: true, TaskProgress: true, ChangedFileList: true, DiffViewer: true,
+      DiffDrilldownOverlay: true, BlockDetailPanel: true, ReviewLayoutResizer: true,
+      'n-button': { template: '<button><slot /></button>' }
+    } } });
+    await flushPromises();
+
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '分析任务事件订阅失败',
+        message: 'project-1：事件通道不可用',
+        source: 'Review'
+      })
+    ]);
   });
 
   it('草稿中直接切换文件会替换编辑器上下文且不弹确认，并保留真实筛选栏和文件列表', async () => {

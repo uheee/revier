@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { FolderOpen } from 'lucide-vue-next';
-import { computed, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref } from 'vue';
 import { toErrorMessage } from '../../api/errors';
 import { revierClient } from '../../api/revierClient';
+import { addNotification } from '../../composables/useNotifications';
 
 const props = withDefaults(
   defineProps<{
@@ -25,6 +26,11 @@ const form = reactive({
   name: ''
 });
 const directoryError = ref<string>();
+let directoryRequestId = 0;
+
+onBeforeUnmount(() => {
+  ++directoryRequestId;
+});
 
 const canSubmit = computed(() => form.repoPath.trim().length > 0 && !props.loading);
 
@@ -42,9 +48,11 @@ function submit(): void {
 }
 
 async function selectDirectory(): Promise<void> {
+  const requestId = ++directoryRequestId;
   directoryError.value = undefined;
   try {
     const selection = await revierClient.projects.selectDirectory();
+    if (requestId !== directoryRequestId) return;
     if (!selection) {
       return;
     }
@@ -52,7 +60,16 @@ async function selectDirectory(): Promise<void> {
     form.repoPath = selection.path;
     form.name = selection.name;
   } catch (error) {
-    directoryError.value = toErrorMessage(error);
+    if (requestId === directoryRequestId) {
+      const message = toErrorMessage(error);
+      directoryError.value = message;
+      addNotification({
+        type: 'error',
+        title: '仓库目录选择失败',
+        message,
+        source: 'Projects'
+      });
+    }
   }
 }
 </script>

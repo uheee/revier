@@ -135,6 +135,115 @@ describe('renderer reviewStore', () => {
     expect(store.error).toBeUndefined();
   });
 
+  it('分析启动失败时保留局部错误并记录一次带筛选上下文的通知', async () => {
+    vi.mocked(revierClient.review.startAnalysis).mockRejectedValue(new Error('无法启动分析'));
+
+    const store = useReviewStore();
+    await store.start(filters);
+
+    expect(store.error).toBe('无法启动分析');
+    expect(store.loading).toBe(false);
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '分析启动失败',
+        message: 'project-1 / develop：无法启动分析',
+        source: 'Review'
+      })
+    ]);
+  });
+
+  it('已被新分析替代的启动失败不得产生陈旧通知', async () => {
+    let rejectOld!: (reason: unknown) => void;
+    vi.mocked(revierClient.review.startAnalysis)
+      .mockReturnValueOnce(new Promise((_, reject) => { rejectOld = reject; }))
+      .mockResolvedValueOnce(runningTask);
+
+    const store = useReviewStore();
+    const oldRequest = store.start(filters);
+    await store.start({ ...filters, branch: 'main' });
+    rejectOld(new Error('旧分析失败'));
+    await oldRequest;
+
+    expect(store.error).toBeUndefined();
+    expect(useNotifications().notifications.value).toEqual([]);
+  });
+
+  it('完成后文件列表加载失败时记录通知，过期结果不通知', async () => {
+    vi.mocked(revierClient.review.listChangedFiles).mockRejectedValue(new Error('文件列表不可用'));
+    const store = useReviewStore();
+    store.task = runningTask;
+
+    await store.handleTaskUpdate(task);
+
+    expect(store.error).toBe('文件列表不可用');
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '变更文件加载失败',
+        message: 'task-1：文件列表不可用',
+        source: 'Review'
+      })
+    ]);
+  });
+
+  it('分析取消后到达的文件列表失败不得产生陈旧通知', async () => {
+    let rejectFiles!: (reason: unknown) => void;
+    vi.mocked(revierClient.review.listChangedFiles).mockReturnValue(
+      new Promise((_, reject) => { rejectFiles = reject; })
+    );
+    vi.mocked(revierClient.review.cancelAnalysis).mockResolvedValue(undefined);
+    const store = useReviewStore();
+    store.task = runningTask;
+
+    const completion = store.handleTaskUpdate(task);
+    await store.cancelAnalysis();
+    rejectFiles(new Error('取消后的文件列表失败'));
+    await completion;
+
+    expect(useNotifications().notifications.value).toEqual([]);
+  });
+
+  it('后端任务失败只记录一次通知并保留任务错误', async () => {
+    const failedTask: AnalysisTaskSnapshot = {
+      ...runningTask,
+      status: 'failed',
+      stage: 'ready',
+      error: { code: 'ANALYSIS_FAILED', message: '仓库分析失败' }
+    };
+    const store = useReviewStore();
+    store.task = runningTask;
+
+    await store.handleTaskUpdate(failedTask);
+    await store.handleTaskUpdate(failedTask);
+
+    expect(store.error).toBe('仓库分析失败');
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '分析任务失败',
+        message: 'task-1：仓库分析失败',
+        source: 'Review'
+      })
+    ]);
+  });
+
+  it('用户已取消后迟到的失败事件不视为新的运行时错误', async () => {
+    const failedTask: AnalysisTaskSnapshot = {
+      ...runningTask,
+      status: 'failed',
+      stage: 'ready',
+      error: { code: 'ANALYSIS_FAILED', message: '迟到失败' }
+    };
+    const store = useReviewStore();
+    store.task = { ...runningTask, status: 'cancelled', stage: 'ready' };
+
+    await store.handleTaskUpdate(failedTask);
+
+    expect(store.task?.status).toBe('cancelled');
+    expect(useNotifications().notifications.value).toEqual([]);
+  });
+
   it('keeps completed task when completion event arrives before start returns', async () => {
     let resolveStart!: (value: AnalysisTaskSnapshot) => void;
     vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
@@ -171,6 +280,51 @@ describe('renderer reviewStore', () => {
     expect(store.task).toEqual(task);
     expect(store.files).toEqual([file]);
     expect(store.loading).toBe(false);
+  });
+
+  it('取消 IPC 失败时保留可理解状态并通知，成功取消不通知', async () => {
+    vi.mocked(revierClient.review.cancelAnalysis)
+      .mockRejectedValueOnce(new Error('无法联系后端'))
+      .mockResolvedValueOnce(undefined);
+    const store = useReviewStore();
+    store.task = runningTask;
+    store.loading = true;
+
+    await store.cancelAnalysis();
+
+    expect(store.task?.status).toBe('cancelled');
+    expect(store.error).toBe('无法联系后端');
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '取消分析失败',
+        message: 'task-1：无法联系后端',
+        source: 'Review'
+      })
+    ]);
+
+    useNotifications().clear();
+    store.task = runningTask;
+    await store.cancelAnalysis();
+    expect(useNotifications().notifications.value).toEqual([]);
+  });
+
+  it('被新分析替代的取消请求失败不得产生陈旧通知', async () => {
+    let rejectCancel!: (reason: unknown) => void;
+    vi.mocked(revierClient.review.cancelAnalysis).mockReturnValue(
+      new Promise((_, reject) => { rejectCancel = reject; })
+    );
+    vi.mocked(revierClient.review.startAnalysis).mockResolvedValue(runningTask);
+    const store = useReviewStore();
+    store.task = runningTask;
+
+    const cancellation = store.cancelAnalysis();
+    await store.start({ ...filters, branch: 'main' });
+    rejectCancel(new Error('旧取消失败'));
+    await cancellation;
+
+    expect(store.error).toBeUndefined();
+    expect(useNotifications().notifications.value).toEqual([]);
   });
 
   it('loads overlay and selects a diff block', async () => {
@@ -311,6 +465,48 @@ describe('renderer reviewStore', () => {
     expect(revierClient.review.listAuthors).toHaveBeenCalledWith(request);
     expect(store.authors).toEqual(authors);
     expect(store.authorsLoading).toBe(false);
+  });
+
+  it('作者筛选加载失败只影响当前请求并记录上下文通知', async () => {
+    const request: ReviewAuthorOptionsRequest = {
+      projectId: 'project-1',
+      branch: 'develop'
+    };
+    vi.mocked(revierClient.review.listAuthors).mockRejectedValue(new Error('作者列表失败'));
+
+    const store = useReviewStore();
+    await store.loadAuthors(request);
+
+    expect(store.error).toBe('作者列表失败');
+    expect(store.authorsLoading).toBe(false);
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '作者筛选加载失败',
+        message: 'project-1 / develop：作者列表失败',
+        source: 'Review'
+      })
+    ]);
+  });
+
+  it('旧作者筛选请求失败不得覆盖新结果或产生陈旧通知', async () => {
+    let rejectOld!: (reason: unknown) => void;
+    const authors = [
+      { key: 'alice@example.com', name: 'Alice', email: 'alice@example.com', commitCount: 2 }
+    ];
+    vi.mocked(revierClient.review.listAuthors)
+      .mockReturnValueOnce(new Promise((_, reject) => { rejectOld = reject; }))
+      .mockResolvedValueOnce(authors);
+    const store = useReviewStore();
+
+    const oldRequest = store.loadAuthors({ projectId: 'project-1', branch: 'develop' });
+    await store.loadAuthors({ projectId: 'project-1', branch: 'main' });
+    rejectOld(new Error('旧作者请求失败'));
+    await oldRequest;
+
+    expect(store.authors).toStrictEqual(authors);
+    expect(store.error).toBeUndefined();
+    expect(useNotifications().notifications.value).toEqual([]);
   });
 
   it('loads and clears commit drilldown overlay', async () => {

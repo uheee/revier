@@ -10,6 +10,8 @@ import FilterPanel from '../components/review/FilterPanel.vue';
 import ReviewLayoutResizer from '../components/review/ReviewLayoutResizer.vue';
 import TaskProgress from '../components/review/TaskProgress.vue';
 import { revierClient } from '../api/revierClient';
+import { toErrorMessage } from '../api/errors';
+import { addNotification } from '../composables/useNotifications';
 import { useReviewLayoutSizes } from '../composables/useReviewLayoutSizes';
 import { useEditorSettings } from '../composables/useEditorSettings';
 import { useProjectStore } from '../stores/projectStore';
@@ -64,16 +66,38 @@ const initialAuthorBranch = computed(() => savedFilters.value?.branch ?? default
 let unsubscribe: (() => void) | undefined;
 let pendingReviewFilterSave: number | undefined;
 let latestReviewFilters: ReviewFilters | undefined;
+let workspaceActive = false;
+let metadataRequestId = 0;
 
 onMounted(async () => {
+  workspaceActive = true;
+  const subscribedProjectId = projectId.value;
   layout.setContainer(workspaceEl.value);
   void initializeProject();
-  unsubscribe = await revierClient.review.onTaskUpdate((snapshot) => {
-    void handleTaskUpdate(snapshot);
-  });
+  try {
+    const stop = await revierClient.review.onTaskUpdate((snapshot) => {
+      void handleTaskUpdate(snapshot);
+    });
+    if (workspaceActive) {
+      unsubscribe = stop;
+    } else {
+      stop();
+    }
+  } catch (error) {
+    if (workspaceActive) {
+      addNotification({
+        type: 'error',
+        title: '分析任务事件订阅失败',
+        message: `${subscribedProjectId}：${toErrorMessage(error)}`,
+        source: 'Review'
+      });
+    }
+  }
 });
 
 onBeforeUnmount(() => {
+  workspaceActive = false;
+  ++metadataRequestId;
   flushPendingReviewFilterSave();
   unsubscribe?.();
 });
@@ -109,9 +133,24 @@ async function loadReviewMetadata(): Promise<void> {
     return;
   }
 
-  branches.value = await revierClient.projects.listBranches(projectId.value);
+  const requestId = ++metadataRequestId;
+  const metadataProjectId = projectId.value;
+  try {
+    const loadedBranches = await revierClient.projects.listBranches(metadataProjectId);
+    if (!workspaceActive || requestId !== metadataRequestId) return;
+    branches.value = loadedBranches;
+  } catch (error) {
+    if (!workspaceActive || requestId !== metadataRequestId) return;
+    addNotification({
+      type: 'error',
+      title: '项目分支加载失败',
+      message: `${metadataProjectId}：${toErrorMessage(error)}`,
+      source: 'Review'
+    });
+  }
+  if (!workspaceActive || requestId !== metadataRequestId) return;
   await reviewStore.loadAuthors({
-    projectId: projectId.value,
+    projectId: metadataProjectId,
     branch: initialAuthorBranch.value
   });
 }

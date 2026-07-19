@@ -30,6 +30,8 @@ interface ReviewState {
   analysisRequestId: number;
   overlayRequestId: number;
   drilldownRequestId: number;
+  authorsRequestId: number;
+  notifiedFailedTaskId?: string;
 }
 
 function isTerminalStatus(status: AnalysisTaskSnapshot['status']): boolean {
@@ -57,11 +59,14 @@ export const useReviewStore = defineStore('review', {
     error: undefined,
     analysisRequestId: 0,
     overlayRequestId: 0,
-    drilldownRequestId: 0
+    drilldownRequestId: 0,
+    authorsRequestId: 0,
+    notifiedFailedTaskId: undefined
   }),
   actions: {
     async start(filters: ReviewFilters): Promise<void> {
       const requestId = ++this.analysisRequestId;
+      this.notifiedFailedTaskId = undefined;
       this.error = undefined;
       this.overlay = undefined;
       this.selectedBlock = undefined;
@@ -84,8 +89,15 @@ export const useReviewStore = defineStore('review', {
           await this.handleTaskUpdate(task);
         }
       } catch (error) {
-        if (requestId === this.analysisRequestId) this.error = toErrorMessage(error);
-        if (requestId === this.analysisRequestId) this.loading = false;
+        if (requestId === this.analysisRequestId) {
+          const message = toErrorMessage(error);
+          this.error = message;
+          this.loading = false;
+          notifyReviewError(
+            '分析启动失败',
+            `${filters.projectId} / ${filters.branch ?? 'HEAD'}：${message}`
+          );
+        }
       }
     },
 
@@ -94,6 +106,9 @@ export const useReviewStore = defineStore('review', {
         return;
       }
       if (this.task && isTerminalStatus(this.task.status) && !isTerminalStatus(snapshot.status)) {
+        return;
+      }
+      if (this.task?.status === 'cancelled' && snapshot.status === 'failed') {
         return;
       }
 
@@ -107,7 +122,11 @@ export const useReviewStore = defineStore('review', {
           this.files = files;
           this.error = undefined;
         } catch (error) {
-          if (requestId === this.analysisRequestId) this.error = toErrorMessage(error);
+          if (requestId === this.analysisRequestId && this.task?.taskId === snapshot.taskId) {
+            const message = toErrorMessage(error);
+            this.error = message;
+            notifyReviewError('变更文件加载失败', `${snapshot.taskId}：${message}`);
+          }
         } finally {
           if (requestId === this.analysisRequestId && this.task?.taskId === snapshot.taskId) {
             this.loading = false;
@@ -117,7 +136,12 @@ export const useReviewStore = defineStore('review', {
       }
 
       if (snapshot.status === 'failed') {
-        this.error = snapshot.error?.message ?? '分析任务失败';
+        const message = snapshot.error?.message ?? '分析任务失败';
+        this.error = message;
+        if (this.notifiedFailedTaskId !== snapshot.taskId) {
+          this.notifiedFailedTaskId = snapshot.taskId;
+          notifyReviewError('分析任务失败', `${snapshot.taskId}：${message}`);
+        }
         this.loading = false;
         return;
       }
@@ -129,7 +153,7 @@ export const useReviewStore = defineStore('review', {
 
     async cancelAnalysis(): Promise<void> {
       const taskId = this.task?.taskId;
-      ++this.analysisRequestId;
+      const requestId = ++this.analysisRequestId;
       this.loading = false;
       this.cancelOverlay();
       this.closeCommitDrilldown();
@@ -144,7 +168,19 @@ export const useReviewStore = defineStore('review', {
         };
       }
       if (taskId) {
-        await revierClient.review.cancelAnalysis(taskId);
+        try {
+          await revierClient.review.cancelAnalysis(taskId);
+        } catch (error) {
+          if (
+            requestId === this.analysisRequestId
+            && this.task?.taskId === taskId
+            && this.task.status === 'cancelled'
+          ) {
+            const message = toErrorMessage(error);
+            this.error = message;
+            notifyReviewError('取消分析失败', `${taskId}：${message}`);
+          }
+        }
       }
     },
 
@@ -325,14 +361,26 @@ export const useReviewStore = defineStore('review', {
     },
 
     async loadAuthors(request: ReviewAuthorOptionsRequest): Promise<void> {
+      const requestId = ++this.authorsRequestId;
       this.authorsLoading = true;
       this.error = undefined;
       try {
-        this.authors = await revierClient.review.listAuthors(request);
+        const authors = await revierClient.review.listAuthors(request);
+        if (requestId !== this.authorsRequestId) return;
+        this.authors = authors;
       } catch (error) {
-        this.error = toErrorMessage(error);
+        if (requestId === this.authorsRequestId) {
+          const message = toErrorMessage(error);
+          this.error = message;
+          notifyReviewError(
+            '作者筛选加载失败',
+            `${request.projectId} / ${request.branch ?? 'HEAD'}：${message}`
+          );
+        }
       } finally {
-        this.authorsLoading = false;
+        if (requestId === this.authorsRequestId) {
+          this.authorsLoading = false;
+        }
       }
     }
   }
