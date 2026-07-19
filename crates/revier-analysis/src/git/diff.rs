@@ -325,11 +325,13 @@ fn map_tree_change(
                 commit,
                 parent,
                 parent_index,
-                location,
-                None,
-                "added",
-                is_binary,
-                None,
+                FileChangeDetails {
+                    path: location,
+                    old_path: None,
+                    status: "added",
+                    is_binary,
+                    similarity: None,
+                },
             )))
         }
         gix_diff::tree_with_rewrites::ChangeRef::Deletion {
@@ -346,11 +348,13 @@ fn map_tree_change(
                 commit,
                 parent,
                 parent_index,
-                location,
-                None,
-                "deleted",
-                is_binary,
-                None,
+                FileChangeDetails {
+                    path: location,
+                    old_path: None,
+                    status: "deleted",
+                    is_binary,
+                    similarity: None,
+                },
             )))
         }
         gix_diff::tree_with_rewrites::ChangeRef::Modification {
@@ -369,11 +373,13 @@ fn map_tree_change(
                 commit,
                 parent,
                 parent_index,
-                location,
-                None,
-                "modified",
-                is_binary,
-                None,
+                FileChangeDetails {
+                    path: location,
+                    old_path: None,
+                    status: "modified",
+                    is_binary,
+                    similarity: None,
+                },
             )))
         }
         gix_diff::tree_with_rewrites::ChangeRef::Rewrite {
@@ -394,11 +400,13 @@ fn map_tree_change(
                 commit,
                 parent,
                 parent_index,
-                location,
-                Some(source_location),
-                "renamed",
-                is_binary,
-                diff.map(|stats| stats.similarity),
+                FileChangeDetails {
+                    path: location,
+                    old_path: Some(source_location),
+                    status: "renamed",
+                    is_binary,
+                    similarity: diff.map(|stats| stats.similarity),
+                },
             )))
         }
         _ => Ok(None),
@@ -409,25 +417,31 @@ fn file_change(
     commit: &gix::Commit<'_>,
     parent: &gix::Commit<'_>,
     parent_index: usize,
-    path: &gix::bstr::BStr,
-    old_path: Option<&gix::bstr::BStr>,
-    status: &str,
-    is_binary: bool,
-    similarity: Option<f32>,
+    details: FileChangeDetails<'_>,
 ) -> CommitFileChange {
     CommitFileChange {
         commit_hash: commit.id.to_string(),
         parent_hash: parent.id.to_string(),
         parent_index,
-        path: String::from_utf8_lossy(path.as_ref()).into_owned(),
-        old_path: old_path.map(|value| String::from_utf8_lossy(value.as_ref()).into_owned()),
-        status: status.to_string(),
+        path: String::from_utf8_lossy(details.path.as_ref()).into_owned(),
+        old_path: details
+            .old_path
+            .map(|value| String::from_utf8_lossy(value.as_ref()).into_owned()),
+        status: details.status.to_string(),
         additions: 0,
         deletions: 0,
-        is_binary,
-        is_previewable: !is_binary,
-        similarity,
+        is_binary: details.is_binary,
+        is_previewable: !details.is_binary,
+        similarity: details.similarity,
     }
+}
+
+struct FileChangeDetails<'a> {
+    path: &'a gix::bstr::BStr,
+    old_path: Option<&'a gix::bstr::BStr>,
+    status: &'a str,
+    is_binary: bool,
+    similarity: Option<f32>,
 }
 
 fn blob_contains_nul(

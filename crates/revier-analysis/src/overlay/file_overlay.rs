@@ -65,36 +65,33 @@ pub fn build_file_overlay(
         )));
     }
     let diff = build_overlay_diff(&old_text, &new_text);
+    let attribution_options = crate::attribution::patch_inference::AttributionOptions {
+        encoding: resolved,
+        authors: &args.common.authors,
+        author_query: args.common.author_query.as_deref(),
+        message: args.common.message.as_deref(),
+    };
     let blocks = crate::attribution::patch_inference::attach_patch_inference(
         &context,
         diff.blocks,
-        resolved,
         &change.path,
         change.old_path.as_deref(),
-        &args.common.authors,
-        args.common.author_query.as_deref(),
-        args.common.message.as_deref(),
+        &attribution_options,
     )?;
     let blocks = crate::attribution::blame::attach_blame_attribution(
         &context,
         &args.common.head,
         &change.path,
         blocks,
-        resolved,
-        &args.common.authors,
-        args.common.author_query.as_deref(),
-        args.common.message.as_deref(),
+        &attribution_options,
     )?;
     let blocks = crate::attribution::deletion_trace::attach_deletion_trace(
         &context,
         blocks,
-        resolved,
         &path_candidates.paths,
         &change.path,
         change.old_path.as_deref(),
-        &args.common.authors,
-        args.common.author_query.as_deref(),
-        args.common.message.as_deref(),
+        &attribution_options,
     )?;
 
     Ok(FileOverlayCommandOutput {

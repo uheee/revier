@@ -380,11 +380,13 @@ fn build_glob_matcher(rules: &[String]) -> Result<GlobMatcher, AppError> {
 
 fn path_matches(matcher: &GlobMatcher, path: &str, old_path: Option<&str>) -> bool {
     let candidates = old_path.map_or_else(|| vec![path], |old| vec![path, old]);
-    let included = matcher.include.as_ref().map_or(true, |set| {
-        candidates.iter().any(|candidate| set.is_match(candidate))
-    });
-    let excluded = matcher.exclude.as_ref().map_or(false, |set| {
-        candidates.iter().any(|candidate| set.is_match(candidate))
-    });
+    let included = matcher
+        .include
+        .as_ref()
+        .is_none_or(|set| candidates.iter().any(|candidate| set.is_match(candidate)));
+    let excluded = matcher
+        .exclude
+        .as_ref()
+        .is_some_and(|set| candidates.iter().any(|candidate| set.is_match(candidate)));
     included && !excluded
 }

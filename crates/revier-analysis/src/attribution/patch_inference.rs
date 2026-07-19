@@ -14,17 +14,21 @@ use std::collections::HashSet;
 
 const PATCH_INFERENCE_METHOD: &str = "patch-inference";
 
+pub struct AttributionOptions<'a> {
+    pub encoding: ResolvedTextEncoding,
+    pub authors: &'a [String],
+    pub author_query: Option<&'a str>,
+    pub message: Option<&'a str>,
+}
+
 pub fn attach_patch_inference(
     context: &AttributionContext<'_>,
     blocks: Vec<DiffBlockOutput>,
-    encoding: ResolvedTextEncoding,
     file_path: &str,
     old_path: Option<&str>,
-    authors: &[String],
-    author_query: Option<&str>,
-    message: Option<&str>,
+    options: &AttributionOptions<'_>,
 ) -> Result<Vec<DiffBlockOutput>, AppError> {
-    let filter = FilterMatcher::new(authors, author_query, message);
+    let filter = FilterMatcher::new(options.authors, options.author_query, options.message);
     let mut candidates = Vec::new();
     let mut active_paths = initial_active_paths(file_path, old_path);
 
@@ -32,7 +36,7 @@ pub fn attach_patch_inference(
         let commit = commit_lookup::get_commit(context, hash)?;
         let changes = commit_file_changes(context.repo, &commit.hash)?;
         let touched_ranges =
-            touched_ranges_for_commit(context, &commit, &changes, &active_paths, encoding)?;
+            touched_ranges_for_commit(context, &commit, &changes, &active_paths, options.encoding)?;
         advance_active_paths(&mut active_paths, &changes);
         if touched_ranges.is_empty() {
             continue;
@@ -71,7 +75,7 @@ fn touched_ranges_for_commit(
         .iter()
         .filter(|change| change_touches_active_path(change, active_paths))
     {
-        let old_text = match old_change_path(&change) {
+        let old_text = match old_change_path(change) {
             Some(path) => read_text_at_commit_with_encoding(
                 context.repo,
                 &change.parent_hash,
@@ -80,7 +84,7 @@ fn touched_ranges_for_commit(
             )?,
             None => String::new(),
         };
-        let new_text = match new_change_path(&change) {
+        let new_text = match new_change_path(change) {
             Some(path) => {
                 read_text_at_commit_with_encoding(context.repo, &commit.hash, path, encoding)?
             }

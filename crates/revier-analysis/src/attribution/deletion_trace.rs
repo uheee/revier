@@ -1,6 +1,6 @@
 use crate::attribution::commit_lookup;
 use crate::attribution::context::AttributionContext;
-use crate::attribution::patch_inference::FilterMatcher;
+use crate::attribution::patch_inference::{AttributionOptions, FilterMatcher};
 use crate::contracts::ResolvedTextEncoding;
 use crate::error::AppError;
 use crate::git::blob::read_text_at_commit_with_encoding;
@@ -19,27 +19,23 @@ const PRECISE_CONFIDENCE: &str = "precise";
 pub fn attach_deletion_trace(
     context: &AttributionContext<'_>,
     blocks: Vec<DiffBlockOutput>,
-    encoding: ResolvedTextEncoding,
     candidate_paths: &[String],
     file_path: &str,
     old_path: Option<&str>,
-    authors: &[String],
-    author_query: Option<&str>,
-    message: Option<&str>,
+    options: &AttributionOptions<'_>,
 ) -> Result<Vec<DiffBlockOutput>, AppError> {
-    let filter = FilterMatcher::new(authors, author_query, message);
+    let filter = FilterMatcher::new(options.authors, options.author_query, options.message);
+    let scope = DeletionTraceScope {
+        candidate_paths,
+        file_path,
+        old_path,
+        filter: &filter,
+        encoding: options.encoding,
+    };
     let mut traced_blocks = Vec::new();
 
     for block in blocks {
-        traced_blocks.push(attach_block_deletion_trace(
-            context,
-            block,
-            candidate_paths,
-            file_path,
-            old_path,
-            &filter,
-            encoding,
-        )?);
+        traced_blocks.push(attach_block_deletion_trace(context, block, &scope)?);
     }
 
     Ok(traced_blocks)
@@ -48,11 +44,7 @@ pub fn attach_deletion_trace(
 fn attach_block_deletion_trace(
     context: &AttributionContext<'_>,
     mut block: DiffBlockOutput,
-    candidate_paths: &[String],
-    file_path: &str,
-    old_path: Option<&str>,
-    filter: &FilterMatcher,
-    encoding: ResolvedTextEncoding,
+    scope: &DeletionTraceScope<'_>,
 ) -> Result<DiffBlockOutput, AppError> {
     if !has_old_side_deletion(&block) {
         return Ok(block);
@@ -63,16 +55,7 @@ fn attach_block_deletion_trace(
         return Ok(block);
     }
 
-    let related_commits = find_deletion_commits(
-        context,
-        &block,
-        &deleted_lines,
-        candidate_paths,
-        file_path,
-        old_path,
-        filter,
-        encoding,
-    )?;
+    let related_commits = find_deletion_commits(context, &block, &deleted_lines, scope)?;
     if related_commits.is_empty() {
         return Ok(block);
     }
@@ -90,16 +73,13 @@ fn find_deletion_commits(
     context: &AttributionContext<'_>,
     block: &DiffBlockOutput,
     deleted_lines: &[String],
-    candidate_paths: &[String],
-    file_path: &str,
-    old_path: Option<&str>,
-    filter: &FilterMatcher,
-    encoding: ResolvedTextEncoding,
+    scope: &DeletionTraceScope<'_>,
 ) -> Result<Vec<RelatedCommitOutput>, AppError> {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
-    let candidate_paths = candidate_path_set(candidate_paths, file_path, old_path);
-    let mut active_paths = initial_active_paths(file_path, old_path, &candidate_paths);
+    let candidate_paths =
+        candidate_path_set(scope.candidate_paths, scope.file_path, scope.old_path);
+    let mut active_paths = initial_active_paths(scope.file_path, scope.old_path, &candidate_paths);
 
     for hash in &context.range_hashes {
         let commit = commit_lookup::get_commit(context, hash)?;
@@ -114,13 +94,19 @@ fn find_deletion_commits(
             .iter()
             .filter(|change| change_touches_active_path(change, &active_paths))
         {
-            let touched_ranges =
-                deletion_touched_ranges(context, &commit, change, block, deleted_lines, encoding)?;
+            let touched_ranges = deletion_touched_ranges(
+                context,
+                &commit,
+                change,
+                block,
+                deleted_lines,
+                scope.encoding,
+            )?;
             if touched_ranges.len() != 1 {
                 continue;
             }
             if seen.insert(commit.hash.clone()) {
-                let matched_by_filter = filter.matches(&commit);
+                let matched_by_filter = scope.filter.matches(&commit);
                 candidates.push(DeletionTraceCandidate {
                     commit,
                     matched_by_filter,
@@ -141,6 +127,14 @@ fn find_deletion_commits(
         .map(DeletionTraceCandidate::into_related_commit)
         .into_iter()
         .collect())
+}
+
+struct DeletionTraceScope<'a> {
+    candidate_paths: &'a [String],
+    file_path: &'a str,
+    old_path: Option<&'a str>,
+    filter: &'a FilterMatcher,
+    encoding: ResolvedTextEncoding,
 }
 
 fn deletion_touched_ranges(

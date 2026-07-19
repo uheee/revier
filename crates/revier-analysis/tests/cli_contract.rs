@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 mod fixtures;
 
 use serde_json::Value;

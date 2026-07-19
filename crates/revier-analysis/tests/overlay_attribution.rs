@@ -482,7 +482,7 @@ fn rename_overlay_uses_old_path_and_does_not_drop_blocks() {
     let blocks = value["overlay"]["blocks"].as_array().expect("blocks 数组");
 
     assert_eq!(value["overlay"]["file"]["oldPath"], "src/old.txt");
-    assert!(blocks.len() >= 1, "rename overlay 不应丢失 blocks");
+    assert!(!blocks.is_empty(), "rename overlay 不应丢失 blocks");
 }
 
 fn run_file_overlay(fixture: &fixtures::FixtureRepo, file: &str) -> Value {

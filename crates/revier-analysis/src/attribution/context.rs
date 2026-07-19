@@ -1,6 +1,6 @@
 use crate::cli::OverlayCommonArgs;
 use crate::error::AppError;
-use std::path::PathBuf;
+use std::path::Path;
 
 const INDEX_UNAVAILABLE_WARNING: &str = "索引不可用，已即时计算 overlay 结果";
 
@@ -80,7 +80,7 @@ impl<'repo> AttributionContext<'repo> {
     }
 }
 
-fn display_path(path: &PathBuf) -> String {
+fn display_path(path: &Path) -> String {
     path.display().to_string()
 }
 
