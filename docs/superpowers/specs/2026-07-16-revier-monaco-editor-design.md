@@ -1,5 +1,8 @@
 # Revier Monaco 可交互 Diff 编辑器设计
 
+> **实现状态（2026-07-19）：已完成。** 最终实现与真实 Tauri 验收结果见
+> [Monaco 编辑器最终验收记录](../verification/2026-07-19-revier-monaco-editor.md)。
+
 > 状态：已确认。本文记录 Revier 将现有自绘 Diff 阅读区升级为 Monaco 原生 Diff Editor 的完整设计。本文是后续实施计划、测试与验收的唯一范围依据。
 
 ## 关联成果
@@ -166,7 +169,7 @@ Tauri Commands
 - 铃铛始终可见；仅存在未读通知时在按钮右下角显示红色数量徽标，1 至 99 显示实际数量，超过 99 显示 `99+`。
 - 点击铃铛从所在页面的右上操作区向下展开通知列表；配置与运行时警告不再占用顶部横幅或编辑器状态栏。
 
-### `editorLanguageRegistry.ts`
+### `editorLanguages.ts`
 
 - 维护扩展名、文件名与 Monaco/Shiki 语言 ID 的映射。
 - 只加载已确认语言的语法资源。

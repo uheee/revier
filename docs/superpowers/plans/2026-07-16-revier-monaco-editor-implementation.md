@@ -1,5 +1,10 @@
 # Revier Monaco 可交互 Diff 编辑器 Implementation Plan
 
+> **实施状态（2026-07-19）：已完成。** Task 1–13 已落地并通过最终验收；自动化、
+> Tauri 交互、配置行为与静态审计结果见
+> [最终验收记录](../verification/2026-07-19-revier-monaco-editor.md)。下方复选框保留为原始执行清单，
+> 实际完成状态以验收记录和对应语义化提交为准。
+
 > **给 agentic workers：** 必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 按任务执行本计划。所有步骤使用 checkbox（`- [ ]`）语法跟踪。
 
 **目标：** 将 Revier 当前自绘 side-by-side Diff 升级为 Monaco 原生 Diff Editor，使左右两侧可临时编辑但永不保存，并完整实现语言高亮、编码切换、应用级 TOML 主题、真实块选择和外置 AuthorRail。
@@ -1225,13 +1230,17 @@ git commit -m "feat(editor): 在 Minimap 外侧显示块作者轨道"
 
 ### Task 10: 实现状态栏语言/编码上拉与大文件三态 DiffViewer
 
+> 实施勘误（2026-07-17）：用户选择方案 A。Task 10 暂时保留仍被详情栏引用的
+> `DiffBlockAuthors.vue`；待 Task 11 完成 `BlockDetailPanel` 草稿语义迁移后再删除，
+> 以保证每个提交都可独立测试和构建。
+
 **Files:**
 - Create: `src/renderer/components/review/EditorStatusBar.vue`
 - Create: `tests/unit/editorStatusBar.test.ts`
 - Modify: `src/renderer/components/review/DiffViewer.vue`
 - Modify: `tests/unit/diffViewer.test.ts`
 - Modify: `tests/unit/diffViewerSelectionStyles.test.ts`
-- Delete: `src/renderer/components/review/DiffBlockAuthors.vue`
+- Keep temporarily: `src/renderer/components/review/DiffBlockAuthors.vue`
 
 - [ ] **Step 1: 先写状态栏失败测试**
 
@@ -1283,7 +1292,7 @@ type DiffViewerMode = 'deferred' | 'original' | 'draft';
 
 - [ ] **Step 6: 删除代码区作者组件和旧样式契约测试**
 
-删除 `DiffBlockAuthors.vue`。将 `diffViewerSelectionStyles.test.ts` 改为读取新 Decoration class 的 CSS，断言旧侧深红外缘、新侧深绿外缘、首行 teal top、尾行 teal bottom，且中间 class 没有横线规则。
+Task 10 先移除 DiffViewer 对旧作者组件和旧样式的依赖；`DiffBlockAuthors.vue` 按方案 A 暂时保留到 Task 11。将 `diffViewerSelectionStyles.test.ts` 改为读取新 Decoration class 的 CSS，断言旧侧深红外缘、新侧深绿外缘、首行 teal top、尾行 teal bottom，且中间 class 没有横线规则。
 
 - [ ] **Step 7: 运行 DiffViewer 测试**
 
@@ -1301,7 +1310,7 @@ pnpm typecheck
 运行：
 
 ```powershell
-git add src/renderer/components/review/EditorStatusBar.vue tests/unit/editorStatusBar.test.ts src/renderer/components/review/DiffViewer.vue tests/unit/diffViewer.test.ts tests/unit/diffViewerSelectionStyles.test.ts src/renderer/components/review/DiffBlockAuthors.vue
+git add src/renderer/components/review/EditorStatusBar.vue tests/unit/editorStatusBar.test.ts src/renderer/components/review/DiffViewer.vue tests/unit/diffViewer.test.ts tests/unit/diffViewerSelectionStyles.test.ts
 git commit -m "feat(editor): 组合草稿状态与交互状态栏"
 ```
 
@@ -1318,6 +1327,7 @@ git commit -m "feat(editor): 组合草稿状态与交互状态栏"
 - Modify: `tests/unit/blockDetailPanel.test.ts`
 - Modify: `src/renderer/pages/ReviewWorkspace.vue`
 - Modify: `tests/unit/reviewWorkspace.test.ts`
+- Delete: `src/renderer/components/review/DiffBlockAuthors.vue`
 
 - [ ] **Step 1: 先写 Store 原子替换失败测试**
 
@@ -1362,6 +1372,8 @@ async reloadCommitOverlayEncoding(
 
 `BlockDetailPanel` 新增 `draft?: boolean`：draft 时只显示“临时草稿不提供归因”，不渲染作者/提交列表。
 
+完成详情栏迁移后删除 `DiffBlockAuthors.vue`，并确认运行时代码中不存在旧代码区作者标签引用。
+
 `ReviewWorkspace` 新增本地 `isEditorDraft`：
 
 - 收到 `draftChange(true)` 立即 `reviewStore.selectBlock(undefined)`。
@@ -1397,7 +1409,7 @@ pnpm typecheck
 运行：
 
 ```powershell
-git add src/renderer/stores/reviewStore.ts tests/unit/rendererReviewStore.test.ts src/renderer/components/review/DiffDrilldownOverlay.vue tests/unit/diffDrilldownOverlay.test.ts src/renderer/components/review/BlockDetailPanel.vue tests/unit/blockDetailPanel.test.ts src/renderer/pages/ReviewWorkspace.vue tests/unit/reviewWorkspace.test.ts
+git add src/renderer/stores/reviewStore.ts tests/unit/rendererReviewStore.test.ts src/renderer/components/review/DiffDrilldownOverlay.vue tests/unit/diffDrilldownOverlay.test.ts src/renderer/components/review/BlockDetailPanel.vue tests/unit/blockDetailPanel.test.ts src/renderer/pages/ReviewWorkspace.vue tests/unit/reviewWorkspace.test.ts src/renderer/components/review/DiffBlockAuthors.vue
 git commit -m "feat(review): 接入草稿销毁与编码重载"
 ```
 

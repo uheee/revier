@@ -14,7 +14,7 @@ import MonacoDiffSurface from './MonacoDiffSurface.vue';
 
 type DiffViewerMode = 'deferred' | 'original' | 'draft';
 
-// Task 11 接线前保留兼容默认值，工作台接入后由启动配置覆盖。
+// 独立复用与组件测试使用兼容默认值；工作台始终显式传入启动配置快照。
 const COMPATIBLE_SETTINGS = {
   version: 1,
   theme: 'system',
