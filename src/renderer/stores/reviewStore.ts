@@ -36,6 +36,10 @@ interface ReviewState {
     generation: number;
     snapshots: AnalysisTaskSnapshot[];
   };
+  processedTerminal?: {
+    taskId: string;
+    status: 'completed' | 'failed' | 'cancelled';
+  };
 }
 
 export const MAX_PENDING_ANALYSIS_TASKS = 32;
@@ -57,7 +61,11 @@ function mergeConfirmedSnapshot(
   return response;
 }
 
-function isTerminalStatus(status: AnalysisTaskSnapshot['status']): boolean {
+type TerminalAnalysisStatus = 'completed' | 'failed' | 'cancelled';
+
+function isTerminalStatus(
+  status: AnalysisTaskSnapshot['status']
+): status is TerminalAnalysisStatus {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
@@ -85,7 +93,8 @@ export const useReviewStore = defineStore('review', {
     drilldownRequestId: 0,
     authorsRequestId: 0,
     notifiedFailedTaskId: undefined,
-    pendingAnalysis: undefined
+    pendingAnalysis: undefined,
+    processedTerminal: undefined
   }),
   actions: {
     async start(filters: ReviewFilters): Promise<void> {
@@ -112,6 +121,9 @@ export const useReviewStore = defineStore('review', {
           !isTerminalStatus(effectiveSnapshot.status)
         ) {
           return;
+        }
+        if (this.task?.taskId !== effectiveSnapshot.taskId) {
+          this.processedTerminal = undefined;
         }
         this.task = effectiveSnapshot;
         if (isTerminalStatus(effectiveSnapshot.status)) {
@@ -155,7 +167,18 @@ export const useReviewStore = defineStore('review', {
         return;
       }
 
+      if (
+        isTerminalStatus(snapshot.status)
+        && this.processedTerminal?.taskId === snapshot.taskId
+        && this.processedTerminal.status === snapshot.status
+      ) {
+        return;
+      }
+
       this.task = snapshot;
+      if (isTerminalStatus(snapshot.status)) {
+        this.processedTerminal = { taskId: snapshot.taskId, status: snapshot.status };
+      }
       if (snapshot.status === 'completed') {
         const requestId = this.analysisRequestId;
         try {
@@ -210,6 +233,7 @@ export const useReviewStore = defineStore('review', {
           message: '任务已取消',
           error: undefined
         };
+        this.processedTerminal = { taskId: this.task.taskId, status: 'cancelled' };
       }
       if (taskId) {
         try {

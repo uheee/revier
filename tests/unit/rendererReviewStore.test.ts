@@ -429,6 +429,33 @@ describe('renderer reviewStore', () => {
     expect(useNotifications().notifications.value).toEqual([]);
   });
 
+  it('completed 响应处理后订阅重复同终态不会再次加载文件列表', async () => {
+    vi.mocked(revierClient.review.startAnalysis).mockResolvedValue({
+      ...task,
+      message: '响应完成'
+    });
+    vi.mocked(revierClient.review.listChangedFiles)
+      .mockResolvedValueOnce([file])
+      .mockRejectedValueOnce(new Error('不应重复加载'));
+    const store = useReviewStore();
+
+    await store.start(filters);
+    const settledTask = store.task;
+    const settledFiles = store.files;
+    const settledError = store.error;
+    const settledLoading = store.loading;
+    const settledNotifications = [...useNotifications().notifications.value];
+
+    await store.handleTaskUpdate({ ...task, message: '订阅重复完成' });
+
+    expect(revierClient.review.listChangedFiles).toHaveBeenCalledTimes(1);
+    expect(store.task).toStrictEqual(settledTask);
+    expect(store.files).toStrictEqual(settledFiles);
+    expect(store.error).toBe(settledError);
+    expect(store.loading).toBe(settledLoading);
+    expect(useNotifications().notifications.value).toStrictEqual(settledNotifications);
+  });
+
   it('failed 响应与更新后的缓存 failed 只按最终快照通知一次', async () => {
     let resolveStart!: (value: AnalysisTaskSnapshot) => void;
     vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
