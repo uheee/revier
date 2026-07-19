@@ -228,6 +228,41 @@ describe('renderer reviewStore', () => {
     ]);
   });
 
+  it('新分析启动期间重放旧任务失败事件不得改变状态或重复通知', async () => {
+    const failedTask: AnalysisTaskSnapshot = {
+      ...runningTask,
+      status: 'failed',
+      stage: 'ready',
+      error: { code: 'ANALYSIS_FAILED', message: '旧任务失败' }
+    };
+    const nextTask: AnalysisTaskSnapshot = {
+      ...runningTask,
+      taskId: 'task-2'
+    };
+    let resolveStart!: (value: AnalysisTaskSnapshot) => void;
+    vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
+      new Promise((resolve) => { resolveStart = resolve; })
+    );
+    const store = useReviewStore();
+    store.task = runningTask;
+    await store.handleTaskUpdate(failedTask);
+    expect(useNotifications().notifications.value).toHaveLength(1);
+
+    const start = store.start({ ...filters, branch: 'main' });
+    expect(store.loading).toBe(true);
+    await store.handleTaskUpdate(failedTask);
+
+    expect(useNotifications().notifications.value).toHaveLength(1);
+    expect(store.loading).toBe(true);
+    expect(store.error).toBeUndefined();
+    expect(store.task).toStrictEqual(failedTask);
+
+    resolveStart(nextTask);
+    await start;
+    expect(store.task).toStrictEqual(nextTask);
+    expect(store.loading).toBe(true);
+  });
+
   it('用户已取消后迟到的失败事件不视为新的运行时错误', async () => {
     const failedTask: AnalysisTaskSnapshot = {
       ...runningTask,

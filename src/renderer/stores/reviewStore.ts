@@ -32,6 +32,8 @@ interface ReviewState {
   drilldownRequestId: number;
   authorsRequestId: number;
   notifiedFailedTaskId?: string;
+  pendingAnalysisRequestId?: number;
+  supersededAnalysisTaskId?: string;
 }
 
 function isTerminalStatus(status: AnalysisTaskSnapshot['status']): boolean {
@@ -61,12 +63,15 @@ export const useReviewStore = defineStore('review', {
     overlayRequestId: 0,
     drilldownRequestId: 0,
     authorsRequestId: 0,
-    notifiedFailedTaskId: undefined
+    notifiedFailedTaskId: undefined,
+    pendingAnalysisRequestId: undefined,
+    supersededAnalysisTaskId: undefined
   }),
   actions: {
     async start(filters: ReviewFilters): Promise<void> {
       const requestId = ++this.analysisRequestId;
-      this.notifiedFailedTaskId = undefined;
+      this.pendingAnalysisRequestId = requestId;
+      this.supersededAnalysisTaskId = this.task?.taskId;
       this.error = undefined;
       this.overlay = undefined;
       this.selectedBlock = undefined;
@@ -77,6 +82,8 @@ export const useReviewStore = defineStore('review', {
       try {
         const task = await revierClient.review.startAnalysis(filters);
         if (requestId !== this.analysisRequestId) return;
+        this.pendingAnalysisRequestId = undefined;
+        this.supersededAnalysisTaskId = undefined;
         if (
           this.task?.taskId === task.taskId &&
           isTerminalStatus(this.task.status) &&
@@ -90,6 +97,8 @@ export const useReviewStore = defineStore('review', {
         }
       } catch (error) {
         if (requestId === this.analysisRequestId) {
+          this.pendingAnalysisRequestId = undefined;
+          this.supersededAnalysisTaskId = undefined;
           const message = toErrorMessage(error);
           this.error = message;
           this.loading = false;
@@ -102,7 +111,13 @@ export const useReviewStore = defineStore('review', {
     },
 
     async handleTaskUpdate(snapshot: AnalysisTaskSnapshot): Promise<void> {
-      if (this.task && snapshot.taskId !== this.task.taskId) {
+      const startPending = this.pendingAnalysisRequestId === this.analysisRequestId;
+      if (startPending && snapshot.taskId === this.supersededAnalysisTaskId) {
+        return;
+      }
+      const isPendingNewTask = startPending
+        && this.task?.taskId === this.supersededAnalysisTaskId;
+      if (this.task && snapshot.taskId !== this.task.taskId && !isPendingNewTask) {
         return;
       }
       if (this.task && isTerminalStatus(this.task.status) && !isTerminalStatus(snapshot.status)) {
@@ -154,6 +169,8 @@ export const useReviewStore = defineStore('review', {
     async cancelAnalysis(): Promise<void> {
       const taskId = this.task?.taskId;
       const requestId = ++this.analysisRequestId;
+      this.pendingAnalysisRequestId = undefined;
+      this.supersededAnalysisTaskId = undefined;
       this.loading = false;
       this.cancelOverlay();
       this.closeCommitDrilldown();
