@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { useReviewStore } from '../../src/renderer/stores/reviewStore';
 import { revierClient } from '../../src/renderer/api/revierClient';
+import { useNotifications } from '../../src/renderer/composables/useNotifications';
 import type {
   AnalysisTaskSnapshot,
   ChangedFile,
@@ -109,6 +110,7 @@ describe('renderer reviewStore', () => {
     vi.mocked(revierClient.review.getFileOverlay).mockReset();
     vi.mocked(revierClient.review.getCommitOverlay).mockReset();
     vi.mocked(revierClient.review.listAuthors).mockReset();
+    useNotifications().clear();
   });
 
   it('starts analysis and loads changed files after completion event', async () => {
@@ -207,6 +209,25 @@ describe('renderer reviewStore', () => {
     expect(store.overlay).toEqual(newOverlay);
   });
 
+  it('旧文件请求后到达的失败不得污染错误状态或通知中心', async () => {
+    let rejectOld!: (reason: unknown) => void;
+    const newOverlay = { ...overlay, file: { ...file, path: 'src/new.ts' } };
+    vi.mocked(revierClient.review.getFileOverlay)
+      .mockReturnValueOnce(new Promise((_, reject) => { rejectOld = reject; }))
+      .mockResolvedValueOnce(newOverlay);
+
+    const store = useReviewStore();
+    store.task = task;
+    const oldRequest = store.loadOverlay(file.path, 'utf-8');
+    expect(await store.loadOverlay('src/new.ts', 'utf-8')).toBe(true);
+    rejectOld(new Error('旧文件请求失败'));
+
+    expect(await oldRequest).toBe(false);
+    expect(store.overlay).toStrictEqual(newOverlay);
+    expect(store.error).toBeUndefined();
+    expect(useNotifications().notifications.value).toEqual([]);
+  });
+
   it('编码重载在成功前保留旧 overlay，成功后原子替换', async () => {
     let resolveReload!: (value: FileOverlay) => void;
     const reloaded = { ...overlay, resolvedEncoding: 'gb18030' as const, newContent: '新内容' };
@@ -241,6 +262,14 @@ describe('renderer reviewStore', () => {
     expect(store.overlay).toStrictEqual(overlay);
     expect(store.selectedBlock).toStrictEqual(block);
     expect(store.error).toBe('解码失败');
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '文件编码重载失败',
+        message: `${file.path}（utf-16be）：解码失败`,
+        source: 'Review'
+      })
+    ]);
   });
 
   it('stores structured Tauri errors as readable messages', async () => {
@@ -256,6 +285,14 @@ describe('renderer reviewStore', () => {
 
     expect(store.error).toBe('任务文件缓存中不存在请求的文件');
     expect(store.loading).toBe(false);
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '文件差异加载失败',
+        message: `${file.path}：任务文件缓存中不存在请求的文件`,
+        source: 'Review'
+      })
+    ]);
   });
 
   it('loads author filter options', async () => {
@@ -322,6 +359,14 @@ describe('renderer reviewStore', () => {
     expect(store.drilldownOverlay).toBeUndefined();
     expect(store.drilldownLoading).toBe(false);
     expect(store.error).toBe('提交加载失败');
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '提交差异加载失败',
+        message: `${file.path} @ broken：提交加载失败`,
+        source: 'Review'
+      })
+    ]);
   });
 
   it('切换提交时立即清除旧 overlay，旧成功不得覆盖新提交', async () => {
@@ -363,6 +408,7 @@ describe('renderer reviewStore', () => {
     expect(store.selectedCommitHash).toBe('new');
     expect(store.drilldownOverlay).toStrictEqual(newOverlay);
     expect(store.error).toBeUndefined();
+    expect(useNotifications().notifications.value).toEqual([]);
   });
 
   it('提交编码重载保留旧 overlay，后到达的旧请求不能覆盖新请求', async () => {
@@ -397,5 +443,13 @@ describe('renderer reviewStore', () => {
     expect(await store.reloadCommitOverlayEncoding(file.path, 'abc123', 'gb18030')).toBe(false);
     expect(store.drilldownOverlay).toStrictEqual(commitOverlay);
     expect(store.error).toBe('提交解码失败');
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '提交编码重载失败',
+        message: `${file.path} @ abc123（gb18030）：提交解码失败`,
+        source: 'Review'
+      })
+    ]);
   });
 });

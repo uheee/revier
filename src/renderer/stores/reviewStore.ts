@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { toErrorMessage } from '../api/errors';
 import { revierClient } from '../api/revierClient';
+import { addNotification } from '../composables/useNotifications';
 import type {
   AnalysisTaskSnapshot,
   AuthorFilterOption,
@@ -33,6 +34,10 @@ interface ReviewState {
 
 function isTerminalStatus(status: AnalysisTaskSnapshot['status']): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
+
+function notifyReviewError(title: string, message: string): void {
+  addNotification({ type: 'error', title, message, source: 'Review' });
 }
 
 export const useReviewStore = defineStore('review', {
@@ -166,7 +171,11 @@ export const useReviewStore = defineStore('review', {
         this.overlay = overlay;
         return true;
       } catch (error) {
-        if (requestId === this.overlayRequestId) this.error = toErrorMessage(error);
+        if (requestId === this.overlayRequestId) {
+          const message = toErrorMessage(error);
+          this.error = message;
+          notifyReviewError('文件差异加载失败', `${filePath}：${message}`);
+        }
         return false;
       } finally {
         if (requestId === this.overlayRequestId) {
@@ -196,7 +205,11 @@ export const useReviewStore = defineStore('review', {
         this.selectedBlock = undefined;
         return true;
       } catch (error) {
-        if (requestId === this.overlayRequestId) this.error = toErrorMessage(error);
+        if (requestId === this.overlayRequestId) {
+          const message = toErrorMessage(error);
+          this.error = message;
+          notifyReviewError('文件编码重载失败', `${filePath}（${encoding}）：${message}`);
+        }
         return false;
       } finally {
         if (requestId === this.overlayRequestId) {
@@ -245,7 +258,9 @@ export const useReviewStore = defineStore('review', {
       } catch (error) {
         if (requestId === this.drilldownRequestId) {
           this.selectedCommitHash = undefined;
-          this.error = toErrorMessage(error);
+          const message = toErrorMessage(error);
+          this.error = message;
+          notifyReviewError('提交差异加载失败', `${filePath} @ ${commitHash}：${message}`);
         }
         return false;
       } finally {
@@ -284,7 +299,14 @@ export const useReviewStore = defineStore('review', {
         this.drilldownOverlay = overlay;
         return true;
       } catch (error) {
-        if (requestId === this.drilldownRequestId) this.error = toErrorMessage(error);
+        if (requestId === this.drilldownRequestId) {
+          const message = toErrorMessage(error);
+          this.error = message;
+          notifyReviewError(
+            '提交编码重载失败',
+            `${filePath} @ ${commitHash}（${encoding}）：${message}`
+          );
+        }
         return false;
       } finally {
         if (requestId === this.drilldownRequestId) {

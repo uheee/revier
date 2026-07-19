@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { editor } from 'monaco-editor';
 import type { DiffBlock, EditorSettings } from '../../generated/bindings';
+import { addNotification } from '../../composables/useNotifications';
 import {
   createMonacoDiffSession,
   type MonacoDiffSession
@@ -65,6 +66,12 @@ function createSession(): void {
   } catch (error) {
     disposeSession();
     loadError.value = error instanceof Error ? error.message : String(error);
+    addNotification({
+      type: 'error',
+      title: '编辑器加载失败',
+      message: `${props.path}：${loadError.value}`,
+      source: 'Monaco'
+    });
   }
 }
 

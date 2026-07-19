@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils';
 import type { DiffBlock, EditorSettings } from '../../src/renderer/generated/bindings';
+import { useNotifications } from '../../src/renderer/composables/useNotifications';
 
 const createSession = vi.hoisted(() => vi.fn());
 vi.mock('../../src/renderer/editor/monacoDiffSession', () => ({
@@ -53,6 +54,7 @@ beforeEach(() => {
   resize.callback = undefined;
   vi.stubGlobal('ResizeObserver', ResizeObserverMock);
   createSession.mockImplementation(() => sessionMock());
+  useNotifications().clear();
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -155,9 +157,33 @@ describe('MonacoDiffSurface', () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain('编辑器加载失败');
     expect(wrapper.get('button').text()).toContain('重试加载');
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '编辑器加载失败',
+        message: 'src/app.ts：worker failed',
+        source: 'Monaco'
+      })
+    ]);
     await wrapper.get('button').trigger('click');
     expect(createSession).toHaveBeenCalledTimes(2);
     expect(wrapper.text()).not.toContain('编辑器加载失败');
     expect(half.dispose).not.toHaveBeenCalled();
+    expect(useNotifications().notifications.value).toHaveLength(1);
+  });
+
+  it('重试仍失败时按每次操作各记录一条错误通知', async () => {
+    createSession
+      .mockImplementationOnce(() => { throw new Error('首次失败'); })
+      .mockImplementationOnce(() => { throw new Error('重试失败'); });
+
+    const wrapper = mountSurface();
+    await wrapper.vm.$nextTick();
+    await wrapper.get('button').trigger('click');
+
+    expect(useNotifications().notifications.value.map((item) => item.message)).toEqual([
+      'src/app.ts：重试失败',
+      'src/app.ts：首次失败'
+    ]);
   });
 });
