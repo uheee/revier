@@ -263,6 +263,105 @@ describe('renderer reviewStore', () => {
     expect(store.loading).toBe(true);
   });
 
+  it('后发启动使前一代未知 taskId 的早到失败事件失效', async () => {
+    let resolveFirst!: (value: AnalysisTaskSnapshot) => void;
+    let resolveSecond!: (value: AnalysisTaskSnapshot) => void;
+    vi.mocked(revierClient.review.startAnalysis)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve; }));
+    const store = useReviewStore();
+
+    const first = store.start(filters);
+    const second = store.start({ ...filters, branch: 'main' });
+    await store.handleTaskUpdate({
+      ...runningTask,
+      taskId: 'task-from-first',
+      status: 'failed',
+      stage: 'ready',
+      error: { code: 'ANALYSIS_FAILED', message: '前一代早到失败' }
+    });
+
+    expect(store.task).toBeUndefined();
+    expect(store.error).toBeUndefined();
+    expect(store.loading).toBe(true);
+    expect(useNotifications().notifications.value).toEqual([]);
+
+    const secondTask = { ...runningTask, taskId: 'task-from-second' };
+    resolveSecond(secondTask);
+    await second;
+    resolveFirst({ ...runningTask, taskId: 'task-from-first' });
+    await first;
+    expect(store.task).toStrictEqual(secondTask);
+    expect(useNotifications().notifications.value).toEqual([]);
+  });
+
+  it('首次启动等待期间取消会使缓存代次和后续早到终态失效', async () => {
+    let resolveStart!: (value: AnalysisTaskSnapshot) => void;
+    vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
+      new Promise((resolve) => { resolveStart = resolve; })
+    );
+    vi.mocked(revierClient.review.listChangedFiles).mockResolvedValue([]);
+    const store = useReviewStore();
+
+    const start = store.start(filters);
+    await store.cancelAnalysis();
+    await store.handleTaskUpdate({
+      ...runningTask,
+      taskId: 'cancelled-generation-task',
+      status: 'failed',
+      stage: 'ready',
+      error: { code: 'ANALYSIS_FAILED', message: '取消后早到失败' }
+    });
+    await store.handleTaskUpdate({ ...task, taskId: 'cancelled-generation-task' });
+
+    expect(store.task).toBeUndefined();
+    expect(store.error).toBeUndefined();
+    expect(store.loading).toBe(false);
+    expect(useNotifications().notifications.value).toEqual([]);
+
+    resolveStart({ ...runningTask, taskId: 'cancelled-generation-task' });
+    await start;
+    expect(store.task).toBeUndefined();
+  });
+
+  it('旧终态之后的新任务早到运行事件在启动响应确认 taskId 后回放', async () => {
+    const oldFailedTask: AnalysisTaskSnapshot = {
+      ...runningTask,
+      status: 'failed',
+      stage: 'ready',
+      error: { code: 'ANALYSIS_FAILED', message: '旧任务失败' }
+    };
+    const responseTask: AnalysisTaskSnapshot = {
+      ...runningTask,
+      taskId: 'task-2',
+      status: 'pending',
+      stage: 'ready',
+      message: '等待运行'
+    };
+    const earlyRunningTask: AnalysisTaskSnapshot = {
+      ...runningTask,
+      taskId: 'task-2',
+      message: '已经运行'
+    };
+    let resolveStart!: (value: AnalysisTaskSnapshot) => void;
+    vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
+      new Promise((resolve) => { resolveStart = resolve; })
+    );
+    const store = useReviewStore();
+    store.task = oldFailedTask;
+
+    const start = store.start({ ...filters, branch: 'main' });
+    await store.handleTaskUpdate(earlyRunningTask);
+    expect(store.task).toStrictEqual(oldFailedTask);
+    expect(store.loading).toBe(true);
+
+    resolveStart(responseTask);
+    await start;
+    expect(store.task).toStrictEqual(earlyRunningTask);
+    expect(store.loading).toBe(true);
+    expect(useNotifications().notifications.value).toEqual([]);
+  });
+
   it('用户已取消后迟到的失败事件不视为新的运行时错误', async () => {
     const failedTask: AnalysisTaskSnapshot = {
       ...runningTask,

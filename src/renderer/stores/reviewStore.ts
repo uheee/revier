@@ -32,8 +32,10 @@ interface ReviewState {
   drilldownRequestId: number;
   authorsRequestId: number;
   notifiedFailedTaskId?: string;
-  pendingAnalysisRequestId?: number;
-  supersededAnalysisTaskId?: string;
+  pendingAnalysis?: {
+    generation: number;
+    snapshots: AnalysisTaskSnapshot[];
+  };
 }
 
 function isTerminalStatus(status: AnalysisTaskSnapshot['status']): boolean {
@@ -64,14 +66,12 @@ export const useReviewStore = defineStore('review', {
     drilldownRequestId: 0,
     authorsRequestId: 0,
     notifiedFailedTaskId: undefined,
-    pendingAnalysisRequestId: undefined,
-    supersededAnalysisTaskId: undefined
+    pendingAnalysis: undefined
   }),
   actions: {
     async start(filters: ReviewFilters): Promise<void> {
       const requestId = ++this.analysisRequestId;
-      this.pendingAnalysisRequestId = requestId;
-      this.supersededAnalysisTaskId = this.task?.taskId;
+      this.pendingAnalysis = { generation: requestId, snapshots: [] };
       this.error = undefined;
       this.overlay = undefined;
       this.selectedBlock = undefined;
@@ -82,8 +82,10 @@ export const useReviewStore = defineStore('review', {
       try {
         const task = await revierClient.review.startAnalysis(filters);
         if (requestId !== this.analysisRequestId) return;
-        this.pendingAnalysisRequestId = undefined;
-        this.supersededAnalysisTaskId = undefined;
+        const bufferedSnapshots = this.pendingAnalysis?.generation === requestId
+          ? this.pendingAnalysis.snapshots.filter((snapshot) => snapshot.taskId === task.taskId)
+          : [];
+        this.pendingAnalysis = undefined;
         if (
           this.task?.taskId === task.taskId &&
           isTerminalStatus(this.task.status) &&
@@ -95,10 +97,12 @@ export const useReviewStore = defineStore('review', {
         if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
           await this.handleTaskUpdate(task);
         }
+        for (const snapshot of bufferedSnapshots) {
+          await this.handleTaskUpdate(snapshot);
+        }
       } catch (error) {
         if (requestId === this.analysisRequestId) {
-          this.pendingAnalysisRequestId = undefined;
-          this.supersededAnalysisTaskId = undefined;
+          this.pendingAnalysis = undefined;
           const message = toErrorMessage(error);
           this.error = message;
           this.loading = false;
@@ -111,13 +115,11 @@ export const useReviewStore = defineStore('review', {
     },
 
     async handleTaskUpdate(snapshot: AnalysisTaskSnapshot): Promise<void> {
-      const startPending = this.pendingAnalysisRequestId === this.analysisRequestId;
-      if (startPending && snapshot.taskId === this.supersededAnalysisTaskId) {
+      if (this.pendingAnalysis?.generation === this.analysisRequestId) {
+        this.pendingAnalysis.snapshots.push(snapshot);
         return;
       }
-      const isPendingNewTask = startPending
-        && this.task?.taskId === this.supersededAnalysisTaskId;
-      if (this.task && snapshot.taskId !== this.task.taskId && !isPendingNewTask) {
+      if (!this.task || snapshot.taskId !== this.task.taskId) {
         return;
       }
       if (this.task && isTerminalStatus(this.task.status) && !isTerminalStatus(snapshot.status)) {
@@ -169,8 +171,7 @@ export const useReviewStore = defineStore('review', {
     async cancelAnalysis(): Promise<void> {
       const taskId = this.task?.taskId;
       const requestId = ++this.analysisRequestId;
-      this.pendingAnalysisRequestId = undefined;
-      this.supersededAnalysisTaskId = undefined;
+      this.pendingAnalysis = undefined;
       this.loading = false;
       this.cancelOverlay();
       this.closeCommitDrilldown();
