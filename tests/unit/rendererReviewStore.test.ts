@@ -1,5 +1,8 @@
 import { createPinia, setActivePinia } from 'pinia';
-import { useReviewStore } from '../../src/renderer/stores/reviewStore';
+import {
+  MAX_PENDING_ANALYSIS_TASKS,
+  useReviewStore
+} from '../../src/renderer/stores/reviewStore';
 import { revierClient } from '../../src/renderer/api/revierClient';
 import { useNotifications } from '../../src/renderer/composables/useNotifications';
 import type {
@@ -295,6 +298,49 @@ describe('renderer reviewStore', () => {
     expect(useNotifications().notifications.value).toEqual([]);
   });
 
+  it('待确认窗口内同一 taskId 的高频事件只保留最新快照', async () => {
+    let resolveStart!: (value: AnalysisTaskSnapshot) => void;
+    vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
+      new Promise((resolve) => { resolveStart = resolve; })
+    );
+    const store = useReviewStore();
+    const start = store.start(filters);
+
+    for (let index = 0; index < 100; index += 1) {
+      await store.handleTaskUpdate({
+        ...runningTask,
+        taskId: 'high-frequency-task',
+        message: `进度 ${index}`
+      });
+    }
+
+    expect(store.pendingAnalysis?.snapshots).toHaveLength(1);
+    expect(store.pendingAnalysis?.snapshots[0]?.message).toBe('进度 99');
+    resolveStart({ ...runningTask, taskId: 'confirmed-other-task' });
+    await start;
+  });
+
+  it('待确认窗口内不同 taskId 的候选快照限制为固定容量并淘汰最旧项', async () => {
+    let resolveStart!: (value: AnalysisTaskSnapshot) => void;
+    vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
+      new Promise((resolve) => { resolveStart = resolve; })
+    );
+    const store = useReviewStore();
+    const start = store.start(filters);
+
+    for (let index = 0; index < MAX_PENDING_ANALYSIS_TASKS + 5; index += 1) {
+      await store.handleTaskUpdate({ ...runningTask, taskId: `candidate-${index}` });
+    }
+
+    expect(store.pendingAnalysis?.snapshots).toHaveLength(MAX_PENDING_ANALYSIS_TASKS);
+    expect(store.pendingAnalysis?.snapshots[0]?.taskId).toBe('candidate-5');
+    expect(store.pendingAnalysis?.snapshots.at(-1)?.taskId).toBe(
+      `candidate-${MAX_PENDING_ANALYSIS_TASKS + 4}`
+    );
+    resolveStart({ ...runningTask, taskId: 'confirmed-other-task' });
+    await start;
+  });
+
   it('首次启动等待期间取消会使缓存代次和后续早到终态失效', async () => {
     let resolveStart!: (value: AnalysisTaskSnapshot) => void;
     vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
@@ -360,6 +406,59 @@ describe('renderer reviewStore', () => {
     expect(store.task).toStrictEqual(earlyRunningTask);
     expect(store.loading).toBe(true);
     expect(useNotifications().notifications.value).toEqual([]);
+  });
+
+  it('completed 响应与缓存 completed 合并后只加载一次文件列表', async () => {
+    let resolveStart!: (value: AnalysisTaskSnapshot) => void;
+    vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
+      new Promise((resolve) => { resolveStart = resolve; })
+    );
+    vi.mocked(revierClient.review.listChangedFiles)
+      .mockResolvedValueOnce([file])
+      .mockRejectedValueOnce(new Error('重复加载'));
+    const store = useReviewStore();
+
+    const start = store.start(filters);
+    await store.handleTaskUpdate({ ...task, message: '最终完成事件' });
+    resolveStart({ ...task, message: '响应中的完成状态' });
+    await start;
+
+    expect(revierClient.review.listChangedFiles).toHaveBeenCalledTimes(1);
+    expect(store.files).toStrictEqual([file]);
+    expect(store.error).toBeUndefined();
+    expect(useNotifications().notifications.value).toEqual([]);
+  });
+
+  it('failed 响应与更新后的缓存 failed 只按最终快照通知一次', async () => {
+    let resolveStart!: (value: AnalysisTaskSnapshot) => void;
+    vi.mocked(revierClient.review.startAnalysis).mockReturnValue(
+      new Promise((resolve) => { resolveStart = resolve; })
+    );
+    const store = useReviewStore();
+    const responseFailure: AnalysisTaskSnapshot = {
+      ...runningTask,
+      status: 'failed',
+      stage: 'ready',
+      error: { code: 'ANALYSIS_FAILED', message: '响应中的过时失败' }
+    };
+    const finalFailure: AnalysisTaskSnapshot = {
+      ...responseFailure,
+      error: { code: 'ANALYSIS_FAILED', message: '缓存中的最终失败' }
+    };
+
+    const start = store.start(filters);
+    await store.handleTaskUpdate(finalFailure);
+    resolveStart(responseFailure);
+    await start;
+
+    expect(store.error).toBe('缓存中的最终失败');
+    expect(useNotifications().notifications.value).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        title: '分析任务失败',
+        message: 'task-1：缓存中的最终失败'
+      })
+    ]);
   });
 
   it('用户已取消后迟到的失败事件不视为新的运行时错误', async () => {

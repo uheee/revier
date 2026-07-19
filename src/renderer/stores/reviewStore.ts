@@ -38,6 +38,25 @@ interface ReviewState {
   };
 }
 
+export const MAX_PENDING_ANALYSIS_TASKS = 32;
+
+function taskStatusRank(status: AnalysisTaskSnapshot['status']): number {
+  if (status === 'pending') return 0;
+  if (status === 'running') return 1;
+  return 2;
+}
+
+function mergeConfirmedSnapshot(
+  response: AnalysisTaskSnapshot,
+  buffered?: AnalysisTaskSnapshot
+): AnalysisTaskSnapshot {
+  if (!buffered) return response;
+  const responseRank = taskStatusRank(response.status);
+  const bufferedRank = taskStatusRank(buffered.status);
+  if (bufferedRank >= responseRank) return buffered;
+  return response;
+}
+
 function isTerminalStatus(status: AnalysisTaskSnapshot['status']): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
@@ -82,23 +101,21 @@ export const useReviewStore = defineStore('review', {
       try {
         const task = await revierClient.review.startAnalysis(filters);
         if (requestId !== this.analysisRequestId) return;
-        const bufferedSnapshots = this.pendingAnalysis?.generation === requestId
-          ? this.pendingAnalysis.snapshots.filter((snapshot) => snapshot.taskId === task.taskId)
-          : [];
+        const bufferedSnapshot = this.pendingAnalysis?.generation === requestId
+          ? this.pendingAnalysis.snapshots.find((snapshot) => snapshot.taskId === task.taskId)
+          : undefined;
+        const effectiveSnapshot = mergeConfirmedSnapshot(task, bufferedSnapshot);
         this.pendingAnalysis = undefined;
         if (
-          this.task?.taskId === task.taskId &&
+          this.task?.taskId === effectiveSnapshot.taskId &&
           isTerminalStatus(this.task.status) &&
-          !isTerminalStatus(task.status)
+          !isTerminalStatus(effectiveSnapshot.status)
         ) {
           return;
         }
-        this.task = task;
-        if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
-          await this.handleTaskUpdate(task);
-        }
-        for (const snapshot of bufferedSnapshots) {
-          await this.handleTaskUpdate(snapshot);
+        this.task = effectiveSnapshot;
+        if (isTerminalStatus(effectiveSnapshot.status)) {
+          await this.handleTaskUpdate(effectiveSnapshot);
         }
       } catch (error) {
         if (requestId === this.analysisRequestId) {
@@ -116,7 +133,16 @@ export const useReviewStore = defineStore('review', {
 
     async handleTaskUpdate(snapshot: AnalysisTaskSnapshot): Promise<void> {
       if (this.pendingAnalysis?.generation === this.analysisRequestId) {
+        const existingIndex = this.pendingAnalysis.snapshots.findIndex(
+          (candidate) => candidate.taskId === snapshot.taskId
+        );
+        if (existingIndex !== -1) {
+          this.pendingAnalysis.snapshots.splice(existingIndex, 1);
+        }
         this.pendingAnalysis.snapshots.push(snapshot);
+        if (this.pendingAnalysis.snapshots.length > MAX_PENDING_ANALYSIS_TASKS) {
+          this.pendingAnalysis.snapshots.shift();
+        }
         return;
       }
       if (!this.task || snapshot.taskId !== this.task.taskId) {
