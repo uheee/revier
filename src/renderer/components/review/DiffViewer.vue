@@ -7,6 +7,7 @@ import type {
   FileOverlay,
   TextEncoding
 } from '../../generated/bindings';
+import type { MonacoDiffBlocksPayload } from '../../editor/monacoDiffBlocks';
 import { detectEditorLanguage } from '../../editor/editorLanguages';
 import DiffAuthorRail from './DiffAuthorRail.vue';
 import EditorStatusBar from './EditorStatusBar.vue';
@@ -37,17 +38,20 @@ const props = withDefaults(defineProps<{
   themeName?: 'revier-light' | 'revier-dark';
   requestedEncoding?: TextEncoding;
   contextKey?: string | number;
+  diffState?: 'computing' | 'attributing' | 'ready' | 'empty' | 'failed';
 }>(), {
   selectedBlockId: undefined,
   loading: false,
   settings: undefined,
   themeName: undefined,
   requestedEncoding: undefined,
-  contextKey: undefined
+  contextKey: undefined,
+  diffState: 'computing'
 });
 
 const emit = defineEmits<{
   selected: [block: DiffBlock];
+  diffBlocksChange: [payload: MonacoDiffBlocksPayload];
   draftChange: [draft: boolean];
   encodingChange: [encoding: TextEncoding];
   cursorChange: [line: number, column: number];
@@ -80,9 +84,8 @@ const selectedBlockIndex = computed(() => {
   }
   return props.overlay.blocks.findIndex((block) => block.id === selectedBlock.value?.id);
 });
-const surfaceContextKey = computed(() =>
-  `${String(props.contextKey ?? props.overlay?.file.path ?? '')}:${sessionVersion.value}`
-);
+const baseContextKey = computed(() => String(props.contextKey ?? props.overlay?.file.path ?? ''));
+const surfaceContextKey = computed(() => `${baseContextKey.value}:${sessionVersion.value}`);
 
 function textLineCount(content: string): number {
   return content.length === 0 ? 0 : content.split('\n').length;
@@ -157,6 +160,13 @@ function selectBlock(block: DiffBlock): void {
   }
 }
 
+function handleDiffBlocksChange(payload: MonacoDiffBlocksPayload): void {
+  if (payload.contextKey !== surfaceContextKey.value) {
+    return;
+  }
+  emit('diffBlocksChange', { ...payload, contextKey: baseContextKey.value });
+}
+
 let contextInitialized = false;
 watch(
   [() => props.overlay, () => props.contextKey],
@@ -189,7 +199,7 @@ watch(
             <span>{{ overlay.range.baseCommit.slice(0, 8) }}..{{ overlay.range.headCommit.slice(0, 8) }}</span>
           </div>
           <div class="diff-viewer__header-actions">
-            <span class="diff-viewer__count">{{ overlay.blocks.length }} 个变更块</span>
+            <span class="diff-viewer__count">{{ props.diffState === 'computing' && overlay.blocks.length === 0 ? '计算变更块' : `${overlay.blocks.length} 个变更块` }}</span>
             <button
               v-if="mode === 'draft'"
               type="button"
@@ -218,7 +228,7 @@ watch(
             </div>
           </section>
           <n-empty
-            v-else-if="overlay.blocks.length === 0"
+            v-else-if="props.diffState === 'empty'"
             size="large"
             description="无可显示变更"
           />
@@ -236,6 +246,7 @@ watch(
               :selected-block="selectedBlock"
               @draft-change="enterDraft"
               @selected="selectBlock"
+              @diff-blocks-change="handleDiffBlocksChange"
               @cursor-change="setCursor"
               @editors-ready="setEditors"
             />
@@ -245,6 +256,8 @@ watch(
               :draft="false"
               :original-editor="originalEditor"
               :modified-editor="modifiedEditor"
+              :selected-block-id="selectedBlock?.id"
+              :attribution-state="props.diffState"
               @selected="selectBlock"
             />
           </div>

@@ -381,6 +381,7 @@ pub enum AttributionWarningCode {
     MergeTraceAmbiguous,
     PathHistoryIncomplete,
     DeletionTraceIncomplete,
+    EofNewlineAttributionUnavailable,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -493,7 +494,7 @@ pub struct SideBySideDiffRow {
     pub block_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum DiffBlockChangeType {
     Added,
@@ -526,6 +527,49 @@ pub struct DiffBlock {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[specta(optional, type = crate::contracts::BlockAttributionSummary)]
     pub attribution: Option<BlockAttributionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffBlockRange {
+    pub id: String,
+    #[specta(type = u32)]
+    pub old_start: u64,
+    #[specta(type = u32)]
+    pub old_end: u64,
+    #[specta(type = u32)]
+    pub new_start: u64,
+    #[specta(type = u32)]
+    pub new_end: u64,
+    pub change_type: DiffBlockChangeType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AttributeBlocksRequest {
+    pub task_id: TaskId,
+    pub file_path: String,
+    pub resolved_encoding: ResolvedTextEncoding,
+    pub blocks: Vec<DiffBlockRange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffBlockAttribution {
+    pub id: String,
+    pub authors: Vec<AuthorSummary>,
+    pub related_commits: Vec<RelatedCommit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = crate::contracts::BlockAttributionSummary)]
+    pub attribution: Option<BlockAttributionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AttributeBlocksResult {
+    pub resolved_encoding: ResolvedTextEncoding,
+    pub attributions: Vec<DiffBlockAttribution>,
+    pub warnings: Vec<AppError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

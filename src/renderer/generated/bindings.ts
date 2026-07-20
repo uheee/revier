@@ -57,6 +57,27 @@ export type AppError_Serialize = {
 	detail?: string,
 };
 
+export type AttributeBlocksRequest = {
+	taskId: string,
+	filePath: string,
+	resolvedEncoding: ResolvedTextEncoding,
+	blocks: DiffBlockRange[],
+};
+
+export type AttributeBlocksResult = AttributeBlocksResult_Serialize | AttributeBlocksResult_Deserialize;
+
+export type AttributeBlocksResult_Deserialize = {
+	resolvedEncoding: ResolvedTextEncoding,
+	attributions: DiffBlockAttribution_Deserialize[],
+	warnings: AppError_Deserialize[],
+};
+
+export type AttributeBlocksResult_Serialize = {
+	resolvedEncoding: ResolvedTextEncoding,
+	attributions: DiffBlockAttribution_Serialize[],
+	warnings: AppError_Serialize[],
+};
+
 export type AttributionConfidence = "precise" | "inferred" | "partial";
 
 export type AttributionMethod = "blame" | "merge-trace" | "patch-inference" | "deletion-trace";
@@ -66,7 +87,7 @@ export type AttributionWarning = {
 	message: string,
 };
 
-export type AttributionWarningCode = "BLAME_UNAVAILABLE" | "MERGE_TRACE_AMBIGUOUS" | "PATH_HISTORY_INCOMPLETE" | "DELETION_TRACE_INCOMPLETE";
+export type AttributionWarningCode = "BLAME_UNAVAILABLE" | "MERGE_TRACE_AMBIGUOUS" | "PATH_HISTORY_INCOMPLETE" | "DELETION_TRACE_INCOMPLETE" | "EOF_NEWLINE_ATTRIBUTION_UNAVAILABLE";
 
 export type AuthorFilterOption = AuthorFilterOption_Serialize | AuthorFilterOption_Deserialize;
 
@@ -147,7 +168,32 @@ export type CommitOverlayRequest_Serialize = {
 
 export type DiffBlock = DiffBlock_Serialize | DiffBlock_Deserialize;
 
+export type DiffBlockAttribution = DiffBlockAttribution_Serialize | DiffBlockAttribution_Deserialize;
+
+export type DiffBlockAttribution_Deserialize = {
+	id: string,
+	authors: AuthorSummary_Deserialize[],
+	relatedCommits: RelatedCommit_Deserialize[],
+	attribution?: BlockAttributionSummary,
+};
+
+export type DiffBlockAttribution_Serialize = {
+	id: string,
+	authors: AuthorSummary_Serialize[],
+	relatedCommits: RelatedCommit_Serialize[],
+	attribution?: BlockAttributionSummary,
+};
+
 export type DiffBlockChangeType = "added" | "deleted" | "modified";
+
+export type DiffBlockRange = {
+	id: string,
+	oldStart: number,
+	oldEnd: number,
+	newStart: number,
+	newEnd: number,
+	changeType: DiffBlockChangeType,
+};
 
 export type DiffBlock_Deserialize = {
 	id: string,

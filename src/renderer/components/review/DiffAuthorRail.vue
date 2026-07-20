@@ -15,6 +15,8 @@ import {
 const props = defineProps<{
   blocks: DiffBlock[];
   draft: boolean;
+  selectedBlockId?: string;
+  attributionState?: 'computing' | 'attributing' | 'ready' | 'empty' | 'failed';
   originalEditor?: editor.ICodeEditor;
   modifiedEditor?: editor.ICodeEditor;
 }>();
@@ -114,16 +116,14 @@ function setPopoverOpen(blockId: string, show: boolean): void {
   openBlockId.value = show ? blockId : undefined;
 }
 
-function activateBlock(event: KeyboardEvent, block: DiffBlock): void {
-  if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
-    return;
-  }
-  event.preventDefault();
-  selectBlock(block);
-}
-
 function displayCommittedAt(value: string): string {
   return value && Number.isFinite(Date.parse(value)) ? value : '未知';
+}
+
+function blockLabel(block: DiffBlock, authors: AuthorSummary[]): string {
+  const start = block.newStart || block.oldStart;
+  const end = block.newEnd || block.oldEnd;
+  return `选择 ${start}-${end} 行变更块，${authors.length} 位作者`;
 }
 
 function handleBlocksChanged(): void {
@@ -152,18 +152,39 @@ onBeforeUnmount(() => {
       v-for="item in positionedBlocks"
       :key="item.block.id"
       class="diff-author-rail__block"
-      role="button"
-      tabindex="0"
+      :class="[
+        `diff-author-rail__block--${item.block.changeType}`,
+        {
+          'is-selected': item.block.id === selectedBlockId,
+          'is-loading': attributionState === 'attributing' && item.authors.length === 0,
+          'is-failed': attributionState === 'failed' && item.authors.length === 0
+        }
+      ]"
+      :aria-busy="attributionState === 'attributing' && item.authors.length === 0"
       :style="{ top: `${item.geometry.top}px`, height: `${item.geometry.height}px` }"
-      @click="selectBlock(item.block)"
-      @keydown="activateBlock($event, item.block)"
     >
-      <span
-        v-for="author in item.visibleAuthors"
-        :key="`${author.name}:${author.email ?? ''}`"
-        class="diff-author-rail__author"
-        :title="author.email ? `${author.name} <${author.email}>` : author.name"
-      >{{ author.name }}</span>
+      <button
+        type="button"
+        class="diff-author-rail__select"
+        :aria-label="blockLabel(item.block, item.authors)"
+        :aria-pressed="item.block.id === selectedBlockId"
+        @click="selectBlock(item.block)"
+      >
+        <span
+          v-for="author in item.visibleAuthors"
+          :key="`${author.name}:${author.email ?? ''}`"
+          class="diff-author-rail__author"
+          :title="author.email ? `${author.name} <${author.email}>` : author.name"
+        >{{ author.name }}</span>
+        <span
+          v-if="attributionState === 'attributing' && item.authors.length === 0"
+          class="diff-author-rail__status"
+        >加载中</span>
+        <span
+          v-else-if="attributionState === 'failed' && item.authors.length === 0"
+          class="diff-author-rail__status"
+        >不可用</span>
+      </button>
       <NPopover
         v-if="item.hasMore"
         trigger="manual"
@@ -210,17 +231,68 @@ onBeforeUnmount(() => {
 
 .diff-author-rail__block {
   position: absolute;
-  inset-inline: 0;
+  inset-inline: 4px;
   display: flex;
+  align-items: stretch;
+  gap: 3px;
+  overflow: hidden;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel-background) 88%, var(--selection-color));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-color) 76%, transparent);
+}
+
+.diff-author-rail__block::before {
+  content: "";
+  flex: 0 0 3px;
+  width: 3px;
+  background: var(--accent-color);
+}
+
+.diff-author-rail__block--added::before {
+  background: var(--diff-added-strong);
+}
+
+.diff-author-rail__block--deleted::before {
+  background: var(--diff-removed-strong);
+}
+
+.diff-author-rail__block--modified::before {
+  background: var(--accent-color);
+}
+
+.diff-author-rail__block:hover,
+.diff-author-rail__block.is-selected {
+  background: color-mix(in srgb, var(--panel-background) 76%, var(--selection-color));
+  box-shadow: inset 0 0 0 1px var(--accent-color);
+}
+
+.diff-author-rail__block.is-selected {
+  box-shadow: inset 0 0 0 2px var(--accent-color);
+}
+
+.diff-author-rail__select {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   flex-direction: column;
   gap: 2px;
   overflow: hidden;
-  box-sizing: border-box;
-  padding-inline: 5px;
+  padding: 2px 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
   cursor: pointer;
 }
 
+.diff-author-rail__select:focus-visible,
+.diff-author-rail__more:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+
 .diff-author-rail__author,
+.diff-author-rail__status,
 .diff-author-rail__more {
   display: block;
   flex: 0 0 20px;
@@ -235,11 +307,20 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.diff-author-rail__status {
+  color: var(--muted-color);
+}
+
 .diff-author-rail__more {
+  flex: 0 0 22px;
+  width: 22px;
+  margin: 4px 3px 4px 0;
   padding: 0;
-  border: 0;
-  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  background: var(--editor-background);
   cursor: pointer;
+  text-align: center;
 }
 
 .diff-author-rail__more:hover {

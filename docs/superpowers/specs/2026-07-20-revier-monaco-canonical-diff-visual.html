@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Revier Monaco 单一块边界视觉方案</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      background: #eef2f6;
+      color: #1d2939;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px; }
+    main { max-width: 1440px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .lead { max-width: 920px; margin: 0 0 24px; color: #667085; line-height: 1.7; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 22px; }
+    .legend span { padding: 6px 10px; border: 1px solid #d0d5dd; border-radius: 999px; background: #fff; font-size: 12px; }
+    .gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    .case { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: 0 14px 36px rgb(16 24 40 / 10%); }
+    .case.light {
+      --workspace: #f4f7fa; --panel: #fff; --editor: #fbfcfd; --border: #dfe5ec;
+      --fg: #273142; --muted: #748196; --accent: #0f9285; --select: #dcefeb;
+      --added: #e2f3e8; --added-strong: #26804a; --removed-strong: #bc3d35;
+    }
+    .case.dark {
+      --workspace: #0f151d; --panel: #151d27; --editor: #101720; --border: #293645;
+      --fg: #dce3ec; --muted: #94a1b3; --accent: #2dd4bf; --select: #173c3a;
+      --added: #1d3a30; --added-strong: #5ec58a; --removed-strong: #e06b63;
+    }
+    .case-title { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; color: var(--fg); background: var(--panel); border-bottom: 1px solid var(--border); font-size: 13px; }
+    .case-title small { color: var(--muted); }
+    .editor-grid { display: grid; grid-template-columns: minmax(0, 1fr) 76px 112px; height: 420px; background: var(--editor); }
+    .code { overflow: hidden; padding: 18px 0; font: 13px/22px "JetBrainsMono Nerd Font Mono", Consolas, monospace; color: var(--fg); background: var(--editor); }
+    .line { display: grid; grid-template-columns: 48px minmax(0, 1fr); min-height: 22px; padding-right: 12px; }
+    .line b { padding-right: 10px; color: var(--muted); font-weight: 400; text-align: right; user-select: none; }
+    .line.added { background: color-mix(in srgb, var(--added) 72%, transparent); }
+    .line.added b { color: var(--added-strong); }
+    .line.block-start { border-top: 2px solid var(--accent); }
+    .line.block-end { border-bottom: 2px solid var(--accent); }
+    .line.selected { box-shadow: inset -5px 0 var(--added-strong); }
+    .token-comment { color: var(--muted); }
+    .token-keyword { color: #c084e8; }
+    .token-string { color: #63bd87; }
+    .minimap { position: relative; overflow: hidden; border-left: 1px solid var(--border); background: var(--editor); }
+    .mini-lines { position: absolute; inset: 14px 8px; opacity: .8; background: repeating-linear-gradient(to bottom, var(--muted) 0 2px, transparent 2px 5px); mask: linear-gradient(90deg, #000 0 68%, transparent 68% 75%, #000 75% 100%); }
+    .mini-change { position: absolute; right: 5px; top: 160px; width: 7px; height: 104px; background: var(--added-strong); opacity: .7; }
+    .mini-slider { position: absolute; inset-inline: 0; top: 116px; height: 112px; background: color-mix(in srgb, var(--muted) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--muted) 20%, transparent); }
+    .rail { position: relative; overflow: hidden; border-left: 1px solid var(--border); background: var(--panel); }
+    .author-card { position: absolute; inset-inline: 4px; display: flex; flex-direction: column; overflow: hidden; padding: 0 4px 0 7px; color: var(--muted); border-radius: 4px; background: color-mix(in srgb, var(--panel) 78%, var(--select)); box-shadow: inset 0 0 0 1px var(--border), inset 3px 0 var(--added-strong); font-size: 12px; line-height: 20px; }
+    .author-card.selected { color: var(--fg); box-shadow: inset 0 0 0 2px var(--accent), inset 4px 0 var(--added-strong); }
+    .author-select { min-height: 0; padding: 0; color: inherit; border: 0; background: transparent; font: inherit; line-height: inherit; text-align: left; cursor: pointer; }
+    .author-select span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .author-card.loading .author-select { color: transparent; }
+    .author-card.loading .author-select::after { content: ""; display: block; width: 70%; height: 7px; margin: 7px 0 0 3px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 25%, transparent); }
+    .more { width: 26px; height: 18px; margin-top: auto; padding: 0; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; background: color-mix(in srgb, var(--panel) 80%, var(--select)); line-height: 14px; text-align: center; cursor: pointer; }
+    .state-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 14px; color: var(--muted); background: var(--workspace); border-top: 1px solid var(--border); font-size: 11px; }
+    .state-strip div { display: flex; align-items: center; gap: 7px; }
+    .swatch { width: 32px; height: 14px; border-radius: 3px; background: color-mix(in srgb, var(--muted) var(--alpha), transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--muted) 20%, transparent); }
+    .note { margin-top: 24px; padding: 16px 18px; border-left: 4px solid #0f9285; border-radius: 6px; background: #fff; color: #475467; line-height: 1.7; }
+    @media (max-width: 980px) { .gallery { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Monaco 单一块边界与 AuthorRail 卡片</h1>
+    <p class="lead">绿色背景、青色选中框、点击命中和作者卡片全部使用 Monaco 实际计算出的同一范围。Minimap 视口滑块持续可见但保持低透明度；AuthorRail 使用不占高度的内描边，避免作者框超过代码块。</p>
+    <div class="legend">
+      <span>Monaco advanced Diff</span>
+      <span>ignoreTrimWhitespace = false</span>
+      <span>112px AuthorRail</span>
+      <span>公开 API 定位</span>
+      <span>浅色 / 深色一致</span>
+    </div>
+
+    <section class="gallery">
+      <article class="case light">
+        <header class="case-title"><strong>浅色主题</strong><small>选中块 · 归因已完成</small></header>
+        <div class="editor-grid">
+          <div class="code">
+            <div class="line"><b>201</b><span>return config</span></div>
+            <div class="line"><b>202</b><span>}</span></div>
+            <div class="line added selected block-start"><b>203+</b><span class="token-comment">// 准备新的工作目录</span></div>
+            <div class="line added selected"><b>204+</b><span><span class="token-keyword">if</span> (shouldChangeCurrent) {</span></div>
+            <div class="line added selected"><b>205+</b><span>&nbsp;&nbsp;<span class="token-keyword">try</span> {</span></div>
+            <div class="line added selected"><b>206+</b><span>&nbsp;&nbsp;&nbsp;&nbsp;<span class="token-keyword">await</span> generateProfile()</span></div>
+            <div class="line added selected"><b>207+</b><span>&nbsp;&nbsp;} catch (error) {</span></div>
+            <div class="line added selected"><b>208+</b><span>&nbsp;&nbsp;&nbsp;&nbsp;logger.warn(<span class="token-string">'生成失败'</span>)</span></div>
+            <div class="line added selected"><b>209+</b><span>&nbsp;&nbsp;}</span></div>
+            <div class="line added selected block-end"><b>210+</b><span>}</span></div>
+            <div class="line"><b>211</b><span>&nbsp;</span></div>
+            <div class="line"><b>212</b><span>startCore()</span></div>
+          </div>
+          <div class="minimap" aria-label="Minimap 视口滑块示意">
+            <div class="mini-lines"></div><div class="mini-change"></div><div class="mini-slider"></div>
+          </div>
+          <aside class="rail">
+            <div class="author-card selected" style="top: 62px; height: 176px">
+              <button class="author-select" type="button" aria-label="选择第 3 个变更块" aria-pressed="true">
+                <span>Danjin</span><span>Snowind</span>
+              </button>
+              <button class="more" type="button" aria-label="查看其余作者">…</button>
+            </div>
+          </aside>
+        </div>
+        <footer class="state-strip">
+          <div><i class="swatch" style="--alpha:16%"></i>普通 16%</div>
+          <div><i class="swatch" style="--alpha:30%"></i>hover 30%</div>
+          <div><i class="swatch" style="--alpha:45%"></i>拖动 45%</div>
+        </footer>
+      </article>
+
+      <article class="case dark">
+        <header class="case-title"><strong>深色主题</strong><small>块框骨架 · 归因加载中</small></header>
+        <div class="editor-grid">
+          <div class="code">
+            <div class="line"><b>201</b><span>return config</span></div>
+            <div class="line"><b>202</b><span>}</span></div>
+            <div class="line added selected block-start"><b>203+</b><span class="token-comment">// 准备新的工作目录</span></div>
+            <div class="line added selected"><b>204+</b><span><span class="token-keyword">if</span> (shouldChangeCurrent) {</span></div>
+            <div class="line added selected"><b>205+</b><span>&nbsp;&nbsp;<span class="token-keyword">try</span> {</span></div>
+            <div class="line added selected"><b>206+</b><span>&nbsp;&nbsp;&nbsp;&nbsp;<span class="token-keyword">await</span> generateProfile()</span></div>
+            <div class="line added selected"><b>207+</b><span>&nbsp;&nbsp;} catch (error) {</span></div>
+            <div class="line added selected"><b>208+</b><span>&nbsp;&nbsp;&nbsp;&nbsp;logger.warn(<span class="token-string">'生成失败'</span>)</span></div>
+            <div class="line added selected"><b>209+</b><span>&nbsp;&nbsp;}</span></div>
+            <div class="line added selected block-end"><b>210+</b><span>}</span></div>
+            <div class="line"><b>211</b><span>&nbsp;</span></div>
+            <div class="line"><b>212</b><span>startCore()</span></div>
+          </div>
+          <div class="minimap" aria-label="Minimap 视口滑块示意">
+            <div class="mini-lines"></div><div class="mini-change"></div><div class="mini-slider"></div>
+          </div>
+          <aside class="rail">
+            <div class="author-card loading" style="top: 62px; height: 176px" aria-busy="true">
+              <button class="author-select" type="button" aria-label="选择第 3 个变更块">加载中</button>
+            </div>
+          </aside>
+        </div>
+        <footer class="state-strip">
+          <div><i class="swatch" style="--alpha:16%"></i>普通 16%</div>
+          <div><i class="swatch" style="--alpha:30%"></i>hover 30%</div>
+          <div><i class="swatch" style="--alpha:45%"></i>拖动 45%</div>
+        </footer>
+      </article>
+    </section>
+
+    <p class="note"><strong>边界原则：</strong>AuthorRail 的卡片与 Monaco 绿色块共用同一行范围。卡片使用内描边，不增加上下 padding 或 margin；作者数量超过可见高度时显示有框体的 `…` 按钮并向左展开列表。</p>
+  </main>
+</body>
+</html>

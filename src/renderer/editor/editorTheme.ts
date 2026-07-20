@@ -44,6 +44,16 @@ function tokenRules(theme: EditorThemeColors): editor.ITokenThemeRule[] {
 const inactiveSelectionAlpha = '80';
 const diffLineAlpha = '99';
 const diffTextAlpha = 'CC';
+const minimapSliderAlpha = {
+  normal: '29',
+  hover: '4D',
+  active: '73'
+};
+const scrollbarSliderAlpha = {
+  normal: '38',
+  hover: '5C',
+  active: '85'
+};
 
 function withAlpha(color: string, alpha: string): string {
   return `${color}${alpha}`;
@@ -91,7 +101,12 @@ function shikiEditorColors(theme: EditorThemeColors): Record<string, string> {
     'editorWidget.background': theme.panelBackground,
     'editorWidget.border': theme.border,
     'minimap.background': theme.editorBackground,
-    'scrollbarSlider.background': theme.border,
+    'minimapSlider.background': withAlpha(theme.muted, minimapSliderAlpha.normal),
+    'minimapSlider.hoverBackground': withAlpha(theme.muted, minimapSliderAlpha.hover),
+    'minimapSlider.activeBackground': withAlpha(theme.muted, minimapSliderAlpha.active),
+    'scrollbarSlider.background': withAlpha(theme.muted, scrollbarSliderAlpha.normal),
+    'scrollbarSlider.hoverBackground': withAlpha(theme.muted, scrollbarSliderAlpha.hover),
+    'scrollbarSlider.activeBackground': withAlpha(theme.muted, scrollbarSliderAlpha.active),
     'contrastBorder': theme.border,
     'focusBorder': theme.accent,
     'diffEditor.removedLineBackground': theme.diffRemoved,

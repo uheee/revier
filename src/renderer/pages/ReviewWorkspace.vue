@@ -47,7 +47,8 @@ const {
   authors,
   authorsLoading,
   loading,
-  error
+  error,
+  diffComputationState
 } = storeToRefs(reviewStore);
 const projectId = computed(() => String(route.params.projectId ?? ''));
 const selectedFilePath = ref<string>();
@@ -58,6 +59,7 @@ const branches = ref<GitBranch[]>([]);
 const workspaceEl = ref<HTMLElement>();
 const layout = useReviewLayoutSizes();
 const project = computed(() => projectStore.projects.find((item) => item.id === projectId.value));
+const overlayContextKey = computed(() => `${selectedFilePath.value ?? ''}:${reviewStore.selectedCommitHash ?? ''}`);
 const defaultBranch = computed(() => project.value?.preferences.defaultBranch ?? 'HEAD');
 const defaultDays = computed(() => project.value?.preferences.defaultDays ?? 30);
 const defaultGlobRules = computed(() => project.value?.preferences.defaultGlobRules ?? []);
@@ -299,8 +301,10 @@ function closeCommitDrilldown(): void {
         :settings="editorSettings"
         :theme-name="editorThemeName"
         :requested-encoding="requestedEncoding"
-        :context-key="`${selectedFilePath ?? ''}:${selectedCommitHash ?? ''}`"
+        :context-key="overlayContextKey"
+        :diff-state="diffComputationState"
         @selected="reviewStore.selectBlock"
+        @diff-blocks-change="reviewStore.acceptDiffBlocks($event, overlayContextKey)"
         @draft-change="handleDraftChange"
         @encoding-change="changeOverlayEncoding"
       />

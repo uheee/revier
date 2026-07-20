@@ -5,14 +5,13 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use revier_analysis::api::QueryFilesRequest;
-use revier_analysis::cli::{
-    FileOverlayArgs, IndexBuildArgs, IndexCommonArgs, OutputFormat, OverlayCommonArgs,
-};
+use revier_analysis::cli::{IndexBuildArgs, IndexCommonArgs, OutputFormat, OverlayCommonArgs};
 use revier_analysis::contracts::{
-    AnalysisRange, AnalysisStage, AnalysisTaskSnapshot, AnalysisTaskStatus, AttributionConfidence,
-    AttributionMethod, AttributionWarning, AttributionWarningCode, AuthorFilterOption,
-    AuthorSummary, BlockAttributionSummary, ChangedFile, ChangedFileStatus, CommitOverlayRequest,
-    DiffBlock, DiffBlockChangeType, FileOverlay, FileOverlayMode, FileOverlayRequest, ProjectId,
+    AnalysisRange, AnalysisStage, AnalysisTaskSnapshot, AnalysisTaskStatus, AttributeBlocksRequest,
+    AttributeBlocksResult, AttributionConfidence, AttributionMethod, AttributionWarning,
+    AttributionWarningCode, AuthorFilterOption, AuthorSummary, BlockAttributionSummary,
+    ChangedFile, ChangedFileStatus, CommitOverlayRequest, DiffBlock, DiffBlockAttribution,
+    DiffBlockChangeType, FileOverlay, FileOverlayMode, FileOverlayRequest, ProjectId,
     RelatedCommit, RelatedCommitAttribution, ResolvedTextEncoding, ReviewAuthorOptionsRequest,
     ReviewFilters, ReviewProject, SideBySideDiffRow, SideBySideDiffRowType, TaskId, TextEncoding,
     TouchedRange, WordChange,
@@ -21,8 +20,8 @@ use revier_analysis::error::AppError as AnalysisAppError;
 use revier_analysis::execution::AnalysisExecutionContext;
 use revier_analysis::json::{
     AttributionWarningOutput, AuthorOutput, BlockAttributionOutput, ChangedFileOutput,
-    DiffBlockOutput, FileOverlayCommandOutput, RelatedCommitAttributionOutput, RelatedCommitOutput,
-    SideBySideDiffRowOutput, TouchedRangeOutput, WordChangeOutput,
+    DiffBlockOutput, RelatedCommitAttributionOutput, RelatedCommitOutput, SideBySideDiffRowOutput,
+    TouchedRangeOutput, WordChangeOutput,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -271,16 +270,121 @@ impl ReviewService {
     pub fn get_file_overlay(&self, request: FileOverlayRequest) -> CommandResult<FileOverlay> {
         self.ensure_completed_task(&request.task_id)?;
         let context = self.context_for_task(&request.task_id)?;
-        self.file_for_task(&request.task_id, &request.file_path)?;
-        let output = revier_analysis::api::file_overlay(FileOverlayArgs {
-            common: overlay_common_args(&context),
-            file: request.file_path,
-            encoding: requested_encoding_as_str(request.encoding.unwrap_or(TextEncoding::Auto))
-                .to_string(),
+        let file = self.file_for_task(&request.task_id, &request.file_path)?;
+        let document = load_range_overlay_document(
+            &context,
+            &request.file_path,
+            request.encoding.unwrap_or(TextEncoding::Auto),
+        )?;
+
+        Ok(FileOverlay {
+            mode: Some(FileOverlayMode::Range),
+            file,
+            range: context.range,
+            rows: None,
+            blocks: Vec::new(),
+            warnings: document.warnings,
+            commit: None,
+            parent_hash: None,
+            old_content: document.old_text,
+            new_content: document.new_text,
+            resolved_encoding: document.resolved_encoding,
         })
+    }
+
+    pub fn attribute_blocks(
+        &self,
+        request: AttributeBlocksRequest,
+    ) -> CommandResult<AttributeBlocksResult> {
+        self.ensure_completed_task(&request.task_id)?;
+        let context = self.context_for_task(&request.task_id)?;
+        self.file_for_task(&request.task_id, &request.file_path)?;
+        let document = load_range_overlay_document(
+            &context,
+            &request.file_path,
+            resolved_encoding_as_requested(request.resolved_encoding),
+        )?;
+        if document.resolved_encoding != request.resolved_encoding {
+            return Err(command_error_with_detail(
+                "ENCODING_CHANGED",
+                "文件编码解析结果已变化，无法合并归因",
+                format!(
+                    "request={:?}; actual={:?}",
+                    request.resolved_encoding, document.resolved_encoding
+                ),
+            ));
+        }
+
+        let repo = revier_analysis::git::repository::open_repository(Path::new(
+            &context.project.repo_path,
+        ))
+        .map_err(map_analysis_error)?;
+        let attribution_context = revier_analysis::attribution::context::AttributionContext::open(
+            &repo,
+            &overlay_common_args(&context),
+        )
+        .map_err(map_analysis_error)?;
+        let mut warnings = document.warnings;
+        for warning in attribution_context.warnings.iter() {
+            append_app_warning(&mut warnings, warning);
+        }
+
+        let path_candidates = revier_analysis::attribution::path_history::path_candidates(
+            &attribution_context,
+            &context.range.base_commit,
+            &context.range.head_commit,
+            &document.change.path,
+            document.change.old_path.as_deref(),
+        )
+        .map_err(map_analysis_error)?;
+        for warning in path_candidates.warnings {
+            append_app_warning(&mut warnings, &warning);
+        }
+
+        let blocks = revier_analysis::overlay::block_ranges::build_blocks_from_ranges(
+            &document.old_text,
+            &document.new_text,
+            &request.blocks,
+        )
+        .map_err(map_analysis_error)?;
+        let attribution_options =
+            revier_analysis::attribution::patch_inference::AttributionOptions {
+                encoding: document.resolved_encoding,
+                authors: &context.filters.author_keys.clone().unwrap_or_default(),
+                author_query: context.filters.author_query.as_deref(),
+                message: context.filters.message_query.as_deref(),
+            };
+        let blocks = revier_analysis::attribution::patch_inference::attach_patch_inference(
+            &attribution_context,
+            blocks,
+            &document.change.path,
+            document.change.old_path.as_deref(),
+            &attribution_options,
+        )
+        .map_err(map_analysis_error)?;
+        let blocks = revier_analysis::attribution::blame::attach_blame_attribution(
+            &attribution_context,
+            &context.range.head_commit,
+            &document.change.path,
+            blocks,
+            &attribution_options,
+        )
+        .map_err(map_analysis_error)?;
+        let blocks = revier_analysis::attribution::deletion_trace::attach_deletion_trace(
+            &attribution_context,
+            blocks,
+            &path_candidates.paths,
+            &document.change.path,
+            document.change.old_path.as_deref(),
+            &attribution_options,
+        )
         .map_err(map_analysis_error)?;
 
-        adapt_file_overlay_output(output, &context.range)
+        Ok(AttributeBlocksResult {
+            resolved_encoding: document.resolved_encoding,
+            attributions: adapt_block_attributions(blocks)?,
+            warnings,
+        })
     }
 
     pub fn get_commit_overlay(&self, request: CommitOverlayRequest) -> CommandResult<FileOverlay> {
@@ -672,6 +776,109 @@ fn overlay_common_args(context: &ReviewTaskContext) -> OverlayCommonArgs {
     }
 }
 
+struct OverlayDocument {
+    change: revier_analysis::git::diff::CommitFileChange,
+    old_text: String,
+    new_text: String,
+    resolved_encoding: ResolvedTextEncoding,
+    warnings: Vec<revier_analysis::contracts::AppError>,
+}
+
+fn load_range_overlay_document(
+    context: &ReviewTaskContext,
+    file_path: &str,
+    requested_encoding: TextEncoding,
+) -> CommandResult<OverlayDocument> {
+    let repo =
+        revier_analysis::git::repository::open_repository(Path::new(&context.project.repo_path))
+            .map_err(map_analysis_error)?;
+    let change = revier_analysis::git::diff::changed_file_between(
+        &repo,
+        &context.range.base_commit,
+        &context.range.head_commit,
+        file_path,
+    )
+    .map_err(map_analysis_error)?
+    .ok_or_else(|| {
+        command_error_with_detail("FILE_NOT_CHANGED", "文件在当前范围内未变更", file_path)
+    })?;
+
+    let old_path = old_text_path(&change);
+    let new_path = new_text_path(&change);
+    let old_bytes = match old_path {
+        Some(path) => {
+            revier_analysis::git::blob::read_blob_at_commit(&repo, &context.range.base_commit, path)
+                .map_err(map_analysis_error)?
+                .unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+    let new_bytes = match new_path {
+        Some(path) => {
+            revier_analysis::git::blob::read_blob_at_commit(&repo, &context.range.head_commit, path)
+                .map_err(map_analysis_error)?
+                .unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+    let preferred_bytes = if new_path.is_some() {
+        &new_bytes
+    } else {
+        &old_bytes
+    };
+    let resolved_encoding =
+        revier_analysis::text_encoding::decode_text_bytes(preferred_bytes, requested_encoding)
+            .map_err(map_analysis_error)?
+            .encoding;
+    let concrete_encoding =
+        revier_analysis::text_encoding::resolved_as_requested(resolved_encoding);
+    let old_text = revier_analysis::text_encoding::decode_text_bytes(&old_bytes, concrete_encoding)
+        .map_err(map_analysis_error)?
+        .text;
+    let new_text = revier_analysis::text_encoding::decode_text_bytes(&new_bytes, concrete_encoding)
+        .map_err(map_analysis_error)?
+        .text;
+    if change.is_binary
+        && !matches!(
+            resolved_encoding,
+            ResolvedTextEncoding::Utf16Le | ResolvedTextEncoding::Utf16Be
+        )
+    {
+        return Err(command_error_with_detail(
+            "FILE_NOT_ANALYZABLE",
+            "文件包含二进制内容",
+            change.path,
+        ));
+    }
+
+    Ok(OverlayDocument {
+        change,
+        old_text,
+        new_text,
+        resolved_encoding,
+        warnings: Vec::new(),
+    })
+}
+
+fn resolved_encoding_as_requested(encoding: ResolvedTextEncoding) -> TextEncoding {
+    match encoding {
+        ResolvedTextEncoding::Utf8 => TextEncoding::Utf8,
+        ResolvedTextEncoding::Gb18030 => TextEncoding::Gb18030,
+        ResolvedTextEncoding::Utf16Le => TextEncoding::Utf16Le,
+        ResolvedTextEncoding::Utf16Be => TextEncoding::Utf16Be,
+    }
+}
+
+fn append_app_warning(warnings: &mut Vec<revier_analysis::contracts::AppError>, message: &str) {
+    let warning = command_error("ANALYSIS_WARNING", message.to_string());
+    if !warnings
+        .iter()
+        .any(|item| item.code == warning.code && item.message == warning.message)
+    {
+        warnings.push(warning);
+    }
+}
+
 fn parse_optional_time(value: Option<&str>, field: &str) -> CommandResult<Option<DateTime<Utc>>> {
     value.map(|value| parse_time(value, field)).transpose()
 }
@@ -766,8 +973,9 @@ fn adapt_changed_file_status(status: &str) -> CommandResult<ChangedFileStatus> {
     }
 }
 
+#[cfg(test)]
 fn adapt_file_overlay_output(
-    output: FileOverlayCommandOutput,
+    output: revier_analysis::json::FileOverlayCommandOutput,
     cached_range: &AnalysisRange,
 ) -> CommandResult<FileOverlay> {
     let overlay = output.overlay;
@@ -791,16 +999,7 @@ fn adapt_file_overlay_output(
     })
 }
 
-fn requested_encoding_as_str(encoding: TextEncoding) -> &'static str {
-    match encoding {
-        TextEncoding::Auto => "auto",
-        TextEncoding::Utf8 => "utf-8",
-        TextEncoding::Gb18030 => "gb18030",
-        TextEncoding::Utf16Le => "utf-16le",
-        TextEncoding::Utf16Be => "utf-16be",
-    }
-}
-
+#[cfg(test)]
 fn adapt_resolved_text_encoding(encoding: &str) -> CommandResult<ResolvedTextEncoding> {
     match encoding {
         "utf-8" => Ok(ResolvedTextEncoding::Utf8),
@@ -815,6 +1014,7 @@ fn adapt_resolved_text_encoding(encoding: &str) -> CommandResult<ResolvedTextEnc
     }
 }
 
+#[cfg(test)]
 fn adapt_file_overlay_mode(mode: &str) -> CommandResult<FileOverlayMode> {
     match mode {
         "range" => Ok(FileOverlayMode::Range),
@@ -870,6 +1070,23 @@ fn adapt_word_changes(changes: Vec<WordChangeOutput>) -> CommandResult<Vec<WordC
 
 fn adapt_blocks(blocks: Vec<DiffBlockOutput>) -> CommandResult<Vec<DiffBlock>> {
     blocks.into_iter().map(adapt_block).collect()
+}
+
+fn adapt_block_attributions(
+    blocks: Vec<DiffBlockOutput>,
+) -> CommandResult<Vec<DiffBlockAttribution>> {
+    blocks
+        .into_iter()
+        .map(|block| {
+            let authors = adapt_authors(block.authors, &block.related_commits);
+            Ok(DiffBlockAttribution {
+                id: block.id,
+                authors,
+                related_commits: adapt_related_commits(block.related_commits)?,
+                attribution: block.attribution.map(adapt_block_attribution).transpose()?,
+            })
+        })
+        .collect()
 }
 
 fn adapt_block(block: DiffBlockOutput) -> CommandResult<DiffBlock> {
@@ -1061,6 +1278,9 @@ fn adapt_attribution_warning_code(code: &str) -> CommandResult<AttributionWarnin
         "MERGE_TRACE_AMBIGUOUS" => Ok(AttributionWarningCode::MergeTraceAmbiguous),
         "PATH_HISTORY_INCOMPLETE" => Ok(AttributionWarningCode::PathHistoryIncomplete),
         "DELETION_TRACE_INCOMPLETE" => Ok(AttributionWarningCode::DeletionTraceIncomplete),
+        "EOF_NEWLINE_ATTRIBUTION_UNAVAILABLE" => {
+            Ok(AttributionWarningCode::EofNewlineAttributionUnavailable)
+        }
         other => Err(command_error_with_detail(
             "UNKNOWN_ATTRIBUTION_WARNING_CODE",
             format!("未知归因警告代码：{other}"),
@@ -1130,6 +1350,7 @@ fn error_detail(error: &revier_analysis::contracts::AppError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use revier_analysis::json::FileOverlayCommandOutput;
     use std::ffi::OsString;
     use std::path::Path;
     use std::process::Command;
@@ -1762,7 +1983,8 @@ mod tests {
         assert!(matches!(overlay.mode, Some(FileOverlayMode::Range)));
         assert_eq!(overlay.file.path, "src/app.txt");
         assert_eq!(overlay.range.branch, "main");
-        assert!(!overlay.blocks.is_empty());
+        assert!(overlay.rows.is_none());
+        assert!(overlay.blocks.is_empty());
         assert_eq!(overlay.old_content, "one\n");
         assert_eq!(overlay.new_content, "one\ntwo\n");
         assert_eq!(overlay.resolved_encoding, ResolvedTextEncoding::Utf8);

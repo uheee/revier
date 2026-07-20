@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { editor } from 'monaco-editor';
 import type { DiffBlock, EditorSettings } from '../../generated/bindings';
 import { addNotification } from '../../composables/useNotifications';
+import type { MonacoDiffBlocksPayload } from '../../editor/monacoDiffBlocks';
 import {
   createMonacoDiffSession,
   type MonacoDiffSession
@@ -23,6 +24,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   draftChange: [value: true];
   selected: [block: DiffBlock];
+  diffBlocksChange: [payload: MonacoDiffBlocksPayload];
   cursorChange: [line: number, column: number];
   editorsReady: [original: editor.ICodeEditor, modified: editor.ICodeEditor];
 }>();
@@ -31,6 +33,7 @@ const container = ref<HTMLElement>();
 const loadError = ref<string>();
 let session: MonacoDiffSession | undefined;
 let resizeObserver: ResizeObserver | undefined;
+let sessionGeneration = 0;
 
 function disposeSession(): void {
   try {
@@ -48,6 +51,7 @@ function createSession(): void {
   }
 
   try {
+    sessionGeneration += 1;
     session = createMonacoDiffSession({
       container: container.value,
       path: props.path,
@@ -57,8 +61,11 @@ function createSession(): void {
       settings: props.settings,
       themeName: props.themeName,
       blocks: props.blocks,
+      generation: sessionGeneration,
+      contextKey: props.contextKey,
       onDraftChange: (value) => emit('draftChange', value),
       onBlockSelected: (block) => emit('selected', block),
+      onDiffBlocksChange: (payload) => emit('diffBlocksChange', payload),
       onCursorChange: (line, column) => emit('cursorChange', line, column),
       onEditorsReady: (original, modified) => emit('editorsReady', original, modified)
     });
@@ -79,9 +86,9 @@ watch([
   () => props.path,
   () => props.oldContent,
   () => props.newContent,
-  () => props.contextKey,
-  () => props.blocks
+  () => props.contextKey
 ], createSession);
+watch(() => props.blocks, (blocks) => session?.setBlocks(blocks));
 watch(() => props.languageId, (languageId) => session?.setLanguage(languageId));
 watch(() => props.themeName, (themeName) => session?.setTheme(themeName));
 watch(() => props.selectedBlock, (block) => session?.setSelectedBlock(block));

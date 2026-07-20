@@ -3,6 +3,11 @@ import type { editor } from 'monaco-editor';
 import type { DiffBlock, EditorSettings } from '../generated/bindings';
 import { toFontFamily } from './editorTheme';
 import { resolveInitializedLanguage } from './monacoEnvironment';
+import {
+  diffBlocksSignature,
+  normalizeMonacoDiffBlocks,
+  type MonacoDiffBlocksPayload
+} from './monacoDiffBlocks';
 
 export interface MonacoDiffSession {
   diffEditor: editor.IStandaloneDiffEditor;
@@ -10,6 +15,7 @@ export interface MonacoDiffSession {
   modifiedEditor: editor.ICodeEditor;
   setLanguage(languageId: string): void;
   setTheme(themeName: 'revier-light' | 'revier-dark'): void;
+  setBlocks(blocks: DiffBlock[]): void;
   setSelectedBlock(block?: DiffBlock): void;
   layout(): void;
   dispose(): void;
@@ -24,8 +30,11 @@ export interface MonacoDiffSessionOptions {
   settings: EditorSettings;
   themeName: 'revier-light' | 'revier-dark';
   blocks: DiffBlock[];
+  generation?: number;
+  contextKey?: string | number;
   onDraftChange(value: true): void;
   onBlockSelected(block: DiffBlock): void;
+  onDiffBlocksChange?(payload: MonacoDiffBlocksPayload): void;
   onCursorChange(line: number, column: number): void;
   onEditorsReady(original: editor.ICodeEditor, modified: editor.ICodeEditor): void;
 }
@@ -96,6 +105,8 @@ export function createMonacoDiffSession(
   const listeners: monaco.IDisposable[] = [];
   let draft = false;
   let disposed = false;
+  let currentBlocks = options.blocks;
+  let lastPublishedSignature: string | undefined;
 
   const cleanupResources = (): unknown[] => {
     if (disposed) {
@@ -162,7 +173,9 @@ export function createMonacoDiffSession(
       fontFamily: toFontFamily(options.settings.editor.fontFamilies),
       fontSize: options.settings.editor.fontSize,
       lineHeight: options.settings.editor.lineHeight,
-      minimap: { enabled: options.settings.editor.minimap },
+      minimap: { enabled: options.settings.editor.minimap, showSlider: 'always' },
+      diffAlgorithm: 'advanced',
+      ignoreTrimWhitespace: false,
       folding: true,
       matchBrackets: 'always',
       largeFileOptimizations: true,
@@ -186,6 +199,7 @@ export function createMonacoDiffSession(
       draft = true;
       originalDecorations?.clear();
       modifiedDecorations?.clear();
+      currentBlocks = [];
       options.onDraftChange(true);
     };
     listeners.push(originalModel.onDidChangeContent(enterDraft));
@@ -196,7 +210,7 @@ export function createMonacoDiffSession(
         if (draft || !event.target.position) {
           return;
         }
-        const block = blockAtLine(options.blocks, side, event.target.position.lineNumber);
+        const block = blockAtLine(currentBlocks, side, event.target.position.lineNumber);
         if (block) {
           options.onBlockSelected(block);
         }
@@ -212,6 +226,34 @@ export function createMonacoDiffSession(
     };
     listenForCursor(originalEditor);
     listenForCursor(modifiedEditor);
+
+    const publishDiffBlocks = (): void => {
+      if (disposed || draft || !options.onDiffBlocksChange || !originalModel || !modifiedModel) {
+        return;
+      }
+      const changes = diffEditor?.getLineChanges() ?? null;
+      const blocks = normalizeMonacoDiffBlocks(changes, originalModel, modifiedModel);
+      if (blocks === null) {
+        return;
+      }
+      const signature = diffBlocksSignature(blocks);
+      if (signature === lastPublishedSignature) {
+        return;
+      }
+      lastPublishedSignature = signature;
+      currentBlocks = blocks;
+      options.onDiffBlocksChange({
+        generation: options.generation ?? 0,
+        contextKey: options.contextKey ?? options.path,
+        signature,
+        blocks
+      });
+    };
+    if (typeof diffEditor.onDidUpdateDiff === 'function') {
+      listeners.push(diffEditor.onDidUpdateDiff(publishDiffBlocks));
+    }
+    publishDiffBlocks();
+
     options.onEditorsReady(originalEditor, modifiedEditor);
 
     return {
@@ -231,6 +273,9 @@ export function createMonacoDiffSession(
           return;
         }
         monaco.editor.setTheme(themeName);
+      },
+      setBlocks(blocks) {
+        currentBlocks = blocks;
       },
       setSelectedBlock(block) {
         if (disposed) {

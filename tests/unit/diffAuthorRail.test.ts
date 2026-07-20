@@ -77,7 +77,7 @@ function mountRail(options: { draft?: boolean; blocks?: DiffBlock[]; original?: 
   const original = options.original ?? mockEditor().value;
   const modified = options.modified ?? mockEditor().value;
   return mount(DiffAuthorRail, {
-    props: { blocks: options.blocks ?? [diffBlock()], draft: options.draft ?? false, originalEditor: original, modifiedEditor: modified },
+    props: { blocks: options.blocks ?? [diffBlock()], draft: options.draft ?? false, originalEditor: original, modifiedEditor: modified, attributionState: 'ready' },
     global: { stubs: { NPopover: NPopoverStub, Popover: NPopoverStub, 'n-popover': NPopoverStub } }
   });
 }
@@ -105,7 +105,7 @@ describe('DiffAuthorRail', () => {
 
   it('点击块选择，点击省略号只打开向左的完整作者列表', async () => {
     const wrapper = mountRail();
-    await wrapper.get('.diff-author-rail__block').trigger('click');
+    await wrapper.get('.diff-author-rail__select').trigger('click');
     expect(wrapper.emitted('selected')).toEqual([[expect.objectContaining({ id: 'block-1' })]]);
 
     await wrapper.get('.diff-author-rail__more').trigger('click');
@@ -131,7 +131,7 @@ describe('DiffAuthorRail', () => {
     expect(wrapper.find('.popover-content').exists()).toBe(false);
 
     await wrapper.findAll('.diff-author-rail__more')[0].trigger('click');
-    await wrapper.findAll('.diff-author-rail__block')[1].trigger('click');
+    await wrapper.findAll('.diff-author-rail__select')[1].trigger('click');
     expect(wrapper.find('.popover-content').exists()).toBe(false);
 
     await wrapper.findAll('.diff-author-rail__more')[0].trigger('click');
@@ -140,12 +140,15 @@ describe('DiffAuthorRail', () => {
     expect(wrapper.find('.popover-content').exists()).toBe(false);
   });
 
-  it('作者块可由键盘聚焦和激活', async () => {
+  it('作者块内部选择按钮可由键盘聚焦和激活，外壳不伪装成按钮', async () => {
     const wrapper = mountRail();
     const authorBlock = wrapper.get('.diff-author-rail__block');
-    expect(authorBlock.attributes('role')).toBe('button');
-    expect(authorBlock.attributes('tabindex')).toBe('0');
-    await authorBlock.trigger('keydown', { key: 'Enter' });
+    expect(authorBlock.attributes('role')).toBeUndefined();
+    expect(authorBlock.attributes('tabindex')).toBeUndefined();
+    const select = wrapper.get('.diff-author-rail__select');
+    expect(select.attributes('type')).toBe('button');
+    await select.trigger('keydown.enter');
+    await select.trigger('click');
     expect(wrapper.emitted('selected')).toHaveLength(1);
   });
 
@@ -189,8 +192,8 @@ describe('DiffAuthorRail', () => {
     modified.listeners.layout[0]();
     frames.shift()?.(0);
     await nextTick();
-    expect(wrapper.get('.diff-author-rail__block').attributes('style')).toContain('height: 20px');
-    expect(wrapper.findAll('.diff-author-rail__author')).toHaveLength(0);
+    expect(wrapper.get('.diff-author-rail__block').attributes('style')).toContain('height: 60px');
+    expect(wrapper.findAll('.diff-author-rail__author')).toHaveLength(1);
     expect(wrapper.find('.diff-author-rail__more').exists()).toBe(true);
 
     await wrapper.setProps({ draft: true });

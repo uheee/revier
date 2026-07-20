@@ -40,7 +40,8 @@ pub fn run() {
             commands::review::review_cancel_analysis,
             commands::review::review_list_authors,
             commands::review::review_get_file_overlay,
-            commands::review::review_get_commit_overlay
+            commands::review::review_get_commit_overlay,
+            commands::review::review_attribute_blocks
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 应用启动失败");

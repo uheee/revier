@@ -73,10 +73,28 @@ export function getDiffBlockGeometry(
   originalEditor: DiffBlockGeometryEditor,
   modifiedEditor: DiffBlockGeometryEditor
 ): DiffBlockGeometry | undefined {
+  if (block.changeType === 'modified') {
+    const original = sideGeometry(block.oldStart, block.oldEnd, originalEditor);
+    const modified = sideGeometry(block.newStart, block.newEnd, modifiedEditor);
+    if (!original) return modified;
+    if (!modified) return original;
+    const top = Math.min(original.top, modified.top);
+    const bottom = Math.max(original.top + original.height, modified.top + modified.height);
+    return { top, height: bottom - top };
+  }
   const usesOriginal = block.changeType === 'deleted';
-  const editorInstance = usesOriginal ? originalEditor : modifiedEditor;
-  const start = usesOriginal ? block.oldStart : block.newStart;
-  const end = usesOriginal ? block.oldEnd : block.newEnd;
+  return sideGeometry(
+    usesOriginal ? block.oldStart : block.newStart,
+    usesOriginal ? block.oldEnd : block.newEnd,
+    usesOriginal ? originalEditor : modifiedEditor
+  );
+}
+
+function sideGeometry(
+  start: number,
+  end: number,
+  editorInstance: DiffBlockGeometryEditor
+): DiffBlockGeometry | undefined {
   if (start <= 0 || end < start) {
     return undefined;
   }

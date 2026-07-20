@@ -89,7 +89,7 @@ describe('diffBlockGeometry', () => {
     expect(fitAuthors(0, [])).toEqual({ visible: [], hasMore: false });
   });
 
-  it('修改和新增块使用修改侧，删除块使用原始侧', () => {
+  it('修改块使用左右可见区域并集，新增块使用修改侧，删除块使用原始侧', () => {
     const original = geometryEditor({ scrollTop: 180 });
     const modified = geometryEditor({ scrollTop: 380 });
 
@@ -100,22 +100,33 @@ describe('diffBlockGeometry', () => {
     expect(original.getTopForLineNumber).toHaveBeenCalledWith(10);
   });
 
+  it('修改块在两侧高度不同时使用纵向并集', () => {
+    const original = geometryEditor({
+      scrollTop: 180,
+      topForLine: (lineNumber) => lineNumber === 10 ? 180 : (lineNumber - 1) * 20,
+      bottomForLine: (lineNumber) => lineNumber === 13 ? 320 : lineNumber * 20
+    });
+    const modified = geometryEditor({ scrollTop: 380 });
+
+    expect(getDiffBlockGeometry(block('modified'), original, modified)).toEqual({ top: 0, height: 140 });
+  });
+
   it('把部分出视口的块裁剪到视口且高度不超过可见块高度', () => {
     const original = geometryEditor();
     const modified = geometryEditor({ scrollTop: 410, layoutHeight: 60 });
 
-    expect(getDiffBlockGeometry(block(), original, modified)).toEqual({ top: 0, height: 50 });
+    expect(getDiffBlockGeometry(block('added'), original, modified)).toEqual({ top: 0, height: 50 });
   });
 
   it('完全出视口、零行范围或完全折叠时隐藏', () => {
     const editor = geometryEditor({ visibleRanges: [{ startLineNumber: 1, endLineNumber: 8 }] });
-    expect(getDiffBlockGeometry(block(), editor, editor)).toBeUndefined();
+    expect(getDiffBlockGeometry(block('added'), editor, editor)).toBeUndefined();
 
     const zeroRange = { ...block('added'), newStart: 0, newEnd: 0 };
     expect(getDiffBlockGeometry(zeroRange, editor, editor)).toBeUndefined();
 
     const folded = geometryEditor({ visibleRanges: [{ startLineNumber: 1, endLineNumber: 19 }, { startLineNumber: 24, endLineNumber: 30 }] });
-    expect(getDiffBlockGeometry(block(), folded, folded)).toBeUndefined();
+    expect(getDiffBlockGeometry(block('added'), folded, folded)).toBeUndefined();
   });
 
   it('跨折叠区时只使用公开可见行坐标，并为边界空位置回退到公开滚动坐标', () => {

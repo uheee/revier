@@ -3,6 +3,11 @@
 > **实现状态（2026-07-19）：已完成。** 最终实现与真实 Tauri 验收结果见
 > [Monaco 编辑器最终验收记录](../verification/2026-07-19-revier-monaco-editor.md)。
 
+> **后续修订（2026-07-20）：** 本文关于“Rust `DiffBlock` 是 UI 块边界事实来源”以及允许 Monaco/Rust
+> 边界差异的内容，已由
+> [Monaco 单一 Diff 块边界设计](./2026-07-20-revier-monaco-canonical-diff-design.md)取代；其余已验收的
+> 编辑器、草稿、语言、编码、主题与布局设计继续有效。
+
 > 状态：已确认。本文记录 Revier 将现有自绘 Diff 阅读区升级为 Monaco 原生 Diff Editor 的完整设计。本文是后续实施计划、测试与验收的唯一范围依据。
 
 ## 关联成果

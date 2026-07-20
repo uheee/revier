@@ -5,6 +5,10 @@
 > [最终验收记录](../verification/2026-07-19-revier-monaco-editor.md)。下方复选框保留为原始执行清单，
 > 实际完成状态以验收记录和对应语义化提交为准。
 
+> **后续计划（2026-07-20）：** Monaco/Rust 块边界统一、Minimap 滑块和 AuthorRail 卡片修订见
+> [Monaco 单一 Diff 块边界实施计划](./2026-07-20-revier-monaco-canonical-diff-implementation.md)。本文保留为
+> 已完成版本的历史执行记录。
+
 > **给 agentic workers：** 必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 按任务执行本计划。所有步骤使用 checkbox（`- [ ]`）语法跟踪。
 
 **目标：** 将 Revier 当前自绘 side-by-side Diff 升级为 Monaco 原生 Diff Editor，使左右两侧可临时编辑但永不保存，并完整实现语言高亮、编码切换、应用级 TOML 主题、真实块选择和外置 AuthorRail。

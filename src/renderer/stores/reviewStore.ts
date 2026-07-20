@@ -2,6 +2,11 @@ import { defineStore } from 'pinia';
 import { toErrorMessage } from '../api/errors';
 import { revierClient } from '../api/revierClient';
 import { addNotification } from '../composables/useNotifications';
+import {
+  mergeDiffBlockAttributions,
+  toDiffBlockRanges,
+  type MonacoDiffBlocksPayload
+} from '../editor/monacoDiffBlocks';
 import type {
   AnalysisTaskSnapshot,
   AuthorFilterOption,
@@ -27,6 +32,9 @@ interface ReviewState {
   authorsLoading: boolean;
   loading: boolean;
   error?: string;
+  diffComputationState: 'computing' | 'attributing' | 'ready' | 'empty' | 'failed';
+  diffBlocksSignature?: string;
+  attributionRequestId: number;
   analysisRequestId: number;
   overlayRequestId: number;
   drilldownRequestId: number;
@@ -88,6 +96,9 @@ export const useReviewStore = defineStore('review', {
     authorsLoading: false,
     loading: false,
     error: undefined,
+    diffComputationState: 'computing',
+    diffBlocksSignature: undefined,
+    attributionRequestId: 0,
     analysisRequestId: 0,
     overlayRequestId: 0,
     drilldownRequestId: 0,
@@ -103,6 +114,7 @@ export const useReviewStore = defineStore('review', {
       this.error = undefined;
       this.overlay = undefined;
       this.selectedBlock = undefined;
+      this.invalidateAttribution();
       this.files = [];
       this.cancelOverlay();
       this.closeCommitDrilldown();
@@ -264,6 +276,7 @@ export const useReviewStore = defineStore('review', {
       this.error = undefined;
       this.overlay = undefined;
       this.selectedBlock = undefined;
+      this.invalidateAttribution();
       this.closeCommitDrilldown();
       try {
         const overlay = await revierClient.review.getFileOverlay({
@@ -273,6 +286,8 @@ export const useReviewStore = defineStore('review', {
         });
         if (requestId !== this.overlayRequestId) return false;
         this.overlay = overlay;
+        this.diffComputationState = 'computing';
+        this.diffBlocksSignature = undefined;
         return true;
       } catch (error) {
         if (requestId === this.overlayRequestId) {
@@ -307,6 +322,8 @@ export const useReviewStore = defineStore('review', {
         if (requestId !== this.overlayRequestId) return false;
         this.overlay = overlay;
         this.selectedBlock = undefined;
+        this.invalidateAttribution();
+        this.diffComputationState = 'computing';
         return true;
       } catch (error) {
         if (requestId === this.overlayRequestId) {
@@ -325,12 +342,85 @@ export const useReviewStore = defineStore('review', {
 
     cancelOverlay(): void {
       ++this.overlayRequestId;
+      this.invalidateAttribution();
       this.loading = false;
       this.activeOverlayPath = undefined;
     },
 
     selectBlock(block?: DiffBlock): void {
       this.selectedBlock = block;
+    },
+
+    invalidateAttribution(): void {
+      ++this.attributionRequestId;
+      this.diffBlocksSignature = undefined;
+      this.diffComputationState = 'computing';
+    },
+
+    acceptDiffBlocks(payload: MonacoDiffBlocksPayload, expectedContextKey: string | number): void {
+      if (!this.overlay || payload.contextKey !== expectedContextKey) {
+        return;
+      }
+      if (payload.signature === this.diffBlocksSignature) {
+        return;
+      }
+      this.diffBlocksSignature = payload.signature;
+      this.overlay = { ...this.overlay, blocks: payload.blocks };
+      this.selectedBlock = this.selectedBlock
+        ? payload.blocks.find((block) => block.id === this.selectedBlock?.id)
+        : undefined;
+      if (payload.blocks.length === 0) {
+        this.diffComputationState = 'empty';
+        return;
+      }
+      this.diffComputationState = 'attributing';
+      void this.loadBlockAttribution(payload.signature);
+    },
+
+    async loadBlockAttribution(signature: string): Promise<void> {
+      if (!this.task || !this.overlay || this.overlay.blocks.length === 0) {
+        return;
+      }
+      const requestId = ++this.attributionRequestId;
+      const taskId = this.task.taskId;
+      const filePath = this.overlay.file.path;
+      const resolvedEncoding = this.overlay.resolvedEncoding;
+      const blocks = [...this.overlay.blocks];
+      try {
+        const result = await revierClient.review.attributeBlocks({
+          taskId,
+          filePath,
+          resolvedEncoding,
+          blocks: toDiffBlockRanges(blocks)
+        });
+        if (requestId !== this.attributionRequestId) return;
+        if (!this.overlay || this.task?.taskId !== taskId) return;
+        if (
+          this.overlay.file.path !== filePath
+          || this.overlay.resolvedEncoding !== resolvedEncoding
+          || this.diffBlocksSignature !== signature
+          || result.resolvedEncoding !== resolvedEncoding
+        ) {
+          return;
+        }
+        const mergedBlocks = mergeDiffBlockAttributions(this.overlay.blocks, result.attributions);
+        const warnings = [...this.overlay.warnings];
+        for (const warning of result.warnings) {
+          if (!warnings.some((item) => item.code === warning.code && item.message === warning.message && item.detail === warning.detail)) {
+            warnings.push(warning);
+          }
+        }
+        this.overlay = { ...this.overlay, blocks: mergedBlocks, warnings };
+        this.selectedBlock = this.selectedBlock
+          ? mergedBlocks.find((block) => block.id === this.selectedBlock?.id)
+          : undefined;
+        this.diffComputationState = 'ready';
+      } catch (error) {
+        if (requestId !== this.attributionRequestId) return;
+        const message = toErrorMessage(error);
+        this.diffComputationState = 'failed';
+        notifyReviewError('变更块归因失败', `${this.overlay?.file.path ?? filePath}：${message}`);
+      }
     },
 
     async loadCommitOverlay(

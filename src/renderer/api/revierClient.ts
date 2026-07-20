@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   AnalysisTaskSnapshot,
+  AttributeBlocksRequest,
+  AttributeBlocksResult,
   AuthorFilterOption,
   ChangedFile,
   CommitOverlayRequest,
@@ -54,6 +56,8 @@ export const revierClient = {
     listAuthors: (request: ReviewAuthorOptionsRequest) =>
       invoke<AuthorFilterOption[]>('review_list_authors', { request }),
     getCommitOverlay: (request: CommitOverlayRequest) =>
-      invoke<FileOverlay>('review_get_commit_overlay', { request })
+      invoke<FileOverlay>('review_get_commit_overlay', { request }),
+    attributeBlocks: (request: AttributeBlocksRequest) =>
+      invoke<AttributeBlocksResult>('review_attribute_blocks', { request })
   }
 };

@@ -49,6 +49,10 @@ pub fn export_typescript_bindings(output: &Path) -> Result<(), std::io::Error> {
         .register::<SideBySideDiffRow>()
         .register::<DiffBlockChangeType>()
         .register::<DiffBlock>()
+        .register::<DiffBlockRange>()
+        .register::<AttributeBlocksRequest>()
+        .register::<DiffBlockAttribution>()
+        .register::<AttributeBlocksResult>()
         .register::<FileOverlayMode>()
         .register::<FileOverlay>();
 

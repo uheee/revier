@@ -1,6 +1,7 @@
 use revier_analysis::contracts::{
-    AnalysisTaskSnapshot, AuthorFilterOption, ChangedFile, CommitOverlayRequest, FileOverlay,
-    FileOverlayRequest, ReviewAuthorOptionsRequest, ReviewFilters,
+    AnalysisTaskSnapshot, AttributeBlocksRequest, AttributeBlocksResult, AuthorFilterOption,
+    ChangedFile, CommitOverlayRequest, FileOverlay, FileOverlayRequest, ReviewAuthorOptionsRequest,
+    ReviewFilters,
 };
 use tauri::{AppHandle, Emitter, State};
 
@@ -85,6 +86,22 @@ pub fn review_get_commit_overlay(
     request: CommitOverlayRequest,
 ) -> CommandResult<FileOverlay> {
     state.review.get_commit_overlay(request)
+}
+
+#[tauri::command]
+pub async fn review_attribute_blocks(
+    state: State<'_, AppState>,
+    request: AttributeBlocksRequest,
+) -> CommandResult<AttributeBlocksResult> {
+    let review = state.review.clone();
+    tauri::async_runtime::spawn_blocking(move || review.attribute_blocks(request))
+        .await
+        .map_err(|error| {
+            crate::error::command_error(
+                "ATTRIBUTE_BLOCKS_JOIN_FAILED",
+                format!("归因任务执行失败：{error}"),
+            )
+        })?
 }
 
 fn emit_task_update(app: &AppHandle, snapshot: &AnalysisTaskSnapshot) -> CommandResult<()> {
