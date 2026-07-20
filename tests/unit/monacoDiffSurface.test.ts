@@ -34,7 +34,7 @@ const block = {
 function sessionMock() {
   return {
     diffEditor: {}, originalEditor: {}, modifiedEditor: {},
-    setLanguage: vi.fn(), setTheme: vi.fn(), setSelectedBlock: vi.fn(),
+    setBlocks: vi.fn(), setLanguage: vi.fn(), setTheme: vi.fn(), setSelectedBlock: vi.fn(),
     layout: vi.fn(), dispose: vi.fn()
   };
 }
@@ -98,7 +98,7 @@ describe('MonacoDiffSurface', () => {
     expect(createSession).toHaveBeenCalledTimes(3);
   });
 
-  it('块引用变化触发重建，同一 tick 的多项上下文变化只重建一次', async () => {
+  it('块引用变化只增量更新，同一 tick 的多项上下文变化只重建一次', async () => {
     const first = sessionMock();
     const second = sessionMock();
     const order: string[] = [];
@@ -110,13 +110,11 @@ describe('MonacoDiffSurface', () => {
     const nextBlock = { ...block, id: 'b2' };
 
     await wrapper.setProps({ blocks: [nextBlock] });
-    expect(order).toEqual(['dispose', 'create']);
-    expect(createSession).toHaveBeenCalledTimes(2);
+    expect(first.setBlocks).toHaveBeenCalledWith([nextBlock]);
+    expect(order).toEqual([]);
+    expect(createSession).toHaveBeenCalledTimes(1);
 
-    order.length = 0;
-    const third = sessionMock();
-    second.dispose.mockImplementation(() => order.push('dispose'));
-    createSession.mockImplementation(() => { order.push('create'); return third; });
+    first.dispose.mockImplementation(() => order.push('dispose'));
 
     await wrapper.setProps({
       path: 'src/next.ts',
@@ -127,8 +125,8 @@ describe('MonacoDiffSurface', () => {
     });
 
     expect(order).toEqual(['dispose', 'create']);
-    expect(createSession).toHaveBeenCalledTimes(3);
-    expect(createSession.mock.calls[2][0]).toEqual(expect.objectContaining({
+    expect(createSession).toHaveBeenCalledTimes(2);
+    expect(createSession.mock.calls[1][0]).toEqual(expect.objectContaining({
       path: 'src/next.ts',
       oldContent: 'next old',
       newContent: 'next new',
