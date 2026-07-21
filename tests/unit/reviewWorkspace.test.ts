@@ -343,7 +343,8 @@ describe('ReviewWorkspace', () => {
       DiffDrilldownOverlay: {
         name: 'DiffDrilldownOverlay',
         props: ['selectedCommitHash', 'selectedCommit', 'error'],
-        template: '<aside data-test="drilldown" :data-hash="selectedCommitHash">{{ error }}</aside>'
+        emits: ['close'],
+        template: '<aside data-test="drilldown" :data-hash="selectedCommitHash">{{ error }}<button data-test="close-drilldown" @click="$emit(\'close\')" /></aside>'
       },
       BlockDetailPanel: {
         emits: ['commitSelected'],
@@ -357,12 +358,19 @@ describe('ReviewWorkspace', () => {
     await wrapper.get('[data-test="select-file"]').trigger('click');
     await flushPromises();
     const fileContextKey = wrapper.getComponent({ name: 'DiffViewer' }).props('contextKey');
+    const fileEditorSession = wrapper.get('[data-test="editor-session"]').element;
 
     await wrapper.get('[data-test="select-commit"]').trigger('click');
     await flushPromises();
 
     expect(wrapper.getComponent({ name: 'DiffViewer' }).props('contextKey')).toBe(fileContextKey);
+    expect(wrapper.getComponent({ name: 'DiffViewer' }).classes()).toContain('is-drilldown-covered');
     expect(wrapper.get('[data-test="drilldown"]').attributes('data-hash')).toBe(commit.hash);
     expect(wrapper.get('[data-test="drilldown"]').text()).toContain('提交差异不可用');
+
+    await wrapper.get('[data-test="close-drilldown"]').trigger('click');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.getComponent({ name: 'DiffViewer' }).classes()).not.toContain('is-drilldown-covered');
+    expect(wrapper.get('[data-test="editor-session"]').element).toBe(fileEditorSession);
   });
 });

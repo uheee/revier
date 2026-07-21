@@ -330,6 +330,11 @@ textarea {
   background: var(--editor-background);
 }
 
+.review-file-diff.is-drilldown-covered {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .review-project-summary,
 .filter-panel,
 .task-progress,

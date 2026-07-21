@@ -196,6 +196,29 @@ describe('DiffViewer', () => {
     });
   });
 
+  it('按块 ID 将编辑器的几何块解析为最新归因块后再选择', async () => {
+    const attributedBlock = {
+      ...makeOverlay().blocks[0],
+      relatedCommits: [{
+        hash: 'abc123',
+        shortHash: 'abc123',
+        authorName: 'Alice',
+        authorEmail: 'alice@example.com',
+        committedAt: '2026-05-10T00:00:00.000Z',
+        subject: 'fix: 修正光标选块',
+        matchedByFilter: true,
+        touchedRanges: []
+      }]
+    };
+    const wrapper = mountViewer(makeOverlay({ blocks: [attributedBlock] }));
+    const geometryBlock = { ...attributedBlock, relatedCommits: [] };
+
+    wrapper.findComponent(surfaceStub).vm.$emit('selected', geometryBlock);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.emitted('selected')).toEqual([[attributedBlock]]);
+  });
+
   it('阈值恰等时直接加载，并按 UTF-8 字节、空文本和 CRLF 计算指标', () => {
     const exactSettings = {
       ...settings,

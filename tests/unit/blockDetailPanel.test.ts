@@ -92,6 +92,26 @@ describe('BlockDetailPanel', () => {
     expect(wrapper.emitted('commitSelected')?.[0]?.[0]).toEqual(block.relatedCommits[0]);
   });
 
+  it('归因完成前显示加载状态，完成且无结果时才显示暂无提交', async () => {
+    const emptyBlock = { ...block, authors: [], relatedCommits: [] };
+    const wrapper = mount(BlockDetailPanel, {
+      props: { block: emptyBlock, attributionState: 'attributing' },
+      global: { stubs: {
+        NotificationCenter: true,
+        'n-empty': { props: ['description'], template: '<div>{{ description }}</div>' },
+        'n-alert': true,
+        'n-tag': true
+      } }
+    });
+
+    expect(wrapper.text()).toContain('提交信息加载中');
+    expect(wrapper.text()).not.toContain('暂无提交');
+
+    await wrapper.setProps({ attributionState: 'ready' });
+    expect(wrapper.text()).toContain('暂无提交');
+    expect(wrapper.text()).not.toContain('提交信息加载中');
+  });
+
   it('在提交下钻加载中显示行内取消按钮并移除下方取消按钮', async () => {
     const wrapper = mount(BlockDetailPanel, {
       props: { block, selectedCommitHash: 'abc123', activeCommitHash: 'abc123' },

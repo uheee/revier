@@ -39,7 +39,6 @@ const props = withDefaults(defineProps<{
   requestedEncoding?: TextEncoding;
   contextKey?: string | number;
   diffState?: 'computing' | 'attributing' | 'ready' | 'empty' | 'failed';
-  hideUnchangedRegions?: boolean;
 }>(), {
   selectedBlockId: undefined,
   loading: false,
@@ -47,8 +46,7 @@ const props = withDefaults(defineProps<{
   themeName: undefined,
   requestedEncoding: undefined,
   contextKey: undefined,
-  diffState: 'computing',
-  hideUnchangedRegions: false
+  diffState: 'computing'
 });
 
 const emit = defineEmits<{
@@ -157,8 +155,13 @@ function setCursor(line: number, column: number): void {
 }
 
 function selectBlock(block: DiffBlock): void {
-  if (mode.value === 'original') {
-    emit('selected', block);
+  if (mode.value !== 'original') {
+    return;
+  }
+
+  const currentBlock = props.overlay?.blocks.find((item) => item.id === block.id);
+  if (currentBlock) {
+    emit('selected', currentBlock);
   }
 }
 
@@ -246,7 +249,6 @@ watch(
               :theme-name="activeThemeName"
               :blocks="overlay.blocks"
               :selected-block="selectedBlock"
-              :hide-unchanged-regions="hideUnchangedRegions"
               @draft-change="enterDraft"
               @selected="selectBlock"
               @diff-blocks-change="handleDiffBlocksChange"

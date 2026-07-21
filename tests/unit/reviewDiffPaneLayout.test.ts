@@ -43,6 +43,10 @@ describe('review diff pane layout', () => {
 
     expectRule(styles, '.review-diff-pane', ['overflow: hidden;']);
     expectSelectorNeverDeclares(styles, '.review-diff-pane', 'overflow: visible;');
+    expectRule(styles, '.review-file-diff.is-drilldown-covered', [
+      'visibility: hidden;',
+      'pointer-events: none;'
+    ]);
     expectRule(styles, '.diff-viewer', ['height: 100%;', 'overflow: auto;']);
     expectRule(styles, '.diff-drilldown', [
       'overflow: hidden;',

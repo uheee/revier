@@ -131,7 +131,7 @@ const blocks: DiffBlock[] = [
   }
 ];
 
-function setup(hideUnchangedRegions = false) {
+function setup() {
   const originalModel = createModelMock();
   const modifiedModel = createModelMock();
   const original = createCodeEditorMock();
@@ -162,7 +162,6 @@ function setup(hideUnchangedRegions = false) {
     settings,
     themeName: 'revier-dark',
     blocks,
-    hideUnchangedRegions,
     ...callbacks
   });
   return { session, originalModel, modifiedModel, original, modified, diffEditor, callbacks };
@@ -207,21 +206,8 @@ describe('createMonacoDiffSession', () => {
     );
   });
 
-  it('仅在提交级会话启用带三行上下文的未变更区域折叠', () => {
-    setup(true);
-
-    expect(mocks.createDiffEditor).toHaveBeenCalledWith(
-      expect.any(HTMLElement),
-      expect.objectContaining({
-        hideUnchangedRegions: {
-          enabled: true,
-          contextLineCount: 3
-        }
-      })
-    );
-
-    vi.clearAllMocks();
-    setup(false);
+  it('完整显示提交文件内容，不配置未变更行折叠', () => {
+    setup();
     expect(mocks.createDiffEditor.mock.calls[0][1]).not.toHaveProperty('hideUnchangedRegions');
   });
 
@@ -268,6 +254,23 @@ describe('createMonacoDiffSession', () => {
     ]);
     modified.cursor(12, 7);
     expect(callbacks.onCursorChange).toHaveBeenCalledWith(12, 7);
+  });
+
+  it('光标进入变更块时自动选择，同块内移动或进入普通行不重复选择', () => {
+    const { original, modified, callbacks } = setup();
+
+    original.cursor(2, 1);
+    original.cursor(4, 3);
+    original.cursor(7, 1);
+    modified.cursor(8, 2);
+    modified.cursor(9, 4);
+    modified.cursor(12, 1);
+    original.cursor(11, 1);
+
+    expect(callbacks.onBlockSelected.mock.calls.map(([block]) => block.id)).toEqual([
+      'modified', 'added', 'deleted'
+    ]);
+    expect(callbacks.onCursorChange).toHaveBeenCalledTimes(7);
   });
 
   it('更新语言、主题和选中块时不重建模型', () => {

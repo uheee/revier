@@ -8,6 +8,7 @@ defineProps<{
   selectedCommitHash?: string;
   activeCommitHash?: string;
   draft?: boolean;
+  attributionState?: 'computing' | 'attributing' | 'ready' | 'empty' | 'failed';
 }>();
 
 const emit = defineEmits<{
@@ -54,7 +55,12 @@ function commitKey(commit: RelatedCommit): string {
 
       <section class="detail-section">
         <span class="detail-kicker">相关提交</span>
-        <n-empty v-if="block.relatedCommits.length === 0" size="small" description="暂无提交" />
+        <n-empty
+          v-if="block.relatedCommits.length === 0 && (attributionState === 'computing' || attributionState === 'attributing')"
+          size="small"
+          description="提交信息加载中"
+        />
+        <n-empty v-else-if="block.relatedCommits.length === 0" size="small" description="暂无提交" />
         <ul v-else class="commit-list">
           <li v-for="commit in block.relatedCommits" :key="commitKey(commit)" class="commit-list__item">
             <div

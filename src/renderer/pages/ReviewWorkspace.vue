@@ -62,6 +62,9 @@ const workspaceEl = ref<HTMLElement>();
 const layout = useReviewLayoutSizes();
 const project = computed(() => projectStore.projects.find((item) => item.id === projectId.value));
 const overlayContextKey = computed(() => selectedFilePath.value ?? '');
+const isCommitDrilldownOpen = computed(() => Boolean(
+  reviewStore.selectedCommitHash || reviewStore.drilldownLoading || reviewStore.drilldownOverlay
+));
 const defaultBranch = computed(() => project.value?.preferences.defaultBranch ?? 'HEAD');
 const defaultDays = computed(() => project.value?.preferences.defaultDays ?? 30);
 const defaultGlobRules = computed(() => project.value?.preferences.defaultGlobRules ?? []);
@@ -298,6 +301,8 @@ function closeCommitDrilldown(): void {
 
     <section class="review-diff-pane">
       <DiffViewer
+        class="review-file-diff"
+        :class="{ 'is-drilldown-covered': isCommitDrilldownOpen }"
         :overlay="overlay"
         :loading="loading"
         :selected-block-id="selectedBlock?.id"
@@ -335,6 +340,7 @@ function closeCommitDrilldown(): void {
       :selected-commit-hash="selectedCommitHash"
       :active-commit-hash="activeCommitHash"
       :draft="isEditorDraft"
+      :attribution-state="diffComputationState"
       @commit-selected="openCommitDrilldown"
       @cancel-commit="closeCommitDrilldown"
     />

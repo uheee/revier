@@ -7,7 +7,7 @@ import type { FileOverlay } from '../../src/renderer/generated/bindings';
 vi.mock('../../src/renderer/components/review/DiffViewer.vue', () => ({
   default: {
     name: 'DiffViewer',
-    props: ['overlay', 'loading', 'settings', 'themeName', 'requestedEncoding', 'contextKey', 'hideUnchangedRegions'],
+    props: ['overlay', 'loading', 'settings', 'themeName', 'requestedEncoding', 'contextKey'],
     emits: ['draftChange', 'encodingChange'],
     template: '<button data-testid="diff-viewer-stub" @click="$emit(\'draftChange\', true)" @contextmenu.prevent="$emit(\'encodingChange\', \'gb18030\')" />'
   }
@@ -99,8 +99,7 @@ describe('DiffDrilldownOverlay', () => {
       settings,
       themeName: 'revier-dark',
       requestedEncoding: 'utf-16le',
-      contextKey: 'abc123:parent',
-      hideUnchangedRegions: true
+      contextKey: 'abc123:parent'
     });
     await wrapper.get('[data-testid="diff-viewer-stub"]').trigger('click');
     await wrapper.get('[data-testid="diff-viewer-stub"]').trigger('contextmenu');

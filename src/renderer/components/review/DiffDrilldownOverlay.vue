@@ -57,7 +57,6 @@ const emit = defineEmits<{
       :theme-name="themeName"
       :requested-encoding="requestedEncoding"
       :context-key="`${overlay?.commit?.hash ?? ''}:${overlay?.parentHash ?? ''}`"
-      :hide-unchanged-regions="true"
       @draft-change="emit('draftChange', $event)"
       @encoding-change="emit('encodingChange', $event)"
     />

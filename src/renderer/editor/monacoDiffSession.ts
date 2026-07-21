@@ -30,7 +30,6 @@ export interface MonacoDiffSessionOptions {
   settings: EditorSettings;
   themeName: 'revier-light' | 'revier-dark';
   blocks: DiffBlock[];
-  hideUnchangedRegions?: boolean;
   generation?: number;
   contextKey?: string | number;
   onDraftChange(value: true): void;
@@ -107,6 +106,7 @@ export function createMonacoDiffSession(
   let draft = false;
   let disposed = false;
   let currentBlocks = options.blocks;
+  let selectedBlockId: string | undefined;
   let lastPublishedSignature: string | undefined;
 
   const cleanupResources = (): unknown[] => {
@@ -185,12 +185,6 @@ export function createMonacoDiffSession(
       find: { addExtraSpaceOnTop: false },
       automaticLayout: false
     };
-    if (options.hideUnchangedRegions) {
-      editorOptions.hideUnchangedRegions = {
-        enabled: true,
-        contextLineCount: 3
-      };
-    }
     diffEditor = monaco.editor.createDiffEditor(options.container, editorOptions);
     diffEditor.setModel({ original: originalModel, modified: modifiedModel });
 
@@ -207,10 +201,19 @@ export function createMonacoDiffSession(
       originalDecorations?.clear();
       modifiedDecorations?.clear();
       currentBlocks = [];
+      selectedBlockId = undefined;
       options.onDraftChange(true);
     };
     listeners.push(originalModel.onDidChangeContent(enterDraft));
     listeners.push(modifiedModel.onDidChangeContent(enterDraft));
+
+    const selectBlock = (block: DiffBlock): void => {
+      if (selectedBlockId === block.id) {
+        return;
+      }
+      selectedBlockId = block.id;
+      options.onBlockSelected(block);
+    };
 
     const listenForBlock = (codeEditor: editor.ICodeEditor, side: DiffSide): void => {
       listeners.push(codeEditor.onMouseDown((event) => {
@@ -219,20 +222,27 @@ export function createMonacoDiffSession(
         }
         const block = blockAtLine(currentBlocks, side, event.target.position.lineNumber);
         if (block) {
-          options.onBlockSelected(block);
+          selectBlock(block);
         }
       }));
     };
     listenForBlock(originalEditor, 'old');
     listenForBlock(modifiedEditor, 'new');
 
-    const listenForCursor = (codeEditor: editor.ICodeEditor): void => {
+    const listenForCursor = (codeEditor: editor.ICodeEditor, side: DiffSide): void => {
       listeners.push(codeEditor.onDidChangeCursorPosition(({ position }) => {
         options.onCursorChange(position.lineNumber, position.column);
+        if (draft) {
+          return;
+        }
+        const block = blockAtLine(currentBlocks, side, position.lineNumber);
+        if (block) {
+          selectBlock(block);
+        }
       }));
     };
-    listenForCursor(originalEditor);
-    listenForCursor(modifiedEditor);
+    listenForCursor(originalEditor, 'old');
+    listenForCursor(modifiedEditor, 'new');
 
     const publishDiffBlocks = (): void => {
       if (disposed || draft || !options.onDiffBlocksChange || !originalModel || !modifiedModel) {
@@ -283,16 +293,21 @@ export function createMonacoDiffSession(
       },
       setBlocks(blocks) {
         currentBlocks = blocks;
+        if (selectedBlockId && !blocks.some((block) => block.id === selectedBlockId)) {
+          selectedBlockId = undefined;
+        }
       },
       setSelectedBlock(block) {
         if (disposed) {
           return;
         }
         if (draft || !block) {
+          selectedBlockId = undefined;
           originalDecorations?.clear();
           modifiedDecorations?.clear();
           return;
         }
+        selectedBlockId = block.id;
         originalDecorations?.set(blockDecorations(block, 'old'));
         modifiedDecorations?.set(blockDecorations(block, 'new'));
       },
