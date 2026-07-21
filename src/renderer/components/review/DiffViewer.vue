@@ -39,6 +39,8 @@ const props = withDefaults(defineProps<{
   requestedEncoding?: TextEncoding;
   contextKey?: string | number;
   diffState?: 'computing' | 'attributing' | 'ready' | 'empty' | 'failed';
+  refreshDisabled?: boolean;
+  refreshing?: boolean;
 }>(), {
   selectedBlockId: undefined,
   loading: false,
@@ -46,7 +48,9 @@ const props = withDefaults(defineProps<{
   themeName: undefined,
   requestedEncoding: undefined,
   contextKey: undefined,
-  diffState: 'computing'
+  diffState: 'computing',
+  refreshDisabled: false,
+  refreshing: false
 });
 
 const emit = defineEmits<{
@@ -56,6 +60,7 @@ const emit = defineEmits<{
   encodingChange: [encoding: TextEncoding];
   cursorChange: [line: number, column: number];
   editorsReady: [original: editor.ICodeEditor, modified: editor.ICodeEditor];
+  refresh: [];
 }>();
 
 const mode = ref<DiffViewerMode>('original');
@@ -278,8 +283,11 @@ watch(
           :binary="overlay.file.isBinary"
           :selected-block-index="selectedBlockIndex"
           :block-count="overlay.blocks.length"
+          :refresh-disabled="refreshDisabled || overlay.file.isBinary || !overlay.file.isPreviewable"
+          :refreshing="refreshing"
           @encoding-change="emit('encodingChange', $event)"
           @language-change="manualLanguage = $event"
+          @refresh="emit('refresh')"
         />
       </template>
     </n-spin>

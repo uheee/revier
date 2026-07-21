@@ -1,6 +1,14 @@
 use crate::error::AppError;
 use gix::bstr::ByteSlice;
 
+pub fn read_blob_by_id(repo: &gix::Repository, blob_id: &str) -> Result<Vec<u8>, AppError> {
+    let object_id = gix::ObjectId::from_hex(blob_id.as_bytes())
+        .map_err(|error| AppError::CacheInvalid(format!("Blob ID 无效：{blob_id}（{error}）")))?;
+    repo.find_blob(object_id)
+        .map(|blob| blob.data.to_vec())
+        .map_err(|error| AppError::CacheInvalid(format!("Blob 已不存在：{blob_id}（{error}）")))
+}
+
 pub fn read_blob_at_commit(
     repo: &gix::Repository,
     commit_hash: &str,

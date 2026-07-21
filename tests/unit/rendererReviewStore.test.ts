@@ -36,6 +36,7 @@ vi.mock('../../src/renderer/api/revierClient', () => ({
       onOperationProgress: vi.fn(),
       listChangedFiles: vi.fn(),
       getFileOverlay: vi.fn(),
+      attributeBlocks: vi.fn(),
       getCommitOverlay: vi.fn(),
       listAuthors: vi.fn()
     }
@@ -116,6 +117,7 @@ describe('renderer reviewStore', () => {
     vi.mocked(revierClient.review.listChangedFiles).mockReset();
     vi.mocked(revierClient.review.cancelAnalysis).mockReset();
     vi.mocked(revierClient.review.getFileOverlay).mockReset();
+    vi.mocked(revierClient.review.attributeBlocks).mockReset();
     vi.mocked(revierClient.review.getCommitOverlay).mockReset();
     vi.mocked(revierClient.review.listAuthors).mockReset();
     useNotifications().clear();
@@ -664,11 +666,12 @@ describe('renderer reviewStore', () => {
     expect(await store.loadOverlay(file.path, 'gb18030')).toBe(true);
     store.selectBlock(block);
 
-    expect(revierClient.review.getFileOverlay).toHaveBeenCalledWith({
+    expect(revierClient.review.getFileOverlay).toHaveBeenCalledWith(expect.objectContaining({
       taskId: task.taskId,
       filePath: file.path,
+      cacheMode: 'prefer-cache',
       encoding: 'gb18030'
-    });
+    }));
     expect(store.overlay).toEqual(overlay);
     expect(store.selectedBlock).toEqual(block);
   });
@@ -727,11 +730,80 @@ describe('renderer reviewStore', () => {
 
     expect(await request).toBe(true);
     expect(store.overlay).toEqual(reloaded);
-    expect(revierClient.review.getFileOverlay).toHaveBeenCalledWith({
+    expect(revierClient.review.getFileOverlay).toHaveBeenCalledWith(expect.objectContaining({
       taskId: task.taskId,
       filePath: file.path,
+      cacheMode: 'prefer-cache',
       encoding: 'gb18030'
+    }));
+  });
+
+  it('刷新读取失败时保留旧文件、作者轨和提交下钻', async () => {
+    vi.mocked(revierClient.review.getFileOverlay).mockRejectedValue(new Error('刷新读取失败'));
+    const drilldown = { ...overlay, mode: 'commit' as const, parentHash: 'parent' };
+    const store = useReviewStore();
+    store.task = task;
+    store.overlay = overlay;
+    store.selectedBlock = block;
+    store.drilldownOverlay = drilldown;
+    store.selectedCommitHash = 'abc123';
+
+    expect(await store.loadOverlay(file.path, 'utf-8', 'refresh')).toBe(false);
+
+    expect(revierClient.review.getFileOverlay).toHaveBeenCalledWith(expect.objectContaining({
+      filePath: file.path,
+      cacheMode: 'refresh'
+    }));
+    expect(store.overlay).toStrictEqual(overlay);
+    expect(store.selectedBlock).toStrictEqual(block);
+    expect(store.drilldownOverlay).toStrictEqual(drilldown);
+    expect(store.selectedCommitHash).toBe('abc123');
+  });
+
+  it('刷新归因失败时回滚旧状态，成功时再关闭旧下钻', async () => {
+    const refreshed = { ...overlay, newContent: '刷新后的内容' };
+    const drilldown = { ...overlay, mode: 'commit' as const, parentHash: 'parent' };
+    vi.mocked(revierClient.review.getFileOverlay).mockResolvedValue(refreshed);
+    vi.mocked(revierClient.review.attributeBlocks).mockRejectedValueOnce(new Error('刷新归因失败'));
+    const store = useReviewStore();
+    store.task = task;
+    store.overlay = overlay;
+    store.selectedBlock = block;
+    store.drilldownOverlay = drilldown;
+    store.selectedCommitHash = 'abc123';
+    const canonicalBlock = { ...block, order: 0 };
+
+    expect(await store.loadOverlay(file.path, 'utf-8', 'refresh')).toBe(true);
+    store.acceptDiffBlocks({ contextKey: 'refresh-1', generation: 1, signature: 'signature-1', blocks: [canonicalBlock] }, 'refresh-1');
+    await Promise.resolve();
+
+    expect(store.overlay).toStrictEqual(overlay);
+    expect(store.drilldownOverlay).toStrictEqual(drilldown);
+    expect(store.selectedCommitHash).toBe('abc123');
+
+    vi.mocked(revierClient.review.attributeBlocks).mockResolvedValue({
+      resolvedEncoding: 'utf-8',
+      attributions: [{
+        id: block.id,
+        authors: block.authors,
+        relatedCommits: block.relatedCommits
+      }],
+      warnings: [],
+      cacheState: 'refresh'
     });
+    expect(await store.loadOverlay(file.path, 'utf-8', 'refresh')).toBe(true);
+    store.acceptDiffBlocks({ contextKey: 'refresh-2', generation: 2, signature: 'signature-2', blocks: [canonicalBlock] }, 'refresh-2');
+    await vi.waitFor(() => {
+      expect(store.diffComputationState).toBe('ready');
+    });
+
+    expect(revierClient.review.attributeBlocks).toHaveBeenLastCalledWith(expect.objectContaining({
+      cacheMode: 'refresh',
+      blockSignature: 'signature-2'
+    }));
+    expect(store.overlay?.newContent).toBe('刷新后的内容');
+    expect(store.drilldownOverlay).toBeUndefined();
+    expect(store.selectedCommitHash).toBeUndefined();
   });
 
   it('编码重载失败时保留旧 overlay、选中块并记录错误', async () => {

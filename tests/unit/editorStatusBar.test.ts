@@ -64,6 +64,18 @@ describe('EditorStatusBar', () => {
     expect(mountStatus({ binary: true }).find('[data-testid="encoding-trigger"]').exists()).toBe(false);
   });
 
+  it('重新分析按钮发出刷新事件，并在缓存过期或刷新中禁用', async () => {
+    const wrapper = mountStatus();
+    await wrapper.get('[data-testid="file-refresh"]').trigger('click');
+    expect(wrapper.emitted('refresh')).toHaveLength(1);
+
+    await wrapper.setProps({ refreshDisabled: true });
+    expect(wrapper.get('[data-testid="file-refresh"]').attributes('disabled')).toBeDefined();
+    await wrapper.setProps({ refreshDisabled: false, refreshing: true });
+    expect(wrapper.get('[data-testid="file-refresh"]').text()).toBe('正在刷新文件');
+    expect(wrapper.get('[data-testid="file-refresh"]').attributes('disabled')).toBeDefined();
+  });
+
   it('点击组件外部或按 Escape 会关闭菜单', async () => {
     const wrapper = mountStatus({}, { attachTo: document.body });
     await wrapper.get('[data-testid="language-trigger"]').trigger('click');

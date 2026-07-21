@@ -245,7 +245,10 @@ function toProjectReviewFilters(filters: ReviewFilters): ProjectReviewFilters {
   };
 }
 
-async function selectFile(filePath: string): Promise<void> {
+async function selectFile(
+  filePath: string,
+  cacheMode: 'prefer-cache' | 'refresh' = 'prefer-cache'
+): Promise<void> {
   selectedFilePath.value = filePath;
   isEditorDraft.value = false;
   requestedEncoding.value = editorSettingsSnapshot.value.settings.defaultEncoding;
@@ -261,9 +264,15 @@ async function selectFile(filePath: string): Promise<void> {
         });
       });
   }
-  if (await reviewStore.loadOverlay(filePath, requestedEncoding.value)) {
+  if (await reviewStore.loadOverlay(filePath, requestedEncoding.value, cacheMode)) {
     isEditorDraft.value = false;
   }
+}
+
+async function refreshSelectedFile(): Promise<void> {
+  const filePath = selectedFilePath.value;
+  if (!filePath || branchCacheState.value === 'stale') return;
+  await selectFile(filePath, 'refresh');
 }
 
 async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
@@ -369,10 +378,13 @@ function closeCommitDrilldown(): void {
         :requested-encoding="requestedEncoding"
         :context-key="overlayContextKey"
         :diff-state="diffComputationState"
+        :refresh-disabled="branchCacheState === 'stale'"
+        :refreshing="operation?.kind === 'file-overlay' && operation.status === 'running' && operation.cacheState === 'refresh'"
         @selected="reviewStore.selectBlock"
         @diff-blocks-change="reviewStore.acceptDiffBlocks($event, overlayContextKey)"
         @draft-change="handleDraftChange"
         @encoding-change="changeOverlayEncoding"
+        @refresh="refreshSelectedFile"
       />
       <DiffDrilldownOverlay
         :overlay="drilldownOverlay"

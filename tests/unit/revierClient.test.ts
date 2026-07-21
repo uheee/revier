@@ -115,7 +115,9 @@ describe('revierClient', () => {
     await revierClient.review.listChangedFiles(task.taskId);
     await revierClient.review.getFileOverlay({
       taskId: task.taskId,
-      filePath: file.path
+      filePath: file.path,
+      operationId: 'file-operation-1',
+      cacheMode: 'prefer-cache'
     });
     await revierClient.review.getCommitOverlay({
       taskId: task.taskId,
@@ -131,7 +133,12 @@ describe('revierClient', () => {
       taskId: task.taskId
     });
     expect(invoke).toHaveBeenNthCalledWith(3, 'review_get_file_overlay', {
-      request: { taskId: task.taskId, filePath: file.path }
+      request: {
+        taskId: task.taskId,
+        filePath: file.path,
+        operationId: 'file-operation-1',
+        cacheMode: 'prefer-cache'
+      }
     });
     expect(invoke).toHaveBeenNthCalledWith(4, 'review_get_commit_overlay', {
       request: { taskId: task.taskId, filePath: file.path, commitHash: 'abc123' }

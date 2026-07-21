@@ -141,6 +141,42 @@ pub fn load_branch_snapshot(
     Ok(Some(snapshot))
 }
 
+pub fn load_branch_analysis_file(
+    conn: &Connection,
+    repo_id: &str,
+    branch: &str,
+    path: &str,
+) -> Result<Option<(String, CachedAnalysisFile)>, AppError> {
+    match conn.query_row(
+        "select s.analysis_id, f.path, f.old_path, f.status, f.additions, f.deletions,
+                f.is_binary, f.is_previewable, f.old_blob_id, f.new_blob_id
+         from analysis_snapshots s
+         join analysis_files f on f.analysis_id = s.analysis_id
+         where s.repo_id = ? and s.branch = ? and f.path = ?",
+        params![repo_id, branch, path],
+        |row| {
+            Ok((
+                row.get(0)?,
+                CachedAnalysisFile {
+                    path: row.get(1)?,
+                    old_path: row.get(2)?,
+                    status: row.get(3)?,
+                    additions: row.get::<_, i64>(4)? as u64,
+                    deletions: row.get::<_, i64>(5)? as u64,
+                    is_binary: row.get(6)?,
+                    is_previewable: row.get(7)?,
+                    old_blob_id: row.get(8)?,
+                    new_blob_id: row.get(9)?,
+                },
+            ))
+        },
+    ) {
+        Ok(file) => Ok(Some(file)),
+        Err(DuckDbError::QueryReturnedNoRows) => Ok(None),
+        Err(error) => Err(duckdb_error(error)),
+    }
+}
+
 pub fn update_last_selected_path(
     conn: &Connection,
     repo_id: &str,

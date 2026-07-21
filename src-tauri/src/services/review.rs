@@ -6,18 +6,21 @@ use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use revier_analysis::api::QueryFilesRequest;
-use revier_analysis::cache::models::{CachedAnalysisFile, CachedAnalysisSnapshot};
+use revier_analysis::cache::models::{
+    CachedAnalysisFile, CachedAnalysisSnapshot, CachedBlockCommit, CachedFileAnalysis,
+    CachedFileBlock, CachedTouchedRange,
+};
 use revier_analysis::cli::{IndexBuildArgs, IndexCommonArgs, OutputFormat, OverlayCommonArgs};
 use revier_analysis::contracts::{
     AnalysisRange, AnalysisStage, AnalysisTaskSnapshot, AnalysisTaskStatus, AttributeBlocksRequest,
     AttributeBlocksResult, AttributionConfidence, AttributionMethod, AttributionWarning,
     AttributionWarningCode, AuthorFilterOption, AuthorSummary, BlockAttributionSummary,
-    BranchAnalysisRestoreResult, BranchCacheStatus, CacheState, ChangedFile, ChangedFileStatus,
-    CommitOverlayRequest, DiffBlock, DiffBlockAttribution, DiffBlockChangeType, FileOverlay,
-    FileOverlayMode, FileOverlayRequest, OperationKind, OperationProgressSnapshot, OperationStage,
-    OperationStatus, ProjectId, RelatedCommit, RelatedCommitAttribution, ResolvedTextEncoding,
-    ReviewAuthorOptionsRequest, ReviewFilters, ReviewProject, SideBySideDiffRow,
-    SideBySideDiffRowType, TaskId, TextEncoding, TouchedRange, WordChange,
+    BranchAnalysisRestoreResult, BranchCacheStatus, CacheMode, CacheState, ChangedFile,
+    ChangedFileStatus, CommitOverlayRequest, DiffBlock, DiffBlockAttribution, DiffBlockChangeType,
+    FileOverlay, FileOverlayMode, FileOverlayRequest, OperationKind, OperationProgressSnapshot,
+    OperationStage, OperationStatus, ProjectId, RelatedCommit, RelatedCommitAttribution,
+    ResolvedTextEncoding, ReviewAuthorOptionsRequest, ReviewFilters, ReviewProject,
+    SideBySideDiffRow, SideBySideDiffRowType, TaskId, TextEncoding, TouchedRange, WordChange,
 };
 use revier_analysis::error::AppError as AnalysisAppError;
 use revier_analysis::execution::{
@@ -41,6 +44,7 @@ pub struct ReviewService {
     contexts_by_task: Mutex<HashMap<TaskId, ReviewTaskContext>>,
     cancellations_by_task: Mutex<HashMap<TaskId, CancellationToken>>,
     progress_by_task: Mutex<HashMap<TaskId, TaskProgressRegistration>>,
+    progress_by_file_operation: Mutex<HashMap<String, FileProgressRegistration>>,
 }
 
 pub(crate) type ProgressEventSink = Arc<dyn Fn(OperationProgressSnapshot) + Send + Sync>;
@@ -52,6 +56,18 @@ struct TaskProgressRegistration {
     branch: String,
     started_at: String,
     started: Instant,
+    sink: ProgressEventSink,
+}
+
+#[derive(Clone)]
+struct FileProgressRegistration {
+    operation_id: String,
+    project_id: String,
+    branch: String,
+    file_path: String,
+    started_at: String,
+    started: Instant,
+    cache_state: CacheState,
     sink: ProgressEventSink,
 }
 
@@ -162,6 +178,96 @@ fn analysis_stage_for_operation(stage: &OperationStage) -> AnalysisStage {
 }
 
 impl ReviewService {
+    pub fn start_file_operation(
+        &self,
+        request: &FileOverlayRequest,
+        sink: ProgressEventSink,
+    ) -> CommandResult<()> {
+        self.ensure_completed_task(&request.task_id)?;
+        let context = self.context_for_task(&request.task_id)?;
+        self.file_for_task(&request.task_id, &request.file_path)?;
+        let registration = FileProgressRegistration {
+            operation_id: request.operation_id.clone(),
+            project_id: context.project.id,
+            branch: context.range.branch,
+            file_path: request.file_path.clone(),
+            started_at: Utc::now().to_rfc3339(),
+            started: Instant::now(),
+            cache_state: match request.cache_mode {
+                CacheMode::PreferCache => CacheState::None,
+                CacheMode::Refresh => CacheState::Refresh,
+            },
+            sink,
+        };
+        let mut operations = self
+            .progress_by_file_operation
+            .lock()
+            .expect("文件进度注册锁被污染");
+        operations.retain(|_, item| item.started.elapsed().as_secs() < 3600);
+        if operations.len() >= 128 {
+            if let Some(oldest) = operations
+                .iter()
+                .max_by_key(|(_, item)| item.started.elapsed())
+                .map(|(key, _)| key.clone())
+            {
+                operations.remove(&oldest);
+            }
+        }
+        operations.insert(request.operation_id.clone(), registration);
+        drop(operations);
+        self.report_file_operation(
+            &request.operation_id,
+            OperationStatus::Running,
+            OperationStage::ReadFileContent,
+            format!("正在读取 {}", request.file_path),
+            None,
+        );
+        Ok(())
+    }
+
+    pub fn report_file_operation(
+        &self,
+        operation_id: &str,
+        status: OperationStatus,
+        stage: OperationStage,
+        message: String,
+        cache_state: Option<CacheState>,
+    ) {
+        let terminal = !matches!(status, OperationStatus::Running);
+        let registration = {
+            let mut operations = self
+                .progress_by_file_operation
+                .lock()
+                .expect("文件进度注册锁被污染");
+            if terminal {
+                operations.remove(operation_id)
+            } else {
+                operations.get(operation_id).cloned()
+            }
+        };
+        let Some(registration) = registration else {
+            return;
+        };
+        let elapsed_ms = registration.started.elapsed().as_millis() as u64;
+        (registration.sink)(OperationProgressSnapshot {
+            operation_id: registration.operation_id,
+            kind: OperationKind::FileOverlay,
+            status,
+            project_id: registration.project_id,
+            branch: Some(registration.branch),
+            file_path: Some(registration.file_path),
+            commit_hash: None,
+            stage,
+            message,
+            completed_units: None,
+            total_units: None,
+            progress: if terminal { Some(1.0) } else { None },
+            started_at: registration.started_at,
+            elapsed_ms,
+            cache_state: cache_state.unwrap_or(registration.cache_state),
+        });
+    }
+
     pub fn get_branch_cache_status(
         &self,
         projects: &ProjectService,
@@ -610,6 +716,7 @@ impl ReviewService {
     pub fn get_file_overlay(&self, request: FileOverlayRequest) -> CommandResult<FileOverlay> {
         self.ensure_completed_task(&request.task_id)?;
         let context = self.context_for_task(&request.task_id)?;
+        ensure_file_refresh_is_current(&context, request.cache_mode)?;
         let file = self.file_for_task(&request.task_id, &request.file_path)?;
         let document = load_range_overlay_document(
             &context,
@@ -638,12 +745,15 @@ impl ReviewService {
     ) -> CommandResult<AttributeBlocksResult> {
         self.ensure_completed_task(&request.task_id)?;
         let context = self.context_for_task(&request.task_id)?;
+        ensure_file_refresh_is_current(&context, request.cache_mode)?;
         self.file_for_task(&request.task_id, &request.file_path)?;
+        let content_started = Instant::now();
         let document = load_range_overlay_document(
             &context,
             &request.file_path,
             resolved_encoding_as_requested(request.resolved_encoding),
         )?;
+        let content_elapsed_ms = content_started.elapsed().as_millis() as u64;
         if document.resolved_encoding != request.resolved_encoding {
             return Err(command_error_with_detail(
                 "ENCODING_CHANGED",
@@ -655,6 +765,34 @@ impl ReviewService {
             ));
         }
 
+        let (_, conn) = cache_connection_for_context(&context)?;
+        if matches!(request.cache_mode, CacheMode::PreferCache) {
+            if let Some(cached) = revier_analysis::cache::repository::load_file_analysis(
+                &conn,
+                &document.analysis_id,
+                &request.file_path,
+            )
+            .map_err(map_analysis_error)?
+            .filter(|cached| {
+                cached.analysis_version == revier_analysis::cache::ANALYSIS_VERSION
+                    && cached.resolved_encoding == resolved_encoding_code(request.resolved_encoding)
+                    && cached.block_signature == request.block_signature
+            }) {
+                if let Some(attributions) =
+                    restore_cached_attributions(&conn, &cached, &request.blocks)?
+                {
+                    return Ok(AttributeBlocksResult {
+                        resolved_encoding: request.resolved_encoding,
+                        attributions,
+                        warnings: document.warnings,
+                        cache_state: CacheState::Hit,
+                    });
+                }
+            }
+        }
+        drop(conn);
+
+        let attribution_started = Instant::now();
         let repo = revier_analysis::git::repository::open_repository(Path::new(
             &context.project.repo_path,
         ))
@@ -719,11 +857,29 @@ impl ReviewService {
             &attribution_options,
         )
         .map_err(map_analysis_error)?;
+        drop(attribution_context);
 
+        let cached = cached_file_analysis(
+            &document.analysis_id,
+            &request.file_path,
+            request.resolved_encoding,
+            &request.block_signature,
+            content_elapsed_ms,
+            attribution_started.elapsed().as_millis() as u64,
+            &blocks,
+        )?;
+        let (_, conn) = cache_connection_for_context(&context)?;
+        revier_analysis::cache::repository::replace_file_analysis(&conn, &cached)
+            .map_err(map_analysis_error)?;
         Ok(AttributeBlocksResult {
             resolved_encoding: document.resolved_encoding,
             attributions: adapt_block_attributions(blocks)?,
             warnings,
+            cache_state: if matches!(request.cache_mode, CacheMode::Refresh) {
+                CacheState::Refresh
+            } else {
+                CacheState::Miss
+            },
         })
     }
 
@@ -1206,6 +1362,27 @@ fn branch_cache_location(
     Ok((identity.repo_id, current_head, db_path))
 }
 
+fn ensure_file_refresh_is_current(
+    context: &ReviewTaskContext,
+    cache_mode: CacheMode,
+) -> CommandResult<()> {
+    if !matches!(cache_mode, CacheMode::Refresh) {
+        return Ok(());
+    }
+    let (_, current_head, _) = branch_cache_location(&context.project, &context.range.branch)?;
+    if current_head != context.range.head_commit {
+        return Err(command_error_with_detail(
+            "BRANCH_CACHE_STALE",
+            "项目缓存已过期，请先重新分析项目",
+            format!(
+                "cached_head={}; current_head={current_head}",
+                context.range.head_commit
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn empty_branch_restore(
     project_id: &str,
     branch: &str,
@@ -1248,11 +1425,29 @@ fn overlay_common_args(context: &ReviewTaskContext) -> OverlayCommonArgs {
 }
 
 struct OverlayDocument {
+    analysis_id: String,
     change: revier_analysis::git::diff::CommitFileChange,
     old_text: String,
     new_text: String,
     resolved_encoding: ResolvedTextEncoding,
     warnings: Vec<revier_analysis::contracts::AppError>,
+}
+
+fn cache_connection_for_context(
+    context: &ReviewTaskContext,
+) -> CommandResult<(String, duckdb::Connection)> {
+    let repo =
+        revier_analysis::git::repository::open_repository(Path::new(&context.project.repo_path))
+            .map_err(map_analysis_error)?;
+    let identity =
+        revier_analysis::git::repository::repository_identity(&repo).map_err(map_analysis_error)?;
+    let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
+        .map_err(map_analysis_error)?;
+    let conn =
+        revier_analysis::index::connection::open_database(&db_path).map_err(map_analysis_error)?;
+    revier_analysis::index::migrations::ensure_compatible_schema(&conn)
+        .map_err(map_analysis_error)?;
+    Ok((identity.repo_id, conn))
 }
 
 fn load_range_overlay_document(
@@ -1263,35 +1458,59 @@ fn load_range_overlay_document(
     let repo =
         revier_analysis::git::repository::open_repository(Path::new(&context.project.repo_path))
             .map_err(map_analysis_error)?;
-    let change = revier_analysis::git::diff::changed_file_between(
-        &repo,
-        &context.range.base_commit,
-        &context.range.head_commit,
+    let identity =
+        revier_analysis::git::repository::repository_identity(&repo).map_err(map_analysis_error)?;
+    let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
+        .map_err(map_analysis_error)?;
+    let conn =
+        revier_analysis::index::connection::open_database(&db_path).map_err(map_analysis_error)?;
+    revier_analysis::index::migrations::ensure_compatible_schema(&conn)
+        .map_err(map_analysis_error)?;
+    let (analysis_id, cached_file) = revier_analysis::cache::repository::load_branch_analysis_file(
+        &conn,
+        &identity.repo_id,
+        &context.range.branch,
         file_path,
     )
     .map_err(map_analysis_error)?
     .ok_or_else(|| {
-        command_error_with_detail("FILE_NOT_CHANGED", "文件在当前范围内未变更", file_path)
+        command_error_with_detail(
+            "FILE_CACHE_NOT_FOUND",
+            "分支快照中不存在目标文件缓存",
+            file_path,
+        )
     })?;
-
-    let old_path = old_text_path(&change);
+    let status = cached_file_status_label(cached_file.status)?;
+    let change = revier_analysis::git::diff::CommitFileChange {
+        commit_hash: context.range.head_commit.clone(),
+        parent_hash: context.range.base_commit.clone(),
+        parent_index: 0,
+        path: cached_file.path.clone(),
+        old_path: cached_file.old_path.clone(),
+        status: status.to_string(),
+        additions: cached_file.additions,
+        deletions: cached_file.deletions,
+        is_binary: cached_file.is_binary,
+        is_previewable: cached_file.is_previewable,
+        similarity: None,
+        old_blob_id: cached_file.old_blob_id.clone(),
+        new_blob_id: cached_file.new_blob_id.clone(),
+    };
+    let old_bytes = cached_file
+        .old_blob_id
+        .as_deref()
+        .map(|blob_id| revier_analysis::git::blob::read_blob_by_id(&repo, blob_id))
+        .transpose()
+        .map_err(map_analysis_error)?
+        .unwrap_or_default();
+    let new_bytes = cached_file
+        .new_blob_id
+        .as_deref()
+        .map(|blob_id| revier_analysis::git::blob::read_blob_by_id(&repo, blob_id))
+        .transpose()
+        .map_err(map_analysis_error)?
+        .unwrap_or_default();
     let new_path = new_text_path(&change);
-    let old_bytes = match old_path {
-        Some(path) => {
-            revier_analysis::git::blob::read_blob_at_commit(&repo, &context.range.base_commit, path)
-                .map_err(map_analysis_error)?
-                .unwrap_or_default()
-        }
-        None => Vec::new(),
-    };
-    let new_bytes = match new_path {
-        Some(path) => {
-            revier_analysis::git::blob::read_blob_at_commit(&repo, &context.range.head_commit, path)
-                .map_err(map_analysis_error)?
-                .unwrap_or_default()
-        }
-        None => Vec::new(),
-    };
     let preferred_bytes = if new_path.is_some() {
         &new_bytes
     } else {
@@ -1323,6 +1542,7 @@ fn load_range_overlay_document(
     }
 
     Ok(OverlayDocument {
+        analysis_id,
         change,
         old_text,
         new_text,
@@ -1482,6 +1702,21 @@ fn changed_file_status_code(status: &str) -> CommandResult<i16> {
     }
 }
 
+fn cached_file_status_label(status: i16) -> CommandResult<&'static str> {
+    match status {
+        0 => Ok("added"),
+        1 => Ok("modified"),
+        2 => Ok("deleted"),
+        3 => Ok("renamed"),
+        4 => Ok("binary"),
+        other => Err(command_error_with_detail(
+            "UNKNOWN_CHANGED_FILE_STATUS",
+            format!("未知缓存文件状态：{other}"),
+            other.to_string(),
+        )),
+    }
+}
+
 fn adapt_changed_file_status(status: &str) -> CommandResult<ChangedFileStatus> {
     match status {
         "added" => Ok(ChangedFileStatus::Added),
@@ -1613,6 +1848,188 @@ fn adapt_block_attributions(
         .collect()
 }
 
+fn cached_file_analysis(
+    analysis_id: &str,
+    path: &str,
+    encoding: ResolvedTextEncoding,
+    block_signature: &str,
+    content_elapsed_ms: u64,
+    attribution_elapsed_ms: u64,
+    blocks: &[DiffBlockOutput],
+) -> CommandResult<CachedFileAnalysis> {
+    Ok(CachedFileAnalysis {
+        file_analysis_id: uuid::Uuid::new_v4().to_string(),
+        analysis_id: analysis_id.to_string(),
+        path: path.to_string(),
+        resolved_encoding: resolved_encoding_code(encoding),
+        block_signature: block_signature.to_string(),
+        analysis_version: revier_analysis::cache::ANALYSIS_VERSION,
+        content_elapsed_ms,
+        attribution_elapsed_ms,
+        completed_at: Utc::now().to_rfc3339(),
+        blocks: blocks
+            .iter()
+            .enumerate()
+            .map(|(ordinal, block)| cached_file_block(ordinal as u32, block))
+            .collect::<CommandResult<Vec<_>>>()?,
+    })
+}
+
+fn cached_file_block(ordinal: u32, block: &DiffBlockOutput) -> CommandResult<CachedFileBlock> {
+    Ok(CachedFileBlock {
+        ordinal,
+        old_start: block.old_start as u64,
+        old_end: block.old_end as u64,
+        new_start: block.new_start as u64,
+        new_end: block.new_end as u64,
+        change_type: diff_block_change_type_code(&block.change_type)?,
+        confidence: block
+            .attribution
+            .as_ref()
+            .map(|value| attribution_confidence_code(&value.confidence))
+            .transpose()?,
+        warning_flags: block
+            .attribution
+            .as_ref()
+            .map(|value| attribution_warning_flags(&value.warnings))
+            .unwrap_or_default(),
+        commits: block
+            .related_commits
+            .iter()
+            .map(|commit| {
+                Ok(CachedBlockCommit {
+                    commit_hash: commit.hash.clone(),
+                    matched_by_filter: commit.matched_by_filter,
+                    attribution_method: commit
+                        .attribution
+                        .as_ref()
+                        .map(|value| attribution_method_code(&value.method))
+                        .transpose()?,
+                    touched_ranges: commit
+                        .touched_ranges
+                        .iter()
+                        .map(|range| CachedTouchedRange {
+                            old_start: range.old_start.map(|value| value as u64),
+                            old_end: range.old_end.map(|value| value as u64),
+                            new_start: range.new_start.map(|value| value as u64),
+                            new_end: range.new_end.map(|value| value as u64),
+                        })
+                        .collect(),
+                    merge_hashes: commit
+                        .attribution
+                        .as_ref()
+                        .map(|value| value.via_merge_hashes.clone())
+                        .unwrap_or_default(),
+                })
+            })
+            .collect::<CommandResult<Vec<_>>>()?,
+    })
+}
+
+fn restore_cached_attributions(
+    conn: &duckdb::Connection,
+    cached: &CachedFileAnalysis,
+    requested_blocks: &[revier_analysis::contracts::DiffBlockRange],
+) -> CommandResult<Option<Vec<DiffBlockAttribution>>> {
+    if cached.blocks.len() != requested_blocks.len()
+        || cached
+            .blocks
+            .iter()
+            .zip(requested_blocks)
+            .any(|(cached, requested)| {
+                cached.old_start != requested.old_start
+                    || cached.old_end != requested.old_end
+                    || cached.new_start != requested.new_start
+                    || cached.new_end != requested.new_end
+            })
+    {
+        return Ok(None);
+    }
+    let hashes = cached
+        .blocks
+        .iter()
+        .flat_map(|block| {
+            block
+                .commits
+                .iter()
+                .map(|commit| commit.commit_hash.clone())
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let metadata = revier_analysis::index::queries::commit_metadata_batch(conn, &hashes)
+        .map_err(map_analysis_error)?;
+    if metadata.len() != hashes.len() {
+        return Ok(None);
+    }
+
+    cached
+        .blocks
+        .iter()
+        .zip(requested_blocks)
+        .map(|(block, requested)| {
+            let related_outputs = block
+                .commits
+                .iter()
+                .map(|commit| cached_related_commit_output(commit, &metadata))
+                .collect::<CommandResult<Vec<_>>>()?;
+            let authors = related_outputs
+                .iter()
+                .map(|commit| AuthorOutput {
+                    name: commit.author_name.clone(),
+                    email: commit.author_email.clone(),
+                })
+                .collect();
+            Ok(DiffBlockAttribution {
+                id: requested.id.clone(),
+                authors: adapt_authors(authors, &related_outputs),
+                related_commits: adapt_related_commits(related_outputs)?,
+                attribution: block
+                    .confidence
+                    .map(|confidence| cached_block_attribution(confidence, block.warning_flags))
+                    .transpose()?,
+            })
+        })
+        .collect::<CommandResult<Vec<_>>>()
+        .map(Some)
+}
+
+fn cached_related_commit_output(
+    cached: &CachedBlockCommit,
+    metadata: &HashMap<String, revier_analysis::git::commits::IndexedCommit>,
+) -> CommandResult<RelatedCommitOutput> {
+    let commit = metadata.get(&cached.commit_hash).ok_or_else(|| {
+        command_error_with_detail(
+            "FILE_CACHE_INCOMPLETE",
+            "文件缓存引用的提交元数据不存在",
+            &cached.commit_hash,
+        )
+    })?;
+    Ok(RelatedCommitOutput {
+        hash: commit.hash.clone(),
+        short_hash: commit.short_hash.clone(),
+        author_name: commit.author_name.clone(),
+        author_email: commit.author_email.clone(),
+        committed_at: commit.committed_at.clone(),
+        subject: commit.subject.clone(),
+        matched_by_filter: cached.matched_by_filter,
+        touched_ranges: cached
+            .touched_ranges
+            .iter()
+            .map(|range| TouchedRangeOutput {
+                old_start: range.old_start.map(|value| value as usize),
+                old_end: range.old_end.map(|value| value as usize),
+                new_start: range.new_start.map(|value| value as usize),
+                new_end: range.new_end.map(|value| value as usize),
+            })
+            .collect(),
+        attribution: cached
+            .attribution_method
+            .map(|method| cached_related_attribution(method, &cached.merge_hashes))
+            .transpose()?,
+    })
+}
+
 fn adapt_block(block: DiffBlockOutput) -> CommandResult<DiffBlock> {
     let authors = adapt_authors(block.authors, &block.related_commits);
     Ok(DiffBlock {
@@ -1642,6 +2059,145 @@ fn adapt_block_change_type(change_type: &str) -> CommandResult<DiffBlockChangeTy
             other,
         )),
     }
+}
+
+fn resolved_encoding_code(encoding: ResolvedTextEncoding) -> i16 {
+    match encoding {
+        ResolvedTextEncoding::Utf8 => 0,
+        ResolvedTextEncoding::Gb18030 => 1,
+        ResolvedTextEncoding::Utf16Le => 2,
+        ResolvedTextEncoding::Utf16Be => 3,
+    }
+}
+
+fn diff_block_change_type_code(change_type: &str) -> CommandResult<i16> {
+    match change_type {
+        "added" => Ok(0),
+        "deleted" => Ok(1),
+        "modified" => Ok(2),
+        other => Err(command_error_with_detail(
+            "UNKNOWN_DIFF_BLOCK_CHANGE_TYPE",
+            format!("未知 diff 块类型：{other}"),
+            other,
+        )),
+    }
+}
+
+fn attribution_confidence_code(confidence: &str) -> CommandResult<i16> {
+    match confidence {
+        "precise" => Ok(0),
+        "inferred" => Ok(1),
+        "partial" => Ok(2),
+        other => Err(command_error_with_detail(
+            "UNKNOWN_ATTRIBUTION_CONFIDENCE",
+            format!("未知归因置信度：{other}"),
+            other,
+        )),
+    }
+}
+
+fn attribution_method_code(method: &str) -> CommandResult<i16> {
+    match method {
+        "blame" => Ok(0),
+        "merge-trace" => Ok(1),
+        "patch-inference" => Ok(2),
+        "deletion-trace" => Ok(3),
+        other => Err(command_error_with_detail(
+            "UNKNOWN_ATTRIBUTION_METHOD",
+            format!("未知归因方法：{other}"),
+            other,
+        )),
+    }
+}
+
+fn attribution_warning_flags(warnings: &[AttributionWarningOutput]) -> u32 {
+    warnings.iter().fold(0, |flags, warning| {
+        flags
+            | match warning.code.as_str() {
+                "BLAME_UNAVAILABLE" => 1,
+                "MERGE_TRACE_AMBIGUOUS" => 1 << 1,
+                "PATH_HISTORY_INCOMPLETE" => 1 << 2,
+                "DELETION_TRACE_INCOMPLETE" => 1 << 3,
+                "EOF_NEWLINE_ATTRIBUTION_UNAVAILABLE" => 1 << 4,
+                _ => 0,
+            }
+    })
+}
+
+fn cached_block_attribution(
+    confidence: i16,
+    warning_flags: u32,
+) -> CommandResult<BlockAttributionSummary> {
+    let confidence = match confidence {
+        0 => AttributionConfidence::Precise,
+        1 => AttributionConfidence::Inferred,
+        2 => AttributionConfidence::Partial,
+        other => {
+            return Err(command_error_with_detail(
+                "UNKNOWN_ATTRIBUTION_CONFIDENCE",
+                format!("未知缓存归因置信度：{other}"),
+                other.to_string(),
+            ))
+        }
+    };
+    let mut warnings = Vec::new();
+    for (flag, code, message) in [
+        (1, AttributionWarningCode::BlameUnavailable, "Blame 不可用"),
+        (
+            1 << 1,
+            AttributionWarningCode::MergeTraceAmbiguous,
+            "合并追踪存在歧义",
+        ),
+        (
+            1 << 2,
+            AttributionWarningCode::PathHistoryIncomplete,
+            "路径历史不完整",
+        ),
+        (
+            1 << 3,
+            AttributionWarningCode::DeletionTraceIncomplete,
+            "删除追踪不完整",
+        ),
+        (
+            1 << 4,
+            AttributionWarningCode::EofNewlineAttributionUnavailable,
+            "文件末尾换行归因不可用",
+        ),
+    ] {
+        if warning_flags & flag != 0 {
+            warnings.push(AttributionWarning {
+                code,
+                message: message.to_string(),
+            });
+        }
+    }
+    Ok(BlockAttributionSummary {
+        confidence,
+        warnings,
+    })
+}
+
+fn cached_related_attribution(
+    method: i16,
+    merge_hashes: &[String],
+) -> CommandResult<RelatedCommitAttributionOutput> {
+    let method = match method {
+        0 => "blame",
+        1 => "merge-trace",
+        2 => "patch-inference",
+        3 => "deletion-trace",
+        other => {
+            return Err(command_error_with_detail(
+                "UNKNOWN_ATTRIBUTION_METHOD",
+                format!("未知缓存归因方法：{other}"),
+                other.to_string(),
+            ))
+        }
+    };
+    Ok(RelatedCommitAttributionOutput {
+        method: method.to_string(),
+        via_merge_hashes: merge_hashes.to_vec(),
+    })
 }
 
 fn adapt_authors(
@@ -1844,6 +2400,7 @@ fn map_analysis_error(error: AnalysisAppError) -> revier_analysis::contracts::Ap
         AnalysisAppError::IndexUnavailable(_) => "INDEX_UNAVAILABLE",
         AnalysisAppError::RequiredIndexUnavailable(_) => "REQUIRED_INDEX_UNAVAILABLE",
         AnalysisAppError::SchemaIncompatible(_) => "SCHEMA_INCOMPATIBLE",
+        AnalysisAppError::CacheInvalid(_) => "CACHE_INVALID",
         AnalysisAppError::DuckDb(_) => "DUCKDB_ERROR",
         AnalysisAppError::Spike(_) => "SPIKE_ERROR",
         AnalysisAppError::Analysis(_) => "ANALYSIS_ERROR",
@@ -2683,6 +3240,16 @@ mod tests {
             restored.cached_head.as_deref(),
             Some(restored.current_head.as_str())
         );
+        let error = service
+            .get_file_overlay(FileOverlayRequest {
+                task_id: restored.task.expect("过期缓存仍应恢复可浏览任务").task_id,
+                file_path: "src/app.txt".to_string(),
+                operation_id: "operation-stale-refresh".to_string(),
+                cache_mode: CacheMode::Refresh,
+                encoding: None,
+            })
+            .expect_err("过期项目缓存不得执行单文件刷新");
+        assert_eq!(error.code, "BRANCH_CACHE_STALE");
     }
 
     #[test]
@@ -2828,6 +3395,8 @@ mod tests {
             .get_file_overlay(FileOverlayRequest {
                 task_id: task.task_id,
                 file_path: "src/app.txt".to_string(),
+                operation_id: "operation-file-1".to_string(),
+                cache_mode: revier_analysis::contracts::CacheMode::PreferCache,
                 encoding: None,
             })
             .expect("读取文件 overlay 失败");
@@ -2840,6 +3409,175 @@ mod tests {
         assert_eq!(overlay.old_content, "one\n");
         assert_eq!(overlay.new_content, "one\ntwo\n");
         assert_eq!(overlay.resolved_encoding, ResolvedTextEncoding::Utf8);
+    }
+
+    #[test]
+    fn get_file_overlay_reads_cached_blob_ids_without_resolving_range_commits() {
+        let fixture = create_linear_repo();
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let service = ReviewService::default();
+        let task = service
+            .start_analysis(&projects, review_filters(project.id))
+            .expect("执行真实分析失败");
+        {
+            let mut contexts = service.contexts_by_task.lock().expect("任务上下文锁被污染");
+            let context = contexts.get_mut(&task.task_id).expect("任务上下文应存在");
+            context.range.base_commit = "invalid-base-that-must-not-be-read".to_string();
+            context.range.head_commit = "invalid-head-that-must-not-be-read".to_string();
+        }
+
+        let overlay = service
+            .get_file_overlay(FileOverlayRequest {
+                task_id: task.task_id,
+                file_path: "src/app.txt".to_string(),
+                operation_id: "operation-file-fast-path".to_string(),
+                cache_mode: revier_analysis::contracts::CacheMode::PreferCache,
+                encoding: None,
+            })
+            .expect("Blob ID 快速路径不应读取范围提交");
+
+        assert_eq!(overlay.old_content, "one\n");
+        assert_eq!(overlay.new_content, "one\ntwo\n");
+    }
+
+    #[test]
+    fn file_attribution_is_persisted_then_restored_by_signature() {
+        let fixture = create_linear_repo();
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let service = ReviewService::default();
+        let task = service
+            .start_analysis(&projects, review_filters(project.id))
+            .expect("执行真实分析失败");
+        let request = AttributeBlocksRequest {
+            task_id: task.task_id,
+            file_path: "src/app.txt".to_string(),
+            operation_id: "operation-attribution-1".to_string(),
+            cache_mode: CacheMode::PreferCache,
+            block_signature: "signature-added-line".to_string(),
+            resolved_encoding: ResolvedTextEncoding::Utf8,
+            blocks: vec![revier_analysis::contracts::DiffBlockRange {
+                id: "block-added".to_string(),
+                old_start: 0,
+                old_end: 0,
+                new_start: 2,
+                new_end: 2,
+                change_type: DiffBlockChangeType::Added,
+            }],
+        };
+
+        let cold_started = Instant::now();
+        let first = service
+            .attribute_blocks(request.clone())
+            .expect("首次文件归因失败");
+        let cold_elapsed = cold_started.elapsed();
+        let hot_started = Instant::now();
+        let second = service
+            .attribute_blocks(request.clone())
+            .expect("缓存文件归因失败");
+        let hot_elapsed = hot_started.elapsed();
+        let refreshed = service
+            .attribute_blocks(AttributeBlocksRequest {
+                cache_mode: CacheMode::Refresh,
+                ..request.clone()
+            })
+            .expect("刷新文件归因失败");
+        let after_refresh = service
+            .attribute_blocks(request)
+            .expect("刷新后读取文件归因缓存失败");
+
+        assert_eq!(first.cache_state, CacheState::Miss);
+        assert_eq!(second.cache_state, CacheState::Hit);
+        assert_eq!(refreshed.cache_state, CacheState::Refresh);
+        assert_eq!(after_refresh.cache_state, CacheState::Hit);
+        assert_eq!(second.attributions.len(), 1);
+        assert_eq!(second.attributions[0].id, "block-added");
+        assert_eq!(second.attributions[0].related_commits.len(), 1);
+        assert_eq!(
+            second.attributions[0].related_commits[0].hash,
+            first.attributions[0].related_commits[0].hash
+        );
+        eprintln!(
+            "文件归因冷缓存={}ms，热缓存={}ms",
+            cold_elapsed.as_millis(),
+            hot_elapsed.as_millis()
+        );
+    }
+
+    #[test]
+    fn file_operation_progress_uses_one_operation_and_continuous_elapsed_time() {
+        let fixture = create_linear_repo();
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let service = ReviewService::default();
+        let task = service
+            .start_analysis(&projects, review_filters(project.id))
+            .expect("执行真实分析失败");
+        let request = FileOverlayRequest {
+            task_id: task.task_id,
+            file_path: "src/app.txt".to_string(),
+            operation_id: "operation-file-progress".to_string(),
+            cache_mode: CacheMode::Refresh,
+            encoding: None,
+        };
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        service
+            .start_file_operation(
+                &request,
+                Arc::new(move |progress| {
+                    captured.lock().expect("事件锁被污染").push(progress);
+                }),
+            )
+            .expect("启动文件进度失败");
+        service.report_file_operation(
+            &request.operation_id,
+            OperationStatus::Running,
+            OperationStage::ComputeDiff,
+            "正在计算差异".to_string(),
+            None,
+        );
+        service.report_file_operation(
+            &request.operation_id,
+            OperationStatus::Completed,
+            OperationStage::Ready,
+            "文件归因完成".to_string(),
+            Some(CacheState::Refresh),
+        );
+
+        let events = events.lock().expect("事件锁被污染");
+        assert_eq!(events.len(), 3);
+        assert!(events
+            .iter()
+            .all(|event| event.operation_id == request.operation_id));
+        assert_eq!(events[0].stage, OperationStage::ReadFileContent);
+        assert_eq!(events[1].stage, OperationStage::ComputeDiff);
+        assert_eq!(events[2].status, OperationStatus::Completed);
+        assert!(events
+            .windows(2)
+            .all(|pair| pair[0].elapsed_ms <= pair[1].elapsed_ms));
     }
 
     #[test]

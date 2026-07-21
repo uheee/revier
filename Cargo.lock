@@ -4382,6 +4382,7 @@ name = "revier-tauri"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "duckdb",
  "revier-analysis",
  "serde",
  "serde_json",

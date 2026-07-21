@@ -266,9 +266,9 @@ describe('ReviewWorkspace', () => {
 
     await wrapper.findAll('.changed-file-row')[0].trigger('click');
     await flushPromises();
-    expect(revierClient.review.getFileOverlay).toHaveBeenNthCalledWith(1, {
-      taskId: 'task-1', filePath: 'src/app.ts', encoding: 'utf-8'
-    });
+    expect(revierClient.review.getFileOverlay).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      taskId: 'task-1', filePath: 'src/app.ts', encoding: 'utf-8', cacheMode: 'prefer-cache'
+    }));
     let viewer = wrapper.getComponent({ name: 'DiffViewer' });
     expect(viewer.props()).toMatchObject({ settings: editorSettings, themeName: 'revier-dark', requestedEncoding: 'utf-8' });
     await wrapper.get('[data-test="select-block"]').trigger('click');

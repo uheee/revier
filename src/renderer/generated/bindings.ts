@@ -60,6 +60,9 @@ export type AppError_Serialize = {
 export type AttributeBlocksRequest = {
 	taskId: string,
 	filePath: string,
+	operationId: string,
+	cacheMode: CacheMode,
+	blockSignature: string,
 	resolvedEncoding: ResolvedTextEncoding,
 	blocks: DiffBlockRange[],
 };
@@ -70,12 +73,14 @@ export type AttributeBlocksResult_Deserialize = {
 	resolvedEncoding: ResolvedTextEncoding,
 	attributions: DiffBlockAttribution_Deserialize[],
 	warnings: AppError_Deserialize[],
+	cacheState: CacheState,
 };
 
 export type AttributeBlocksResult_Serialize = {
 	resolvedEncoding: ResolvedTextEncoding,
 	attributions: DiffBlockAttribution_Serialize[],
 	warnings: AppError_Serialize[],
+	cacheState: CacheState,
 };
 
 export type AttributionConfidence = "precise" | "inferred" | "partial";
@@ -181,6 +186,8 @@ export type BranchCacheStatus_Serialize = {
 	cachedHead?: string,
 	cacheReadElapsedMs: number,
 };
+
+export type CacheMode = "prefer-cache" | "refresh";
 
 export type CacheState = "none" | "hit" | "miss" | "stale" | "refresh";
 
@@ -362,12 +369,16 @@ export type FileOverlayRequest = FileOverlayRequest_Serialize | FileOverlayReque
 export type FileOverlayRequest_Deserialize = {
 	taskId: string,
 	filePath: string,
+	operationId: string,
+	cacheMode: CacheMode,
 	encoding?: TextEncoding,
 };
 
 export type FileOverlayRequest_Serialize = {
 	taskId: string,
 	filePath: string,
+	operationId: string,
+	cacheMode: CacheMode,
 	encoding?: TextEncoding,
 };
 

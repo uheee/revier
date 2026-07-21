@@ -17,17 +17,22 @@ const props = withDefaults(defineProps<{
   binary?: boolean;
   selectedBlockIndex?: number;
   blockCount?: number;
+  refreshDisabled?: boolean;
+  refreshing?: boolean;
 }>(), {
   line: 1,
   column: 1,
   binary: false,
   selectedBlockIndex: undefined,
-  blockCount: 0
+  blockCount: 0,
+  refreshDisabled: false,
+  refreshing: false
 });
 
 const emit = defineEmits<{
   encodingChange: [encoding: TextEncoding];
   languageChange: [languageId: string];
+  refresh: [];
 }>();
 
 const openMenu = ref<'encoding' | 'language'>();
@@ -120,6 +125,14 @@ onBeforeUnmount(() => {
       </span>
     </div>
     <div class="editor-status-bar__right">
+      <button
+        type="button"
+        class="editor-status-refresh"
+        data-testid="file-refresh"
+        :disabled="refreshDisabled || refreshing"
+        :title="refreshDisabled ? '项目缓存过期或当前文件不可刷新' : '重新分析当前文件'"
+        @click="emit('refresh')"
+      >{{ refreshing ? '正在刷新文件' : '重新分析当前文件' }}</button>
       <span>Ln {{ line }}, Col {{ column }}</span>
       <div v-if="!binary" class="editor-status-control">
         <button

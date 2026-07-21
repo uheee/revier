@@ -33,6 +33,8 @@ interface ReviewState {
   drilldownError?: string;
   activeOverlayPath?: string;
   activeCommitHash?: string;
+  activeFileOperationId?: string;
+  activeFileCacheMode: 'prefer-cache' | 'refresh';
   drilldownLoading: boolean;
   authors: AuthorFilterOption[];
   authorsLoading: boolean;
@@ -58,6 +60,18 @@ interface ReviewState {
     status: 'completed' | 'failed' | 'cancelled';
   };
   refreshFallbackTask?: AnalysisTaskSnapshot;
+  fileRefreshFallback?: FileRefreshFallback;
+}
+
+interface FileRefreshFallback {
+  overlay?: FileOverlay;
+  selectedBlock?: DiffBlock;
+  drilldownOverlay?: FileOverlay;
+  selectedCommitHash?: string;
+  selectedCommit?: RelatedCommit;
+  drilldownError?: string;
+  diffComputationState: ReviewState['diffComputationState'];
+  diffBlocksSignature?: string;
 }
 
 export const MAX_PENDING_ANALYSIS_TASKS = 32;
@@ -95,6 +109,27 @@ function createOperationId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `operation-${Date.now()}-${Math.random()}`;
 }
 
+function finishLocalOperation(
+  operation: OperationProgressSnapshot,
+  status: 'completed' | 'failed' | 'cancelled',
+  message: string,
+  cacheState: CacheState
+): OperationProgressSnapshot {
+  const startedAt = Date.parse(operation.startedAt);
+  const elapsedMs = Number.isFinite(startedAt)
+    ? Math.max(operation.elapsedMs, Date.now() - startedAt)
+    : operation.elapsedMs;
+  return {
+    ...operation,
+    status,
+    stage: 'ready',
+    message,
+    progress: status === 'completed' ? 1 : operation.progress,
+    elapsedMs,
+    cacheState
+  };
+}
+
 export const useReviewStore = defineStore('review', {
   state: (): ReviewState => ({
     task: undefined,
@@ -107,6 +142,8 @@ export const useReviewStore = defineStore('review', {
     drilldownError: undefined,
     activeOverlayPath: undefined,
     activeCommitHash: undefined,
+    activeFileOperationId: undefined,
+    activeFileCacheMode: 'prefer-cache',
     drilldownLoading: false,
     authors: [],
     authorsLoading: false,
@@ -125,7 +162,8 @@ export const useReviewStore = defineStore('review', {
     notifiedFailedTaskId: undefined,
     pendingAnalysis: undefined,
     processedTerminal: undefined,
-    refreshFallbackTask: undefined
+    refreshFallbackTask: undefined,
+    fileRefreshFallback: undefined
   }),
   actions: {
     async restoreBranch(projectId: string, branch: string): Promise<BranchAnalysisRestoreResult | undefined> {
@@ -371,34 +409,88 @@ export const useReviewStore = defineStore('review', {
       }
     },
 
-    async loadOverlay(filePath: string, encoding?: TextEncoding): Promise<boolean> {
+    async loadOverlay(
+      filePath: string,
+      encoding?: TextEncoding,
+      cacheMode: 'prefer-cache' | 'refresh' = 'prefer-cache'
+    ): Promise<boolean> {
       if (!this.task) {
         this.error = 'No active analysis task';
         return false;
       }
 
       const requestId = ++this.overlayRequestId;
+      const operationId = createOperationId();
+      if (cacheMode === 'refresh') {
+        this.fileRefreshFallback = {
+          overlay: this.overlay,
+          selectedBlock: this.selectedBlock,
+          drilldownOverlay: this.drilldownOverlay,
+          selectedCommitHash: this.selectedCommitHash,
+          selectedCommit: this.selectedCommit,
+          drilldownError: this.drilldownError,
+          diffComputationState: this.diffComputationState,
+          diffBlocksSignature: this.diffBlocksSignature
+        };
+        ++this.attributionRequestId;
+      } else {
+        this.fileRefreshFallback = undefined;
+      }
+      this.activeFileOperationId = operationId;
+      this.activeFileCacheMode = cacheMode;
+      this.operation = {
+        operationId,
+        kind: 'file-overlay',
+        status: 'running',
+        projectId: this.task.projectId,
+        filePath,
+        stage: 'read-file-content',
+        message: cacheMode === 'refresh' ? `正在刷新 ${filePath}` : `正在打开 ${filePath}`,
+        startedAt: new Date().toISOString(),
+        elapsedMs: 0,
+        cacheState: cacheMode === 'refresh' ? 'refresh' : 'none'
+      };
       this.loading = true;
       this.activeOverlayPath = filePath;
       this.error = undefined;
-      this.overlay = undefined;
-      this.selectedBlock = undefined;
-      this.invalidateAttribution();
-      this.closeCommitDrilldown();
+      if (cacheMode !== 'refresh') {
+        this.overlay = undefined;
+        this.selectedBlock = undefined;
+        this.invalidateAttribution();
+        this.closeCommitDrilldown();
+      }
       try {
         const overlay = await revierClient.review.getFileOverlay({
           taskId: this.task.taskId,
           filePath,
+          operationId,
+          cacheMode,
           encoding
         });
         if (requestId !== this.overlayRequestId) return false;
         this.overlay = overlay;
         this.diffComputationState = 'computing';
         this.diffBlocksSignature = undefined;
+        if (this.operation?.operationId === operationId) {
+          this.operation = {
+            ...this.operation,
+            stage: 'compute-diff',
+            message: `正在计算差异 ${filePath}`
+          };
+        }
         return true;
       } catch (error) {
         if (requestId === this.overlayRequestId) {
           const message = toErrorMessage(error);
+          this.restoreFileRefreshFallback();
+          if (this.operation?.operationId === operationId) {
+            this.operation = finishLocalOperation(
+              this.operation,
+              'failed',
+              message,
+              cacheMode === 'refresh' ? 'refresh' : 'miss'
+            );
+          }
           this.error = message;
           notifyReviewError('文件差异加载失败', `${filePath}：${message}`);
         }
@@ -417,6 +509,21 @@ export const useReviewStore = defineStore('review', {
       }
 
       const requestId = ++this.overlayRequestId;
+      const operationId = createOperationId();
+      this.activeFileOperationId = operationId;
+      this.activeFileCacheMode = 'prefer-cache';
+      this.operation = {
+        operationId,
+        kind: 'file-overlay',
+        status: 'running',
+        projectId: this.task.projectId,
+        filePath,
+        stage: 'read-file-content',
+        message: `正在按编码重新加载 ${filePath}`,
+        startedAt: new Date().toISOString(),
+        elapsedMs: 0,
+        cacheState: 'none'
+      };
       this.loading = true;
       this.activeOverlayPath = filePath;
       this.error = undefined;
@@ -424,6 +531,8 @@ export const useReviewStore = defineStore('review', {
         const overlay = await revierClient.review.getFileOverlay({
           taskId: this.task.taskId,
           filePath,
+          operationId,
+          cacheMode: 'prefer-cache',
           encoding
         });
         if (requestId !== this.overlayRequestId) return false;
@@ -450,6 +559,7 @@ export const useReviewStore = defineStore('review', {
     cancelOverlay(): void {
       ++this.overlayRequestId;
       this.invalidateAttribution();
+      this.restoreFileRefreshFallback();
       this.loading = false;
       this.activeOverlayPath = undefined;
     },
@@ -478,9 +588,25 @@ export const useReviewStore = defineStore('review', {
         : undefined;
       if (payload.blocks.length === 0) {
         this.diffComputationState = 'empty';
+        this.completeFileRefresh();
+        if (this.operation && this.activeFileOperationId === this.operation.operationId) {
+          this.operation = finishLocalOperation(
+            this.operation,
+            'completed',
+            '文件没有可归因变更',
+            this.activeFileCacheMode === 'refresh' ? 'refresh' : 'hit'
+          );
+        }
         return;
       }
       this.diffComputationState = 'attributing';
+      if (this.operation && this.activeFileOperationId === this.operation.operationId) {
+        this.operation = {
+          ...this.operation,
+          stage: 'attribute-candidates',
+          message: `正在归因 ${this.overlay.file.path}`
+        };
+      }
       void this.loadBlockAttribution(payload.signature);
     },
 
@@ -493,10 +619,15 @@ export const useReviewStore = defineStore('review', {
       const filePath = this.overlay.file.path;
       const resolvedEncoding = this.overlay.resolvedEncoding;
       const blocks = [...this.overlay.blocks];
+      const operationId = this.activeFileOperationId ?? createOperationId();
+      const cacheMode = this.activeFileCacheMode;
       try {
         const result = await revierClient.review.attributeBlocks({
           taskId,
           filePath,
+          operationId,
+          cacheMode,
+          blockSignature: signature,
           resolvedEncoding,
           blocks: toDiffBlockRanges(blocks)
         });
@@ -522,12 +653,47 @@ export const useReviewStore = defineStore('review', {
           ? mergedBlocks.find((block) => block.id === this.selectedBlock?.id)
           : undefined;
         this.diffComputationState = 'ready';
+        this.completeFileRefresh();
+        if (this.operation?.operationId === operationId) {
+          this.operation = finishLocalOperation(
+            this.operation,
+            'completed',
+            result.cacheState === 'hit' ? `已从缓存加载 ${filePath}` : `文件归因完成 ${filePath}`,
+            result.cacheState
+          );
+        }
       } catch (error) {
         if (requestId !== this.attributionRequestId) return;
         const message = toErrorMessage(error);
-        this.diffComputationState = 'failed';
+        if (!this.restoreFileRefreshFallback()) {
+          this.diffComputationState = 'failed';
+        }
+        if (this.operation?.operationId === operationId) {
+          this.operation = finishLocalOperation(this.operation, 'failed', message, cacheMode === 'refresh' ? 'refresh' : 'miss');
+        }
         notifyReviewError('变更块归因失败', `${this.overlay?.file.path ?? filePath}：${message}`);
       }
+    },
+
+    completeFileRefresh(): void {
+      if (!this.fileRefreshFallback) return;
+      this.fileRefreshFallback = undefined;
+      this.closeCommitDrilldown();
+    },
+
+    restoreFileRefreshFallback(): boolean {
+      const fallback = this.fileRefreshFallback;
+      if (!fallback) return false;
+      this.overlay = fallback.overlay;
+      this.selectedBlock = fallback.selectedBlock;
+      this.drilldownOverlay = fallback.drilldownOverlay;
+      this.selectedCommitHash = fallback.selectedCommitHash;
+      this.selectedCommit = fallback.selectedCommit;
+      this.drilldownError = fallback.drilldownError;
+      this.diffComputationState = fallback.diffComputationState;
+      this.diffBlocksSignature = fallback.diffBlocksSignature;
+      this.fileRefreshFallback = undefined;
+      return true;
     },
 
     async loadCommitOverlay(

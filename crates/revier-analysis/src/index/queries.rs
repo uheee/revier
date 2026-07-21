@@ -5,6 +5,7 @@ use crate::json::ChangedFileOutput;
 use chrono::{DateTime, Utc};
 use duckdb::params;
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub struct IndexStatusRecord {
@@ -117,6 +118,46 @@ pub fn commit_metadata(
         subject,
         is_merge,
     }))
+}
+
+pub fn commit_metadata_batch(
+    conn: &duckdb::Connection,
+    hashes: &[String],
+) -> Result<HashMap<String, IndexedCommit>, AppError> {
+    if hashes.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = std::iter::repeat_n("?", hashes.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut statement = conn
+        .prepare(&format!(
+            "select hash, short_hash, author_name, author_email, author_key,
+                    strftime(committed_at, '%Y-%m-%dT%H:%M:%S+00:00'), subject, is_merge
+             from commits where hash in ({placeholders})"
+        ))
+        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+    let rows = statement
+        .query_map(duckdb::params_from_iter(hashes.iter()), |row| {
+            Ok(IndexedCommit {
+                hash: row.get(0)?,
+                short_hash: row.get(1)?,
+                author_name: row.get(2)?,
+                author_email: row.get(3)?,
+                author_key: row.get(4)?,
+                committed_at: row.get(5)?,
+                subject: row.get(6)?,
+                is_merge: row.get(7)?,
+                parents: Vec::new(),
+            })
+        })
+        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+    let mut commits = HashMap::new();
+    for row in rows {
+        let commit = row.map_err(|error| AppError::DuckDb(error.to_string()))?;
+        commits.insert(commit.hash.clone(), commit);
+    }
+    Ok(commits)
 }
 
 pub struct QueryFilesFilter {

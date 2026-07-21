@@ -437,11 +437,20 @@ pub struct ChangedFile {
     pub is_previewable: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum CacheMode {
+    PreferCache,
+    Refresh,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FileOverlayRequest {
     pub task_id: TaskId,
     pub file_path: String,
+    pub operation_id: String,
+    pub cache_mode: CacheMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[specta(optional, type = crate::contracts::TextEncoding)]
     pub encoding: Option<TextEncoding>,
@@ -678,6 +687,9 @@ pub struct DiffBlockRange {
 pub struct AttributeBlocksRequest {
     pub task_id: TaskId,
     pub file_path: String,
+    pub operation_id: String,
+    pub cache_mode: CacheMode,
+    pub block_signature: String,
     pub resolved_encoding: ResolvedTextEncoding,
     pub blocks: Vec<DiffBlockRange>,
 }
@@ -699,6 +711,7 @@ pub struct AttributeBlocksResult {
     pub resolved_encoding: ResolvedTextEncoding,
     pub attributions: Vec<DiffBlockAttribution>,
     pub warnings: Vec<AppError>,
+    pub cache_state: CacheState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

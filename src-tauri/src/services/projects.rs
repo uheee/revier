@@ -196,6 +196,7 @@ fn map_analysis_error(error: AnalysisAppError) -> revier_analysis::contracts::Ap
         AnalysisAppError::IndexUnavailable(_) => "INDEX_UNAVAILABLE",
         AnalysisAppError::RequiredIndexUnavailable(_) => "REQUIRED_INDEX_UNAVAILABLE",
         AnalysisAppError::SchemaIncompatible(_) => "SCHEMA_INCOMPATIBLE",
+        AnalysisAppError::CacheInvalid(_) => "CACHE_INVALID",
         AnalysisAppError::DuckDb(_) => "DUCKDB_ERROR",
         AnalysisAppError::Spike(_) => "SPIKE_ERROR",
         AnalysisAppError::Analysis(_) => "ANALYSIS_ERROR",

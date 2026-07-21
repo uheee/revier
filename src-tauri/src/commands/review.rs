@@ -1,8 +1,8 @@
 use revier_analysis::contracts::{
     AnalysisTaskSnapshot, AttributeBlocksRequest, AttributeBlocksResult, AuthorFilterOption,
     BranchAnalysisRestoreResult, BranchCacheStatus, ChangedFile, CommitOverlayRequest, FileOverlay,
-    FileOverlayRequest, OperationProgressSnapshot, OperationStatus, ReviewAuthorOptionsRequest,
-    ReviewFilters,
+    FileOverlayRequest, OperationProgressSnapshot, OperationStage, OperationStatus,
+    ReviewAuthorOptionsRequest, ReviewFilters,
 };
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -154,10 +154,35 @@ pub fn review_list_authors(
 
 #[tauri::command]
 pub fn review_get_file_overlay(
+    app: AppHandle,
     state: State<'_, AppState>,
     request: FileOverlayRequest,
 ) -> CommandResult<FileOverlay> {
-    state.review.get_file_overlay(request)
+    let progress_app = app.clone();
+    let sink = Arc::new(move |progress: OperationProgressSnapshot| {
+        let _ = progress_app.emit(OPERATION_PROGRESS_EVENT, progress);
+    });
+    state.review.start_file_operation(&request, sink)?;
+    let operation_id = request.operation_id.clone();
+    let file_path = request.file_path.clone();
+    let result = state.review.get_file_overlay(request);
+    match &result {
+        Ok(_) => state.review.report_file_operation(
+            &operation_id,
+            OperationStatus::Running,
+            OperationStage::ComputeDiff,
+            format!("正在计算差异 {file_path}"),
+            None,
+        ),
+        Err(error) => state.review.report_file_operation(
+            &operation_id,
+            OperationStatus::Failed,
+            OperationStage::Ready,
+            error.message.clone(),
+            None,
+        ),
+    }
+    result
 }
 
 #[tauri::command]
@@ -173,15 +198,60 @@ pub async fn review_attribute_blocks(
     state: State<'_, AppState>,
     request: AttributeBlocksRequest,
 ) -> CommandResult<AttributeBlocksResult> {
+    let operation_id = request.operation_id.clone();
     let review = state.review.clone();
-    tauri::async_runtime::spawn_blocking(move || review.attribute_blocks(request))
-        .await
-        .map_err(|error| {
-            crate::error::command_error(
-                "ATTRIBUTE_BLOCKS_JOIN_FAILED",
-                format!("归因任务执行失败：{error}"),
-            )
-        })?
+    review.report_file_operation(
+        &operation_id,
+        OperationStatus::Running,
+        OperationStage::AttributeCandidates,
+        format!("正在归因 {}", request.file_path),
+        None,
+    );
+    let worker_review = review.clone();
+    let result =
+        match tauri::async_runtime::spawn_blocking(move || worker_review.attribute_blocks(request))
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let error = crate::error::command_error(
+                    "ATTRIBUTE_BLOCKS_JOIN_FAILED",
+                    format!("归因任务执行失败：{error}"),
+                );
+                review.report_file_operation(
+                    &operation_id,
+                    OperationStatus::Failed,
+                    OperationStage::Ready,
+                    error.message.clone(),
+                    None,
+                );
+                return Err(error);
+            }
+        };
+    match &result {
+        Ok(output) => review.report_file_operation(
+            &operation_id,
+            OperationStatus::Completed,
+            OperationStage::Ready,
+            if matches!(
+                output.cache_state,
+                revier_analysis::contracts::CacheState::Hit
+            ) {
+                "已从缓存加载文件归因".to_string()
+            } else {
+                "文件归因完成".to_string()
+            },
+            Some(output.cache_state.clone()),
+        ),
+        Err(error) => review.report_file_operation(
+            &operation_id,
+            OperationStatus::Failed,
+            OperationStage::Ready,
+            error.message.clone(),
+            None,
+        ),
+    }
+    result
 }
 
 fn emit_task_update(app: &AppHandle, snapshot: &AnalysisTaskSnapshot) -> CommandResult<()> {

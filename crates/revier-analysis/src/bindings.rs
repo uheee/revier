@@ -38,6 +38,7 @@ pub fn export_typescript_bindings(output: &Path) -> Result<(), std::io::Error> {
         .register::<BranchAnalysisRestoreResult>()
         .register::<ChangedFileStatus>()
         .register::<ChangedFile>()
+        .register::<CacheMode>()
         .register::<FileOverlayRequest>()
         .register::<ReviewAuthorOptionsRequest>()
         .register::<CommitOverlayRequest>()

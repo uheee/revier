@@ -20,6 +20,9 @@ pub enum AppError {
     #[error("索引 schema 不兼容：{0}")]
     SchemaIncompatible(String),
 
+    #[error("缓存已失效：{0}")]
+    CacheInvalid(String),
+
     #[error("DuckDB 读写失败：{0}")]
     DuckDb(String),
 
@@ -45,7 +48,9 @@ impl AppError {
             Self::InvalidArgument(_) => 2,
             Self::Repository(_) => 3,
             Self::FileNotAnalyzable(_) | Self::IndexUnavailable(_) => 4,
-            Self::RequiredIndexUnavailable(_) | Self::SchemaIncompatible(_) => 5,
+            Self::RequiredIndexUnavailable(_)
+            | Self::SchemaIncompatible(_)
+            | Self::CacheInvalid(_) => 5,
             Self::DuckDb(_) => 6,
             Self::Cancelled => 130,
             Self::Spike(_) | Self::Analysis(_) | Self::Json(_) | Self::Io(_) => 10,
