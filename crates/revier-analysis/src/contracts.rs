@@ -282,6 +282,89 @@ pub struct AnalysisTaskSnapshot {
     pub error: Option<AppError>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum OperationKind {
+    ProjectMetadata,
+    ProjectAnalysis,
+    FileOverlay,
+    MonacoDiff,
+    FileAttribution,
+    EncodingReload,
+    CommitOverlay,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum OperationStatus {
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum OperationStage {
+    ReadRepository,
+    RestoreCache,
+    ResolveRange,
+    IndexCommits,
+    WriteIndex,
+    FilterFiles,
+    ComputeFileStatistics,
+    ReadFileContent,
+    ComputeDiff,
+    AttributeCandidates,
+    BlameRanges,
+    TraceDeletions,
+    PublishCache,
+    Ready,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum CacheState {
+    None,
+    Hit,
+    Miss,
+    Stale,
+    Refresh,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationProgressSnapshot {
+    pub operation_id: String,
+    pub kind: OperationKind,
+    pub status: OperationStatus,
+    pub project_id: ProjectId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = std::string::String)]
+    pub branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = std::string::String)]
+    pub file_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = std::string::String)]
+    pub commit_hash: Option<String>,
+    pub stage: OperationStage,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = u32)]
+    pub completed_units: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = u32)]
+    pub total_units: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = specta_typescript::Number)]
+    pub progress: Option<f64>,
+    pub started_at: String,
+    #[specta(type = u32)]
+    pub elapsed_ms: u64,
+    pub cache_state: CacheState,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum ChangedFileStatus {

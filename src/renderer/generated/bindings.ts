@@ -126,6 +126,8 @@ export type BlockAttributionSummary = {
 	warnings: AttributionWarning[],
 };
 
+export type CacheState = "none" | "hit" | "miss" | "stale" | "refresh";
+
 export type ChangedFile = ChangedFile_Serialize | ChangedFile_Deserialize;
 
 export type ChangedFileStatus = "added" | "modified" | "deleted" | "renamed" | "binary";
@@ -350,6 +352,50 @@ export type LargeFileSettings = {
 	maxBytes: number,
 	maxLines: number,
 };
+
+export type OperationKind = "project-metadata" | "project-analysis" | "file-overlay" | "monaco-diff" | "file-attribution" | "encoding-reload" | "commit-overlay";
+
+export type OperationProgressSnapshot = OperationProgressSnapshot_Serialize | OperationProgressSnapshot_Deserialize;
+
+export type OperationProgressSnapshot_Deserialize = {
+	operationId: string,
+	kind: OperationKind,
+	status: OperationStatus,
+	projectId: string,
+	branch?: string,
+	filePath?: string,
+	commitHash?: string,
+	stage: OperationStage,
+	message: string,
+	completedUnits?: number,
+	totalUnits?: number,
+	progress?: number,
+	startedAt: string,
+	elapsedMs: number,
+	cacheState: CacheState,
+};
+
+export type OperationProgressSnapshot_Serialize = {
+	operationId: string,
+	kind: OperationKind,
+	status: OperationStatus,
+	projectId: string,
+	branch?: string,
+	filePath?: string,
+	commitHash?: string,
+	stage: OperationStage,
+	message: string,
+	completedUnits?: number,
+	totalUnits?: number,
+	progress?: number,
+	startedAt: string,
+	elapsedMs: number,
+	cacheState: CacheState,
+};
+
+export type OperationStage = "read-repository" | "restore-cache" | "resolve-range" | "index-commits" | "write-index" | "filter-files" | "compute-file-statistics" | "read-file-content" | "compute-diff" | "attribute-candidates" | "blame-ranges" | "trace-deletions" | "publish-cache" | "ready";
+
+export type OperationStatus = "running" | "completed" | "failed" | "cancelled";
 
 export type ProjectPreferences = ProjectPreferences_Serialize | ProjectPreferences_Deserialize;
 

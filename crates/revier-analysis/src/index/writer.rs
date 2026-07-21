@@ -5,6 +5,7 @@ use chrono::Utc;
 use duckdb::params;
 
 pub struct IndexWriteSummary {
+    pub run_id: String,
     pub indexed_commit_count: u64,
     pub indexed_file_count: u64,
 }
@@ -12,11 +13,10 @@ pub struct IndexWriteSummary {
 pub fn write_index(
     conn: &duckdb::Connection,
     repo_id: &str,
+    started_at: &str,
     commits: &[IndexedCommit],
     files: &[CommitFileChange],
-    elapsed_ms: u64,
 ) -> Result<IndexWriteSummary, AppError> {
-    let started_at = Utc::now().to_rfc3339();
     let run_id = format!(
         "{repo_id}-{}-{}",
         Utc::now().timestamp_millis(),
@@ -87,18 +87,32 @@ pub fn write_index(
         .map_err(|error| AppError::DuckDb(error.to_string()))?;
     }
 
+    conn.execute(
+        "update index_runs
+         set indexed_commit_count = ?, indexed_file_count = ?
+         where run_id = ?",
+        params![commits.len() as i64, files.len() as i64, run_id],
+    )
+    .map_err(|error| AppError::DuckDb(error.to_string()))?;
+
+    Ok(IndexWriteSummary {
+        run_id,
+        indexed_commit_count: commits.len() as u64,
+        indexed_file_count: files.len() as u64,
+    })
+}
+
+pub fn complete_index_run(
+    conn: &duckdb::Connection,
+    run_id: &str,
+    elapsed_ms: u64,
+) -> Result<(), AppError> {
     let finished_at = Utc::now().to_rfc3339();
     conn.execute(
         "update index_runs
-         set finished_at = ?, status = 'completed', indexed_commit_count = ?, indexed_file_count = ?, elapsed_ms = ?
+         set finished_at = ?, status = 'completed', elapsed_ms = ?
          where run_id = ?",
-        params![
-            finished_at,
-            commits.len() as i64,
-            files.len() as i64,
-            elapsed_ms as i64,
-            run_id
-        ],
+        params![finished_at, elapsed_ms as i64, run_id],
     )
     .map_err(|error| AppError::DuckDb(error.to_string()))?;
     conn.execute(
@@ -106,9 +120,5 @@ pub fn write_index(
         params![finished_at],
     )
     .map_err(|error| AppError::DuckDb(error.to_string()))?;
-
-    Ok(IndexWriteSummary {
-        indexed_commit_count: commits.len() as u64,
-        indexed_file_count: files.len() as u64,
-    })
+    Ok(())
 }
