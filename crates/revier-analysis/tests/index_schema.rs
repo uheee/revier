@@ -5,7 +5,7 @@ use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
-fn initializes_schema_version_two_tables() {
+fn initializes_schema_version_three_tables() {
     let dir = tempdir().expect("创建临时目录");
     let db_path = dir.path().join("index.duckdb");
     let conn = revier_analysis::index::connection::open_database(&db_path).expect("打开 DuckDB");
@@ -20,7 +20,7 @@ fn initializes_schema_version_two_tables() {
 
     let version =
         revier_analysis::index::schema::read_schema_version(&conn).expect("读取 schema version");
-    assert_eq!(version, Some(2));
+    assert_eq!(version, Some(3));
 
     let tables = revier_analysis::index::schema::list_tables(&conn).expect("读取表列表");
     assert!(tables.contains(&"metadata".to_string()));

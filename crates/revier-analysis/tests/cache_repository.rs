@@ -6,6 +6,7 @@ use revier_analysis::cache::repository::{
     branch_cache_state, cleanup_orphaned_cache_rows, delete_file_commit_overlays,
     load_branch_snapshot, load_commit_overlay, load_file_analysis, publish_branch_snapshot,
     publish_branch_snapshot_and_prune, replace_commit_overlay, replace_file_analysis,
+    update_last_selected_path,
 };
 use revier_analysis::contracts::CacheState;
 use tempfile::tempdir;
@@ -282,6 +283,29 @@ fn reports_branch_cache_state_from_head_and_analysis_version() {
 }
 
 #[test]
+fn persists_only_a_selected_file_that_belongs_to_the_branch_snapshot() {
+    let (_dir, conn) = database();
+    publish_branch_snapshot(&conn, &snapshot("analysis-main-1", "main", "head-main-1"))
+        .expect("发布项目快照");
+
+    update_last_selected_path(&conn, "repo-1", "main", Some("src/lib.rs")).expect("保存选中文件");
+    let loaded = load_branch_snapshot(&conn, "repo-1", "main")
+        .expect("读取项目快照")
+        .expect("项目快照应存在");
+    assert_eq!(loaded.last_selected_path.as_deref(), Some("src/lib.rs"));
+
+    assert!(update_last_selected_path(&conn, "repo-1", "main", Some("src/missing.rs")).is_err());
+    assert_eq!(
+        load_branch_snapshot(&conn, "repo-1", "main")
+            .expect("读取项目快照")
+            .expect("项目快照应存在")
+            .last_selected_path
+            .as_deref(),
+        Some("src/lib.rs")
+    );
+}
+
+#[test]
 fn explicitly_deletes_all_commit_overlays_for_current_file() {
     let (_dir, conn) = database();
     publish_branch_snapshot(&conn, &snapshot("analysis-main-1", "main", "head-main-1"))
@@ -373,6 +397,7 @@ fn snapshot(analysis_id: &str, branch: &str, head: &str) -> CachedAnalysisSnapsh
         started_at: "2026-07-21T00:00:00Z".to_string(),
         completed_at: "2026-07-21T00:00:01Z".to_string(),
         elapsed_ms: 1000,
+        last_selected_path: None,
         author_keys: vec!["alice@example.com".to_string()],
         globs: vec!["src/**/*.rs".to_string()],
         files: vec![CachedAnalysisFile {

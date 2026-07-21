@@ -126,6 +126,62 @@ export type BlockAttributionSummary = {
 	warnings: AttributionWarning[],
 };
 
+export type BranchAnalysisRestoreResult = BranchAnalysisRestoreResult_Serialize | BranchAnalysisRestoreResult_Deserialize;
+
+export type BranchAnalysisRestoreResult_Deserialize = {
+	projectId: string,
+	branch: string,
+	cacheState: CacheState,
+	cacheHit: boolean,
+	stale: boolean,
+	task?: AnalysisTaskSnapshot_Deserialize,
+	range?: AnalysisRange_Deserialize,
+	filters?: ReviewFilters_Deserialize,
+	files: ChangedFile_Deserialize[],
+	lastSelectedPath?: string,
+	currentHead: string,
+	cachedHead?: string,
+	cacheReadElapsedMs: number,
+	analysisElapsedMs?: number,
+};
+
+export type BranchAnalysisRestoreResult_Serialize = {
+	projectId: string,
+	branch: string,
+	cacheState: CacheState,
+	cacheHit: boolean,
+	stale: boolean,
+	task?: AnalysisTaskSnapshot_Serialize,
+	range?: AnalysisRange_Serialize,
+	filters?: ReviewFilters_Serialize,
+	files: ChangedFile_Serialize[],
+	lastSelectedPath?: string,
+	currentHead: string,
+	cachedHead?: string,
+	cacheReadElapsedMs: number,
+	analysisElapsedMs?: number,
+};
+
+export type BranchCacheStatus = BranchCacheStatus_Serialize | BranchCacheStatus_Deserialize;
+
+export type BranchCacheStatus_Deserialize = {
+	projectId: string,
+	branch: string,
+	cacheState: CacheState,
+	currentHead: string,
+	cachedHead?: string,
+	cacheReadElapsedMs: number,
+};
+
+export type BranchCacheStatus_Serialize = {
+	projectId: string,
+	branch: string,
+	cacheState: CacheState,
+	currentHead: string,
+	cachedHead?: string,
+	cacheReadElapsedMs: number,
+};
+
 export type CacheState = "none" | "hit" | "miss" | "stale" | "refresh";
 
 export type ChangedFile = ChangedFile_Serialize | ChangedFile_Deserialize;

@@ -5,6 +5,8 @@ import type {
   AttributeBlocksRequest,
   AttributeBlocksResult,
   AuthorFilterOption,
+  BranchAnalysisRestoreResult,
+  BranchCacheStatus,
   ChangedFile,
   CommitOverlayRequest,
   DirectorySelection,
@@ -12,6 +14,7 @@ import type {
   FileOverlay,
   FileOverlayRequest,
   GitBranch,
+  OperationProgressSnapshot,
   RepositoryValidation,
   ReviewAuthorOptionsRequest,
   ReviewFilters,
@@ -38,13 +41,28 @@ export const revierClient = {
       invoke<GitBranch[]>('projects_list_branches', { projectId })
   },
   review: {
-    startAnalysis: (filters: ReviewFilters) =>
-      invoke<AnalysisTaskSnapshot>('review_start_analysis', { filters }),
+    restoreBranchAnalysis: (projectId: string, branch: string) =>
+      invoke<BranchAnalysisRestoreResult>('review_restore_branch_analysis', { projectId, branch }),
+    getBranchCacheStatus: (projectId: string, branch: string) =>
+      invoke<BranchCacheStatus>('review_get_branch_cache_status', { projectId, branch }),
+    setBranchSelectedFile: (projectId: string, branch: string, filePath?: string) =>
+      invoke<void>('review_set_branch_selected_file', { projectId, branch, filePath }),
+    startAnalysis: (filters: ReviewFilters, operationId: string) =>
+      invoke<AnalysisTaskSnapshot>('review_start_analysis', { filters, operationId }),
     cancelAnalysis: (taskId: string) => invoke<void>('review_cancel_analysis', { taskId }),
     getTask: (taskId: string) => invoke<AnalysisTaskSnapshot>('review_get_task', { taskId }),
     async onTaskUpdate(callback: (task: AnalysisTaskSnapshot) => void): Promise<Unsubscribe> {
       const unlisten: UnlistenFn = await listen<AnalysisTaskSnapshot>(
         'review://task-updated',
+        (event) => callback(event.payload)
+      );
+      return unlisten;
+    },
+    async onOperationProgress(
+      callback: (progress: OperationProgressSnapshot) => void
+    ): Promise<Unsubscribe> {
+      const unlisten: UnlistenFn = await listen<OperationProgressSnapshot>(
+        'review://operation-progress',
         (event) => callback(event.payload)
       );
       return unlisten;

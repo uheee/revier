@@ -18,7 +18,7 @@ fn migrates_version_one_and_preserves_commit_index() {
 
     assert_eq!(
         revier_analysis::index::schema::read_schema_version(&conn).expect("读取 schema 版本"),
-        Some(2)
+        Some(3)
     );
     let commit_count: i64 = conn
         .query_row(
@@ -54,8 +54,47 @@ fn version_one_migration_is_idempotent() {
 
     assert_eq!(
         revier_analysis::index::schema::read_schema_version(&conn).expect("读取 schema 版本"),
-        Some(2)
+        Some(3)
     );
+}
+
+#[test]
+fn migrates_version_two_snapshot_and_preserves_cached_analysis() {
+    let dir = tempdir().expect("创建临时目录");
+    let db_path = dir.path().join("index.duckdb");
+    let conn = revier_analysis::index::connection::open_database(&db_path).expect("打开 DuckDB");
+    conn.execute_batch(
+        "create table metadata (key text primary key, value text not null);
+         insert into metadata values ('schema_version', '2');
+         create table analysis_snapshots (
+           analysis_id text primary key, repo_id text not null, branch text not null,
+           base_commit text not null, head_commit text not null, start_at timestamp,
+           end_at timestamp, author_query text, message_query text,
+           filter_fingerprint text not null, analysis_version integer not null,
+           started_at timestamp not null, completed_at timestamp not null,
+           elapsed_ms bigint not null, unique (repo_id, branch)
+         );
+         insert into analysis_snapshots values (
+           'analysis-1', 'repo-1', 'main', 'base', 'head', null, null, null, null,
+           'fingerprint', 1, '2026-07-21T00:00:00Z', '2026-07-21T00:00:01Z', 1000
+         );",
+    )
+    .expect("创建版本二 schema");
+
+    revier_analysis::index::migrations::ensure_compatible_schema(&conn).expect("迁移版本二 schema");
+
+    assert_eq!(
+        revier_analysis::index::schema::read_schema_version(&conn).expect("读取 schema 版本"),
+        Some(3)
+    );
+    let cached: (String, Option<String>) = conn
+        .query_row(
+            "select analysis_id, last_selected_path from analysis_snapshots",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("读取迁移后的缓存快照");
+    assert_eq!(cached, ("analysis-1".to_string(), None));
 }
 
 #[test]

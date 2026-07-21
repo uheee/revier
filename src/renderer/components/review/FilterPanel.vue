@@ -4,6 +4,7 @@ import { computed, reactive, watch } from 'vue';
 import type { SelectOption } from 'naive-ui';
 import type {
   AuthorFilterOption,
+  CacheState,
   GitBranch,
   ProjectReviewFilters,
   ReviewFilters
@@ -19,6 +20,7 @@ const props = defineProps<{
   authors: AuthorFilterOption[];
   authorsLoading?: boolean;
   loading?: boolean;
+  cacheState?: CacheState;
 }>();
 
 const emit = defineEmits<{
@@ -46,6 +48,10 @@ const authorOptions = computed<SelectOption[]>(() =>
     label: author.email ? `${author.name} <${author.email}>` : author.name,
     value: author.key
   }))
+);
+
+const analysisButtonText = computed(() =>
+  props.cacheState === 'hit' || props.cacheState === 'stale' ? '重新分析项目' : '分析项目'
 );
 
 watch(
@@ -193,7 +199,7 @@ function toIsoString(value?: number): string | undefined {
     <div class="action-row">
       <n-button class="filter-panel__submit" type="primary" attr-type="submit" :loading="loading">
         <Play :size="15" aria-hidden="true" />
-        <span>分析</span>
+        <span>{{ analysisButtonText }}</span>
       </n-button>
       <n-button v-if="loading" class="cancel-work-button" secondary type="warning" @click="emit('cancel')">
         <OctagonX :size="15" aria-hidden="true" />
@@ -201,5 +207,8 @@ function toIsoString(value?: number): string | undefined {
         <span>取消</span>
       </n-button>
     </div>
+    <p v-if="cacheState === 'stale'" class="filter-panel__cache-warning" role="status">
+      缓存可能已过期，可继续浏览或重新分析项目
+    </p>
   </form>
 </template>

@@ -214,6 +214,7 @@ pub trait OperationProgressReporter: Send + Sync {
 
 - `review_restore_branch_analysis`
 - `review_get_branch_cache_status`
+- `review_set_branch_selected_file`
 - `review_start_analysis` 显式刷新语义和 `operation_id`
 - `review://operation-progress` 事件限频、阶段变化直发和终态直发。
 
@@ -432,4 +433,3 @@ fnm exec --using-file pnpm.CMD lint
 5. `feat(review): 持久化提交下钻缓存`
 6. `feat(ui): 增加统一加载进度与耗时状态栏`
 7. `docs(review): 记录缓存与性能验证结果`
-

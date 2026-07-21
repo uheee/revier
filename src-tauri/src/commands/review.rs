@@ -1,14 +1,54 @@
 use revier_analysis::contracts::{
     AnalysisTaskSnapshot, AttributeBlocksRequest, AttributeBlocksResult, AuthorFilterOption,
-    ChangedFile, CommitOverlayRequest, FileOverlay, FileOverlayRequest, ReviewAuthorOptionsRequest,
+    BranchAnalysisRestoreResult, BranchCacheStatus, ChangedFile, CommitOverlayRequest, FileOverlay,
+    FileOverlayRequest, OperationProgressSnapshot, OperationStatus, ReviewAuthorOptionsRequest,
     ReviewFilters,
 };
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::error::CommandResult;
 use crate::state::AppState;
 
 const TASK_UPDATED_EVENT: &str = "review://task-updated";
+const OPERATION_PROGRESS_EVENT: &str = "review://operation-progress";
+
+#[tauri::command]
+pub fn review_restore_branch_analysis(
+    state: State<'_, AppState>,
+    project_id: String,
+    branch: String,
+) -> CommandResult<BranchAnalysisRestoreResult> {
+    state
+        .review
+        .restore_branch_analysis(state.projects.as_ref(), &project_id, &branch)
+}
+
+#[tauri::command]
+pub fn review_get_branch_cache_status(
+    state: State<'_, AppState>,
+    project_id: String,
+    branch: String,
+) -> CommandResult<BranchCacheStatus> {
+    state
+        .review
+        .get_branch_cache_status(state.projects.as_ref(), &project_id, &branch)
+}
+
+#[tauri::command]
+pub fn review_set_branch_selected_file(
+    state: State<'_, AppState>,
+    project_id: String,
+    branch: String,
+    file_path: Option<String>,
+) -> CommandResult<()> {
+    state.review.set_branch_selected_file(
+        state.projects.as_ref(),
+        &project_id,
+        &branch,
+        file_path.as_deref(),
+    )
+}
 
 #[tauri::command]
 pub fn review_get_task(
@@ -23,8 +63,16 @@ pub fn review_start_analysis(
     app: AppHandle,
     state: State<'_, AppState>,
     filters: ReviewFilters,
+    operation_id: String,
 ) -> CommandResult<AnalysisTaskSnapshot> {
-    let snapshot = state.review.start_analysis_task(filters.clone())?;
+    let progress_app = app.clone();
+    let sink = Arc::new(move |progress: OperationProgressSnapshot| {
+        let _ = progress_app.emit(OPERATION_PROGRESS_EVENT, progress);
+    });
+    let snapshot =
+        state
+            .review
+            .start_analysis_task_with_progress(filters.clone(), operation_id, sink)?;
     emit_task_update(&app, &snapshot)?;
 
     let task_id = snapshot.task_id.clone();
@@ -39,6 +87,30 @@ pub fn review_start_analysis(
         };
         if let Some(snapshot) = snapshot {
             let _ = emit_task_update(&app, &snapshot);
+            let status = match &snapshot.status {
+                revier_analysis::contracts::AnalysisTaskStatus::Completed => {
+                    Some((OperationStatus::Completed, "项目分析完成".to_string()))
+                }
+                revier_analysis::contracts::AnalysisTaskStatus::Failed => Some((
+                    OperationStatus::Failed,
+                    snapshot
+                        .error
+                        .as_ref()
+                        .map(|error| error.message.clone())
+                        .unwrap_or_else(|| "项目分析失败".to_string()),
+                )),
+                revier_analysis::contracts::AnalysisTaskStatus::Cancelled => {
+                    Some((OperationStatus::Cancelled, "项目分析已取消".to_string()))
+                }
+                _ => None,
+            };
+            if let Some((status, message)) = status {
+                if let Some(progress) =
+                    review.take_operation_terminal_snapshot(&task_id, status, message)
+                {
+                    let _ = app.emit(OPERATION_PROGRESS_EVENT, progress);
+                }
+            }
         }
     });
 
@@ -61,6 +133,14 @@ pub fn review_cancel_analysis(
 ) -> CommandResult<()> {
     let snapshot = state.review.cancel_analysis(&task_id)?;
     emit_task_update(&app, &snapshot)?;
+    if let Some(progress) = state.review.take_operation_terminal_snapshot(
+        &task_id,
+        OperationStatus::Cancelled,
+        "项目分析已取消".to_string(),
+    ) {
+        app.emit(OPERATION_PROGRESS_EVENT, progress)
+            .map_err(|error| crate::error::command_error("TASK_EVENT_FAILED", error.to_string()))?;
+    }
     Ok(())
 }
 

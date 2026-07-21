@@ -49,10 +49,14 @@ vi.mock('../../src/renderer/api/revierClient', () => ({
       selectDirectory: vi.fn()
     },
     review: {
+      restoreBranchAnalysis: vi.fn(),
+      getBranchCacheStatus: vi.fn(),
+      setBranchSelectedFile: vi.fn(),
       startAnalysis: vi.fn(),
       cancelAnalysis: vi.fn(),
       getTask: vi.fn(),
       onTaskUpdate: vi.fn(),
+      onOperationProgress: vi.fn(),
       listChangedFiles: vi.fn(),
       getFileOverlay: vi.fn(),
       getCommitOverlay: vi.fn(),
@@ -95,6 +99,21 @@ describe('ReviewWorkspace', () => {
     vi.mocked(revierClient.projects.update).mockReset();
     vi.mocked(revierClient.projects.listBranches).mockReset();
     vi.mocked(revierClient.review.listAuthors).mockReset();
+    vi.mocked(revierClient.review.restoreBranchAnalysis).mockReset();
+    vi.mocked(revierClient.review.restoreBranchAnalysis).mockResolvedValue({
+      projectId: project.id,
+      branch: 'develop',
+      cacheState: 'miss',
+      cacheHit: false,
+      stale: false,
+      files: [],
+      currentHead: 'head',
+      cacheReadElapsedMs: 1
+    });
+    vi.mocked(revierClient.review.setBranchSelectedFile).mockReset();
+    vi.mocked(revierClient.review.setBranchSelectedFile).mockResolvedValue();
+    vi.mocked(revierClient.review.onOperationProgress).mockReset();
+    vi.mocked(revierClient.review.onOperationProgress).mockResolvedValue(vi.fn());
     vi.mocked(revierClient.review.onTaskUpdate).mockReset();
     vi.mocked(revierClient.review.getFileOverlay).mockReset();
     vi.mocked(revierClient.review.getCommitOverlay).mockReset();

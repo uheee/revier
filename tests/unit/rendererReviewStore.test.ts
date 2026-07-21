@@ -26,10 +26,14 @@ vi.mock('../../src/renderer/api/revierClient', () => ({
       selectDirectory: vi.fn()
     },
     review: {
+      restoreBranchAnalysis: vi.fn(),
+      getBranchCacheStatus: vi.fn(),
+      setBranchSelectedFile: vi.fn(),
       startAnalysis: vi.fn(),
       cancelAnalysis: vi.fn(),
       getTask: vi.fn(),
       onTaskUpdate: vi.fn(),
+      onOperationProgress: vi.fn(),
       listChangedFiles: vi.fn(),
       getFileOverlay: vi.fn(),
       getCommitOverlay: vi.fn(),
@@ -108,12 +112,77 @@ describe('renderer reviewStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.mocked(revierClient.review.startAnalysis).mockReset();
+    vi.mocked(revierClient.review.restoreBranchAnalysis).mockReset();
     vi.mocked(revierClient.review.listChangedFiles).mockReset();
     vi.mocked(revierClient.review.cancelAnalysis).mockReset();
     vi.mocked(revierClient.review.getFileOverlay).mockReset();
     vi.mocked(revierClient.review.getCommitOverlay).mockReset();
     vi.mocked(revierClient.review.listAuthors).mockReset();
     useNotifications().clear();
+  });
+
+  it('直接恢复分支缓存而不启动分析', async () => {
+    vi.mocked(revierClient.review.restoreBranchAnalysis).mockResolvedValue({
+      projectId: 'project-1',
+      branch: 'develop',
+      cacheState: 'hit',
+      cacheHit: true,
+      stale: false,
+      task,
+      filters,
+      files: [file],
+      lastSelectedPath: file.path,
+      currentHead: 'head',
+      cachedHead: 'head',
+      cacheReadElapsedMs: 12,
+      analysisElapsedMs: 1000
+    });
+
+    const store = useReviewStore();
+    const restored = await store.restoreBranch('project-1', 'develop');
+
+    expect(restored?.cacheHit).toBe(true);
+    expect(store.task).toEqual(task);
+    expect(store.files).toEqual([file]);
+    expect(store.branchCacheState).toBe('hit');
+    expect(revierClient.review.startAnalysis).not.toHaveBeenCalled();
+    expect(store.operation).toEqual(expect.objectContaining({
+      status: 'completed',
+      message: '已从缓存加载',
+      elapsedMs: 12
+    }));
+  });
+
+  it('旧操作的终态不能覆盖当前前台操作', () => {
+    const store = useReviewStore();
+    store.operation = {
+      operationId: 'operation-new',
+      kind: 'project-analysis',
+      status: 'running',
+      projectId: 'project-1',
+      branch: 'develop',
+      stage: 'index-commits',
+      message: '正在更新新操作',
+      startedAt: '2026-07-22T00:00:01Z',
+      elapsedMs: 10,
+      cacheState: 'refresh'
+    };
+
+    store.handleOperationProgress({
+      operationId: 'operation-old',
+      kind: 'project-analysis',
+      status: 'completed',
+      projectId: 'project-1',
+      branch: 'main',
+      stage: 'ready',
+      message: '旧操作完成',
+      startedAt: '2026-07-22T00:00:00Z',
+      elapsedMs: 1000,
+      cacheState: 'refresh'
+    });
+
+    expect(store.operation.operationId).toBe('operation-new');
+    expect(store.operation.status).toBe('running');
   });
 
   it('starts analysis and loads changed files after completion event', async () => {
@@ -123,7 +192,7 @@ describe('renderer reviewStore', () => {
     const store = useReviewStore();
     await store.start(filters);
 
-    expect(revierClient.review.startAnalysis).toHaveBeenCalledWith(filters);
+    expect(revierClient.review.startAnalysis).toHaveBeenCalledWith(filters, expect.any(String));
     expect(revierClient.review.listChangedFiles).not.toHaveBeenCalled();
     expect(store.task).toEqual(runningTask);
     expect(store.files).toEqual([]);

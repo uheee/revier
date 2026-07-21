@@ -92,6 +92,7 @@ pub(crate) fn initialize_cache_schema(conn: &duckdb::Connection) -> Result<(), A
           started_at timestamp not null,
           completed_at timestamp not null,
           elapsed_ms bigint not null,
+          last_selected_path text,
           unique (repo_id, branch)
         );
         create table if not exists analysis_filter_authors (

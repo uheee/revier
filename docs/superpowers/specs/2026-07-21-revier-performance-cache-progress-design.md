@@ -218,6 +218,7 @@ analysis_version         integer not null
 started_at               timestamp not null
 completed_at             timestamp not null
 elapsed_ms               bigint not null
+last_selected_path       text
 unique (repo_id, branch)
 ```
 
@@ -529,6 +530,9 @@ review_restore_branch_analysis(project_id, branch)
 
 review_get_branch_cache_status(project_id, branch)
   -> BranchCacheStatus
+
+review_set_branch_selected_file(project_id, branch, file_path)
+  -> void
 ```
 
 ### 11.2 调整现有请求
@@ -577,13 +581,14 @@ review_get_commit_overlay(request)
 
 ## 13. 数据迁移
 
-现有 schema 版本为 1。实施时提升 schema 版本并提供显式迁移：
+缓存设计落地后的 schema 版本为 3，并提供 `1 -> 2 -> 3` 与 `2 -> 3` 显式迁移：
 
 1. 保留已有提交索引表。
 2. 创建新增缓存表和索引。
 3. 不把旧的内存任务伪装成持久化快照。
 4. 首次打开升级后的项目时无分支快照，界面显示“分析项目”。
 5. migration 失败时返回稳定错误，不删除原数据库。
+6. schema 3 在分支快照中增加可空 `last_selected_path`，只保存仍属于该快照的文件路径。
 
 开发阶段不得通过直接删除用户数据库绕过 migration 测试。
 
@@ -671,4 +676,3 @@ REVIER_TRACE_OPERATIONS=1
 | 进度事件过密 | UI 卡顿 | 后端每秒最多 10 次，前端本地计时 |
 | 增量索引保留不可达提交 | 数据库膨胀 | 仅在用户明确项目刷新时按全部本地分支与当前快照清理 |
 | 不保存源码导致 Git blob 缺失 | 缓存无法展示 | 判为失效并要求项目刷新，不返回伪造内容 |
-

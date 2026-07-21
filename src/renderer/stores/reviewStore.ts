@@ -10,9 +10,12 @@ import {
 import type {
   AnalysisTaskSnapshot,
   AuthorFilterOption,
+  BranchAnalysisRestoreResult,
+  CacheState,
   ChangedFile,
   DiffBlock,
   FileOverlay,
+  OperationProgressSnapshot,
   RelatedCommit,
   ReviewAuthorOptionsRequest,
   ReviewFilters,
@@ -34,6 +37,9 @@ interface ReviewState {
   authors: AuthorFilterOption[];
   authorsLoading: boolean;
   loading: boolean;
+  branchCacheState: CacheState;
+  restoredFilters?: ReviewFilters;
+  operation?: OperationProgressSnapshot;
   error?: string;
   diffComputationState: 'computing' | 'attributing' | 'ready' | 'empty' | 'failed';
   diffBlocksSignature?: string;
@@ -51,6 +57,7 @@ interface ReviewState {
     taskId: string;
     status: 'completed' | 'failed' | 'cancelled';
   };
+  refreshFallbackTask?: AnalysisTaskSnapshot;
 }
 
 export const MAX_PENDING_ANALYSIS_TASKS = 32;
@@ -84,6 +91,10 @@ function notifyReviewError(title: string, message: string): void {
   addNotification({ type: 'error', title, message, source: 'Review' });
 }
 
+function createOperationId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `operation-${Date.now()}-${Math.random()}`;
+}
+
 export const useReviewStore = defineStore('review', {
   state: (): ReviewState => ({
     task: undefined,
@@ -100,6 +111,9 @@ export const useReviewStore = defineStore('review', {
     authors: [],
     authorsLoading: false,
     loading: false,
+    branchCacheState: 'none',
+    restoredFilters: undefined,
+    operation: undefined,
     error: undefined,
     diffComputationState: 'computing',
     diffBlocksSignature: undefined,
@@ -110,22 +124,91 @@ export const useReviewStore = defineStore('review', {
     authorsRequestId: 0,
     notifiedFailedTaskId: undefined,
     pendingAnalysis: undefined,
-    processedTerminal: undefined
+    processedTerminal: undefined,
+    refreshFallbackTask: undefined
   }),
   actions: {
-    async start(filters: ReviewFilters): Promise<void> {
+    async restoreBranch(projectId: string, branch: string): Promise<BranchAnalysisRestoreResult | undefined> {
       const requestId = ++this.analysisRequestId;
-      this.pendingAnalysis = { generation: requestId, snapshots: [] };
+      this.pendingAnalysis = undefined;
+      this.loading = true;
       this.error = undefined;
-      this.overlay = undefined;
-      this.selectedBlock = undefined;
-      this.invalidateAttribution();
+      this.task = undefined;
       this.files = [];
+      this.restoredFilters = undefined;
+      this.branchCacheState = 'none';
       this.cancelOverlay();
       this.closeCommitDrilldown();
-      this.loading = true;
       try {
-        const task = await revierClient.review.startAnalysis(filters);
+        const restored = await revierClient.review.restoreBranchAnalysis(projectId, branch);
+        if (requestId !== this.analysisRequestId) return undefined;
+        this.branchCacheState = restored.cacheState;
+        this.task = restored.task;
+        this.files = restored.files;
+        this.restoredFilters = restored.filters;
+        this.operation = {
+          operationId: `restore:${projectId}:${branch}:${requestId}`,
+          kind: 'project-analysis',
+          status: 'completed',
+          projectId,
+          branch,
+          stage: 'restore-cache',
+          message: restored.cacheHit
+            ? (restored.stale ? '已加载缓存，当前分支已有新提交' : '已从缓存加载')
+            : '未找到分支缓存',
+          startedAt: new Date().toISOString(),
+          elapsedMs: restored.cacheReadElapsedMs,
+          cacheState: restored.cacheState
+        };
+        return restored;
+      } catch (error) {
+        if (requestId === this.analysisRequestId) {
+          const message = toErrorMessage(error);
+          this.error = message;
+          this.branchCacheState = 'miss';
+          notifyReviewError('分支缓存恢复失败', `${projectId} / ${branch}：${message}`);
+        }
+        return undefined;
+      } finally {
+        if (requestId === this.analysisRequestId) this.loading = false;
+      }
+    },
+
+    handleOperationProgress(progress: OperationProgressSnapshot): void {
+      if (this.operation && this.operation.operationId !== progress.operationId) return;
+      if (
+        this.operation?.operationId === progress.operationId
+        && this.operation.status !== 'running'
+        && progress.status === 'running'
+      ) return;
+      this.operation = progress;
+      if (progress.status === 'completed' && progress.kind === 'project-analysis') {
+        this.branchCacheState = 'hit';
+      }
+    },
+
+    async start(filters: ReviewFilters): Promise<void> {
+      const requestId = ++this.analysisRequestId;
+      const operationId = createOperationId();
+      this.refreshFallbackTask = this.task?.status === 'completed' ? this.task : undefined;
+      this.pendingAnalysis = { generation: requestId, snapshots: [] };
+      this.error = undefined;
+      this.loading = true;
+      this.branchCacheState = 'refresh';
+      this.operation = {
+        operationId,
+        kind: 'project-analysis',
+        status: 'running',
+        projectId: filters.projectId,
+        branch: filters.branch,
+        stage: 'read-repository',
+        message: `准备分析 ${filters.branch}`,
+        startedAt: new Date().toISOString(),
+        elapsedMs: 0,
+        cacheState: 'refresh'
+      };
+      try {
+        const task = await revierClient.review.startAnalysis(filters, operationId);
         if (requestId !== this.analysisRequestId) return;
         const bufferedSnapshot = this.pendingAnalysis?.generation === requestId
           ? this.pendingAnalysis.snapshots.find((snapshot) => snapshot.taskId === task.taskId)
@@ -152,6 +235,10 @@ export const useReviewStore = defineStore('review', {
           const message = toErrorMessage(error);
           this.error = message;
           this.loading = false;
+          if (this.refreshFallbackTask) {
+            this.task = this.refreshFallbackTask;
+            this.refreshFallbackTask = undefined;
+          }
           notifyReviewError(
             '分析启动失败',
             `${filters.projectId} / ${filters.branch ?? 'HEAD'}：${message}`
@@ -202,7 +289,14 @@ export const useReviewStore = defineStore('review', {
           const files = await revierClient.review.listChangedFiles(snapshot.taskId);
           if (requestId !== this.analysisRequestId) return;
           if (this.task?.taskId !== snapshot.taskId) return;
+          this.overlay = undefined;
+          this.selectedBlock = undefined;
+          this.invalidateAttribution();
+          this.cancelOverlay();
+          this.closeCommitDrilldown();
           this.files = files;
+          this.branchCacheState = 'hit';
+          this.refreshFallbackTask = undefined;
           this.error = undefined;
         } catch (error) {
           if (requestId === this.analysisRequestId && this.task?.taskId === snapshot.taskId) {
@@ -226,11 +320,19 @@ export const useReviewStore = defineStore('review', {
           notifyReviewError('分析任务失败', `${snapshot.taskId}：${message}`);
         }
         this.loading = false;
+        if (this.refreshFallbackTask) {
+          this.task = this.refreshFallbackTask;
+          this.refreshFallbackTask = undefined;
+        }
         return;
       }
 
       if (snapshot.status === 'cancelled') {
         this.loading = false;
+        if (this.refreshFallbackTask) {
+          this.task = this.refreshFallbackTask;
+          this.refreshFallbackTask = undefined;
+        }
       }
     },
 

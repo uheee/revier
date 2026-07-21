@@ -284,6 +284,7 @@ textarea {
 .review-workspace {
   display: grid;
   grid-template-columns: 320px 6px minmax(520px, 1fr) 6px 320px;
+  grid-template-rows: minmax(0, 1fr) 28px;
   height: 100vh;
   min-width: 1024px;
   overflow: hidden;
@@ -852,10 +853,17 @@ textarea {
 
   .review-workspace {
     grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: none;
     min-width: 0;
     height: auto;
     min-height: 100vh;
     overflow: visible;
+  }
+
+  .operation-status-bar {
+    position: sticky;
+    bottom: 0;
+    grid-row: auto;
   }
 
   .review-resizer {

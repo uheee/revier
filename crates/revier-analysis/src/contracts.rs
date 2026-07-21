@@ -366,6 +366,52 @@ pub struct OperationProgressSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchCacheStatus {
+    pub project_id: ProjectId,
+    pub branch: String,
+    pub cache_state: CacheState,
+    pub current_head: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = std::string::String)]
+    pub cached_head: Option<String>,
+    #[specta(type = u32)]
+    pub cache_read_elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchAnalysisRestoreResult {
+    pub project_id: ProjectId,
+    pub branch: String,
+    pub cache_state: CacheState,
+    pub cache_hit: bool,
+    pub stale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = crate::contracts::AnalysisTaskSnapshot)]
+    pub task: Option<AnalysisTaskSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = crate::contracts::AnalysisRange)]
+    pub range: Option<AnalysisRange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = crate::contracts::ReviewFilters)]
+    pub filters: Option<ReviewFilters>,
+    pub files: Vec<ChangedFile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = std::string::String)]
+    pub last_selected_path: Option<String>,
+    pub current_head: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = std::string::String)]
+    pub cached_head: Option<String>,
+    #[specta(type = u32)]
+    pub cache_read_elapsed_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(optional, type = u32)]
+    pub analysis_elapsed_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum ChangedFileStatus {
     Added,

@@ -94,7 +94,8 @@ pub fn load_branch_snapshot(
                 case when end_at is null then null else strftime(end_at, '%Y-%m-%dT%H:%M:%SZ') end,
                 author_query, message_query, filter_fingerprint, analysis_version,
                 strftime(started_at, '%Y-%m-%dT%H:%M:%SZ'),
-                strftime(completed_at, '%Y-%m-%dT%H:%M:%SZ'), elapsed_ms
+                strftime(completed_at, '%Y-%m-%dT%H:%M:%SZ'), elapsed_ms,
+                last_selected_path
          from analysis_snapshots where repo_id = ? and branch = ?",
         params![repo_id, branch],
         |row| {
@@ -113,6 +114,7 @@ pub fn load_branch_snapshot(
                 started_at: row.get(11)?,
                 completed_at: row.get(12)?,
                 elapsed_ms: row.get::<_, i64>(13)? as u64,
+                last_selected_path: row.get(14)?,
                 author_keys: Vec::new(),
                 globs: Vec::new(),
                 files: Vec::new(),
@@ -137,6 +139,40 @@ pub fn load_branch_snapshot(
     )?;
     snapshot.files = load_analysis_files(conn, &snapshot.analysis_id)?;
     Ok(Some(snapshot))
+}
+
+pub fn update_last_selected_path(
+    conn: &Connection,
+    repo_id: &str,
+    branch: &str,
+    file_path: Option<&str>,
+) -> Result<(), AppError> {
+    if let Some(path) = file_path {
+        let exists: bool = conn
+            .query_row(
+                "select count(*) > 0
+                 from analysis_snapshots s
+                 join analysis_files f on f.analysis_id = s.analysis_id
+                 where s.repo_id = ? and s.branch = ? and f.path = ?",
+                params![repo_id, branch, path],
+                |row| row.get(0),
+            )
+            .map_err(duckdb_error)?;
+        if !exists {
+            return Err(AppError::Analysis(format!("分支快照中不存在文件：{path}")));
+        }
+    }
+
+    let changed = conn
+        .execute(
+            "update analysis_snapshots set last_selected_path = ? where repo_id = ? and branch = ?",
+            params![file_path, repo_id, branch],
+        )
+        .map_err(duckdb_error)?;
+    if changed == 0 {
+        return Err(AppError::Analysis(format!("分支快照不存在：{branch}")));
+    }
+    Ok(())
 }
 
 pub fn replace_file_analysis(
@@ -294,8 +330,8 @@ fn insert_snapshot(conn: &Connection, snapshot: &CachedAnalysisSnapshot) -> Resu
         "insert into analysis_snapshots
          (analysis_id, repo_id, branch, base_commit, head_commit, start_at, end_at,
           author_query, message_query, filter_fingerprint, analysis_version,
-          started_at, completed_at, elapsed_ms)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          started_at, completed_at, elapsed_ms, last_selected_path)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params![
             snapshot.analysis_id,
             snapshot.repo_id,
@@ -310,7 +346,8 @@ fn insert_snapshot(conn: &Connection, snapshot: &CachedAnalysisSnapshot) -> Resu
             i64::from(snapshot.analysis_version),
             snapshot.started_at,
             snapshot.completed_at,
-            as_i64(snapshot.elapsed_ms, "elapsed_ms")?
+            as_i64(snapshot.elapsed_ms, "elapsed_ms")?,
+            snapshot.last_selected_path
         ],
     )
     .map_err(duckdb_error)?;

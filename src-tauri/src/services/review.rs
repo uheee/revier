@@ -12,9 +12,10 @@ use revier_analysis::contracts::{
     AnalysisRange, AnalysisStage, AnalysisTaskSnapshot, AnalysisTaskStatus, AttributeBlocksRequest,
     AttributeBlocksResult, AttributionConfidence, AttributionMethod, AttributionWarning,
     AttributionWarningCode, AuthorFilterOption, AuthorSummary, BlockAttributionSummary,
-    ChangedFile, ChangedFileStatus, CommitOverlayRequest, DiffBlock, DiffBlockAttribution,
-    DiffBlockChangeType, FileOverlay, FileOverlayMode, FileOverlayRequest, OperationStage,
-    ProjectId, RelatedCommit, RelatedCommitAttribution, ResolvedTextEncoding,
+    BranchAnalysisRestoreResult, BranchCacheStatus, CacheState, ChangedFile, ChangedFileStatus,
+    CommitOverlayRequest, DiffBlock, DiffBlockAttribution, DiffBlockChangeType, FileOverlay,
+    FileOverlayMode, FileOverlayRequest, OperationKind, OperationProgressSnapshot, OperationStage,
+    OperationStatus, ProjectId, RelatedCommit, RelatedCommitAttribution, ResolvedTextEncoding,
     ReviewAuthorOptionsRequest, ReviewFilters, ReviewProject, SideBySideDiffRow,
     SideBySideDiffRowType, TaskId, TextEncoding, TouchedRange, WordChange,
 };
@@ -39,6 +40,19 @@ pub struct ReviewService {
     files_by_task: Mutex<HashMap<TaskId, Vec<ChangedFile>>>,
     contexts_by_task: Mutex<HashMap<TaskId, ReviewTaskContext>>,
     cancellations_by_task: Mutex<HashMap<TaskId, CancellationToken>>,
+    progress_by_task: Mutex<HashMap<TaskId, TaskProgressRegistration>>,
+}
+
+pub(crate) type ProgressEventSink = Arc<dyn Fn(OperationProgressSnapshot) + Send + Sync>;
+
+#[derive(Clone)]
+struct TaskProgressRegistration {
+    operation_id: String,
+    project_id: String,
+    branch: String,
+    started_at: String,
+    started: Instant,
+    sink: ProgressEventSink,
 }
 
 #[derive(Clone)]
@@ -57,6 +71,14 @@ struct TaskProgressReporter {
     tasks: Arc<Mutex<HashMap<TaskId, AnalysisTaskSnapshot>>>,
     task_id: TaskId,
     started: Instant,
+    registration: Option<TaskProgressRegistration>,
+    emission: Mutex<ProgressEmissionState>,
+}
+
+#[derive(Default)]
+struct ProgressEmissionState {
+    last_stage: Option<OperationStage>,
+    last_emitted_at: Option<Instant>,
 }
 
 impl OperationProgressReporter for TaskProgressReporter {
@@ -72,24 +94,60 @@ impl OperationProgressReporter for TaskProgressReporter {
                 self.started.elapsed().as_millis()
             );
         }
-        let mut tasks = self.tasks.lock().expect("任务锁被污染");
-        let Some(task) = tasks.get_mut(&self.task_id) else {
-            return;
-        };
-        if matches!(task.status, AnalysisTaskStatus::Cancelled) {
-            return;
-        }
-        task.status = AnalysisTaskStatus::Running;
-        task.stage = analysis_stage_for_operation(&update.stage);
-        task.progress = match (update.completed_units, update.total_units) {
+        let progress = match (update.completed_units, update.total_units) {
             (Some(completed), Some(total)) if total > 0 => {
                 Some((completed as f64 / total as f64).clamp(0.0, 1.0))
             }
             (Some(0), Some(0)) => Some(1.0),
             _ => None,
         };
-        task.message = Some(update.message);
-        task.error = None;
+        {
+            let mut tasks = self.tasks.lock().expect("任务锁被污染");
+            let Some(task) = tasks.get_mut(&self.task_id) else {
+                return;
+            };
+            if matches!(task.status, AnalysisTaskStatus::Cancelled) {
+                return;
+            }
+            task.status = AnalysisTaskStatus::Running;
+            task.stage = analysis_stage_for_operation(&update.stage);
+            task.progress = progress;
+            task.message = Some(update.message.clone());
+            task.error = None;
+        }
+
+        let Some(registration) = self.registration.as_ref() else {
+            return;
+        };
+        let now = Instant::now();
+        let mut emission = self.emission.lock().expect("进度事件锁被污染");
+        let stage_changed = emission.last_stage.as_ref() != Some(&update.stage);
+        let interval_reached = emission
+            .last_emitted_at
+            .is_none_or(|last| now.duration_since(last).as_millis() >= 100);
+        if !stage_changed && !interval_reached {
+            return;
+        }
+        emission.last_stage = Some(update.stage.clone());
+        emission.last_emitted_at = Some(now);
+        drop(emission);
+        (registration.sink)(OperationProgressSnapshot {
+            operation_id: registration.operation_id.clone(),
+            kind: OperationKind::ProjectAnalysis,
+            status: OperationStatus::Running,
+            project_id: registration.project_id.clone(),
+            branch: Some(registration.branch.clone()),
+            file_path: None,
+            commit_hash: None,
+            stage: update.stage,
+            message: update.message,
+            completed_units: update.completed_units,
+            total_units: update.total_units,
+            progress,
+            started_at: registration.started_at.clone(),
+            elapsed_ms: registration.started.elapsed().as_millis() as u64,
+            cache_state: CacheState::Refresh,
+        });
     }
 }
 
@@ -104,6 +162,180 @@ fn analysis_stage_for_operation(stage: &OperationStage) -> AnalysisStage {
 }
 
 impl ReviewService {
+    pub fn get_branch_cache_status(
+        &self,
+        projects: &ProjectService,
+        project_id: &str,
+        branch: &str,
+    ) -> CommandResult<BranchCacheStatus> {
+        let started = Instant::now();
+        let project = projects.get_project(project_id)?;
+        let (repo_id, current_head, db_path) = branch_cache_location(&project, branch)?;
+        let (cache_state, cached_head) = if db_path.exists() {
+            let conn = revier_analysis::index::connection::open_database(&db_path)
+                .map_err(map_analysis_error)?;
+            revier_analysis::index::migrations::ensure_compatible_schema(&conn)
+                .map_err(map_analysis_error)?;
+            let snapshot =
+                revier_analysis::cache::repository::load_branch_snapshot(&conn, &repo_id, branch)
+                    .map_err(map_analysis_error)?;
+            match snapshot {
+                Some(snapshot) => {
+                    let state = if snapshot.head_commit == current_head
+                        && snapshot.analysis_version == revier_analysis::cache::ANALYSIS_VERSION
+                    {
+                        CacheState::Hit
+                    } else {
+                        CacheState::Stale
+                    };
+                    (state, Some(snapshot.head_commit))
+                }
+                None => (CacheState::Miss, None),
+            }
+        } else {
+            (CacheState::Miss, None)
+        };
+
+        Ok(BranchCacheStatus {
+            project_id: project_id.to_string(),
+            branch: branch.to_string(),
+            cache_state,
+            current_head,
+            cached_head,
+            cache_read_elapsed_ms: started.elapsed().as_millis() as u64,
+        })
+    }
+
+    pub fn restore_branch_analysis(
+        &self,
+        projects: &ProjectService,
+        project_id: &str,
+        branch: &str,
+    ) -> CommandResult<BranchAnalysisRestoreResult> {
+        let started = Instant::now();
+        let project = projects.get_project(project_id)?;
+        let (repo_id, current_head, db_path) = branch_cache_location(&project, branch)?;
+        if !db_path.exists() {
+            return Ok(empty_branch_restore(
+                project_id,
+                branch,
+                current_head,
+                started.elapsed().as_millis() as u64,
+            ));
+        }
+        let conn = revier_analysis::index::connection::open_database(&db_path)
+            .map_err(map_analysis_error)?;
+        revier_analysis::index::migrations::ensure_compatible_schema(&conn)
+            .map_err(map_analysis_error)?;
+        let Some(snapshot) =
+            revier_analysis::cache::repository::load_branch_snapshot(&conn, &repo_id, branch)
+                .map_err(map_analysis_error)?
+        else {
+            return Ok(empty_branch_restore(
+                project_id,
+                branch,
+                current_head,
+                started.elapsed().as_millis() as u64,
+            ));
+        };
+
+        let stale = snapshot.head_commit != current_head
+            || snapshot.analysis_version != revier_analysis::cache::ANALYSIS_VERSION;
+        let files = snapshot
+            .files
+            .iter()
+            .map(adapt_cached_analysis_file)
+            .collect::<CommandResult<Vec<_>>>()?;
+        let filters = ReviewFilters {
+            project_id: project_id.to_string(),
+            branch: snapshot.branch.clone(),
+            start_at: snapshot.start_at.clone(),
+            end_at: snapshot.end_at.clone(),
+            author_keys: Some(snapshot.author_keys.clone()),
+            author_query: snapshot.author_query.clone(),
+            message_query: snapshot.message_query.clone(),
+            glob_rules: snapshot.globs.clone(),
+        };
+        let range = AnalysisRange {
+            branch: snapshot.branch.clone(),
+            base_commit: snapshot.base_commit.clone(),
+            head_commit: snapshot.head_commit.clone(),
+            start_at: snapshot.start_at.clone(),
+            end_at: snapshot.end_at.clone(),
+        };
+        let task = self.create_task(project_id.to_string());
+        self.files_by_task
+            .lock()
+            .expect("文件缓存锁被污染")
+            .insert(task.task_id.clone(), files.clone());
+        self.filters_by_task
+            .lock()
+            .expect("筛选条件锁被污染")
+            .insert(task.task_id.clone(), filters.clone());
+        self.contexts_by_task
+            .lock()
+            .expect("任务上下文锁被污染")
+            .insert(
+                task.task_id.clone(),
+                ReviewTaskContext {
+                    project,
+                    filters: filters.clone(),
+                    range: range.clone(),
+                },
+            );
+        self.mark_completed(&task.task_id);
+        let task = self.get_task(&task.task_id)?;
+        let last_selected_path = snapshot
+            .last_selected_path
+            .filter(|path| files.iter().any(|file| file.path == *path));
+
+        Ok(BranchAnalysisRestoreResult {
+            project_id: project_id.to_string(),
+            branch: branch.to_string(),
+            cache_state: if stale {
+                CacheState::Stale
+            } else {
+                CacheState::Hit
+            },
+            cache_hit: true,
+            stale,
+            task: Some(task),
+            range: Some(range),
+            filters: Some(filters),
+            files,
+            last_selected_path,
+            current_head,
+            cached_head: Some(snapshot.head_commit),
+            cache_read_elapsed_ms: started.elapsed().as_millis() as u64,
+            analysis_elapsed_ms: Some(snapshot.elapsed_ms),
+        })
+    }
+
+    pub fn set_branch_selected_file(
+        &self,
+        projects: &ProjectService,
+        project_id: &str,
+        branch: &str,
+        file_path: Option<&str>,
+    ) -> CommandResult<()> {
+        let project = projects.get_project(project_id)?;
+        let (repo_id, _, db_path) = branch_cache_location(&project, branch)?;
+        if !db_path.exists() {
+            return Err(command_error(
+                "BRANCH_CACHE_NOT_FOUND",
+                format!("分支缓存不存在：{branch}"),
+            ));
+        }
+        let conn = revier_analysis::index::connection::open_database(&db_path)
+            .map_err(map_analysis_error)?;
+        revier_analysis::index::migrations::ensure_compatible_schema(&conn)
+            .map_err(map_analysis_error)?;
+        revier_analysis::cache::repository::update_last_selected_path(
+            &conn, &repo_id, branch, file_path,
+        )
+        .map_err(map_analysis_error)
+    }
+
     pub fn create_task(&self, project_id: ProjectId) -> AnalysisTaskSnapshot {
         let task = AnalysisTaskSnapshot {
             task_id: uuid::Uuid::new_v4().to_string(),
@@ -183,6 +415,60 @@ impl ReviewService {
             .insert(task.task_id.clone(), CancellationToken::new());
         self.mark_running(&task.task_id, AnalysisStage::ReadRepository, "等待后台分析");
         self.get_task(&task.task_id)
+    }
+
+    pub fn start_analysis_task_with_progress(
+        &self,
+        filters: ReviewFilters,
+        operation_id: String,
+        sink: ProgressEventSink,
+    ) -> CommandResult<AnalysisTaskSnapshot> {
+        let task = self.start_analysis_task(filters.clone())?;
+        self.progress_by_task
+            .lock()
+            .expect("进度注册锁被污染")
+            .insert(
+                task.task_id.clone(),
+                TaskProgressRegistration {
+                    operation_id,
+                    project_id: filters.project_id,
+                    branch: filters.branch,
+                    started_at: Utc::now().to_rfc3339(),
+                    started: Instant::now(),
+                    sink,
+                },
+            );
+        Ok(task)
+    }
+
+    pub fn take_operation_terminal_snapshot(
+        &self,
+        task_id: &str,
+        status: OperationStatus,
+        message: String,
+    ) -> Option<OperationProgressSnapshot> {
+        let registration = self
+            .progress_by_task
+            .lock()
+            .expect("进度注册锁被污染")
+            .remove(task_id)?;
+        Some(OperationProgressSnapshot {
+            operation_id: registration.operation_id,
+            kind: OperationKind::ProjectAnalysis,
+            status,
+            project_id: registration.project_id,
+            branch: Some(registration.branch),
+            file_path: None,
+            commit_hash: None,
+            stage: OperationStage::Ready,
+            message,
+            completed_units: None,
+            total_units: None,
+            progress: None,
+            started_at: registration.started_at,
+            elapsed_ms: registration.started.elapsed().as_millis() as u64,
+            cache_state: CacheState::Refresh,
+        })
     }
 
     pub fn execute_analysis_task(
@@ -687,6 +973,7 @@ impl ReviewService {
             started_at: analysis_started_at,
             completed_at: Utc::now().to_rfc3339(),
             elapsed_ms: analysis_started.elapsed().as_millis() as u64,
+            last_selected_path: None,
             author_keys,
             globs: filters.glob_rules.clone(),
             files: cache_files,
@@ -758,10 +1045,18 @@ impl ReviewService {
     }
 
     fn analysis_context_for_task(&self, task_id: &str) -> AnalysisExecutionContext {
+        let registration = self
+            .progress_by_task
+            .lock()
+            .expect("进度注册锁被污染")
+            .get(task_id)
+            .cloned();
         let reporter = Arc::new(TaskProgressReporter {
             tasks: Arc::clone(&self.tasks),
             task_id: task_id.to_string(),
             started: Instant::now(),
+            registration,
+            emission: Mutex::new(ProgressEmissionState::default()),
         });
         self.cancellations_by_task
             .lock()
@@ -891,6 +1186,48 @@ fn ensure_analysis_index(
         context,
     )?;
     Ok(())
+}
+
+fn branch_cache_location(
+    project: &ReviewProject,
+    branch: &str,
+) -> CommandResult<(String, String, PathBuf)> {
+    let repo = revier_analysis::git::repository::open_repository(Path::new(&project.repo_path))
+        .map_err(map_analysis_error)?;
+    let identity =
+        revier_analysis::git::repository::repository_identity(&repo).map_err(map_analysis_error)?;
+    let current_head = repo
+        .rev_parse_single(branch)
+        .map_err(|error| command_error("BRANCH_NOT_FOUND", error.to_string()))?
+        .detach()
+        .to_string();
+    let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
+        .map_err(map_analysis_error)?;
+    Ok((identity.repo_id, current_head, db_path))
+}
+
+fn empty_branch_restore(
+    project_id: &str,
+    branch: &str,
+    current_head: String,
+    cache_read_elapsed_ms: u64,
+) -> BranchAnalysisRestoreResult {
+    BranchAnalysisRestoreResult {
+        project_id: project_id.to_string(),
+        branch: branch.to_string(),
+        cache_state: CacheState::Miss,
+        cache_hit: false,
+        stale: false,
+        task: None,
+        range: None,
+        filters: None,
+        files: Vec::new(),
+        last_selected_path: None,
+        current_head,
+        cached_head: None,
+        cache_read_elapsed_ms,
+        analysis_elapsed_ms: None,
+    }
 }
 
 fn overlay_common_args(context: &ReviewTaskContext) -> OverlayCommonArgs {
@@ -1101,6 +1438,32 @@ fn cached_analysis_file(file: &ChangedFileOutput) -> CommandResult<CachedAnalysi
         is_previewable: file.is_previewable,
         old_blob_id: file.old_blob_id.clone(),
         new_blob_id: file.new_blob_id.clone(),
+    })
+}
+
+fn adapt_cached_analysis_file(file: &CachedAnalysisFile) -> CommandResult<ChangedFile> {
+    let status = match file.status {
+        0 => ChangedFileStatus::Added,
+        1 => ChangedFileStatus::Modified,
+        2 => ChangedFileStatus::Deleted,
+        3 => ChangedFileStatus::Renamed,
+        4 => ChangedFileStatus::Binary,
+        other => {
+            return Err(command_error_with_detail(
+                "UNKNOWN_CHANGED_FILE_STATUS",
+                format!("未知缓存文件状态：{other}"),
+                other.to_string(),
+            ))
+        }
+    };
+    Ok(ChangedFile {
+        path: file.path.clone(),
+        old_path: file.old_path.clone(),
+        status,
+        additions: file.additions,
+        deletions: file.deletions,
+        is_binary: file.is_binary,
+        is_previewable: file.is_previewable,
     })
 }
 
@@ -1526,6 +1889,93 @@ mod tests {
     use tempfile::{tempdir, TempDir};
 
     use crate::services::projects::ProjectService;
+
+    #[test]
+    fn throttles_ordinary_progress_and_emits_stage_changes_immediately() {
+        let tasks = Arc::new(Mutex::new(HashMap::new()));
+        let task = AnalysisTaskSnapshot {
+            task_id: "task-progress".to_string(),
+            project_id: "project-1".to_string(),
+            status: AnalysisTaskStatus::Running,
+            stage: AnalysisStage::ReadRepository,
+            progress: None,
+            message: None,
+            error: None,
+        };
+        tasks
+            .lock()
+            .expect("任务锁被污染")
+            .insert(task.task_id.clone(), task);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        let reporter = TaskProgressReporter {
+            tasks,
+            task_id: "task-progress".to_string(),
+            started: Instant::now(),
+            registration: Some(TaskProgressRegistration {
+                operation_id: "operation-1".to_string(),
+                project_id: "project-1".to_string(),
+                branch: "main".to_string(),
+                started_at: Utc::now().to_rfc3339(),
+                started: Instant::now(),
+                sink: Arc::new(move |event| {
+                    captured.lock().expect("事件锁被污染").push(event);
+                }),
+            }),
+            emission: Mutex::new(ProgressEmissionState::default()),
+        };
+
+        reporter.report(OperationProgressUpdate {
+            stage: OperationStage::IndexCommits,
+            message: "索引 1".to_string(),
+            completed_units: Some(1),
+            total_units: Some(10),
+        });
+        reporter.report(OperationProgressUpdate {
+            stage: OperationStage::IndexCommits,
+            message: "索引 2".to_string(),
+            completed_units: Some(2),
+            total_units: Some(10),
+        });
+        reporter.report(OperationProgressUpdate {
+            stage: OperationStage::FilterFiles,
+            message: "筛选文件".to_string(),
+            completed_units: None,
+            total_units: None,
+        });
+
+        let events = events.lock().expect("事件锁被污染");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].stage, OperationStage::IndexCommits);
+        assert_eq!(events[1].stage, OperationStage::FilterFiles);
+    }
+
+    #[test]
+    fn terminal_progress_releases_registered_event_sink() {
+        let service = ReviewService::default();
+        let task = service
+            .start_analysis_task_with_progress(
+                review_filters("project-1".to_string()),
+                "operation-1".to_string(),
+                Arc::new(|_| {}),
+            )
+            .expect("创建带进度的任务失败");
+
+        let terminal = service.take_operation_terminal_snapshot(
+            &task.task_id,
+            OperationStatus::Completed,
+            "项目分析完成".to_string(),
+        );
+
+        assert!(terminal.is_some());
+        assert!(service
+            .take_operation_terminal_snapshot(
+                &task.task_id,
+                OperationStatus::Completed,
+                "重复终态".to_string(),
+            )
+            .is_none());
+    }
 
     #[test]
     fn aggregates_authors_by_normalized_email_and_sorts_source_data() {
@@ -2129,6 +2579,110 @@ mod tests {
         assert_eq!(snapshot.files.len(), 1);
         assert!(snapshot.files[0].old_blob_id.is_some());
         assert!(snapshot.files[0].new_blob_id.is_some());
+    }
+
+    #[test]
+    fn restores_branch_snapshot_without_starting_a_new_analysis() {
+        let fixture = create_linear_repo();
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let writer = ReviewService::default();
+        writer
+            .start_analysis(&projects, review_filters(project.id.clone()))
+            .expect("执行项目分析失败");
+        writer
+            .set_branch_selected_file(&projects, &project.id, "main", Some("src/app.txt"))
+            .expect("保存选中文件失败");
+
+        let restored_service = ReviewService::default();
+        let restored = restored_service
+            .restore_branch_analysis(&projects, &project.id, "main")
+            .expect("恢复项目分析失败");
+
+        assert!(restored.cache_hit);
+        assert!(!restored.stale);
+        assert_eq!(restored.cache_state, CacheState::Hit);
+        assert_eq!(restored.files.len(), 1);
+        assert_eq!(restored.last_selected_path.as_deref(), Some("src/app.txt"));
+        let task = restored.task.expect("恢复结果应包含任务快照");
+        assert!(matches!(task.status, AnalysisTaskStatus::Completed));
+        assert_eq!(
+            restored_service
+                .list_changed_files(&task.task_id)
+                .expect("读取恢复文件失败")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn missing_branch_cache_returns_empty_workspace_without_creating_task() {
+        let fixture = create_linear_repo();
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let service = ReviewService::default();
+
+        let restored = service
+            .restore_branch_analysis(&projects, &project.id, "main")
+            .expect("读取空分支缓存失败");
+
+        assert!(!restored.cache_hit);
+        assert_eq!(restored.cache_state, CacheState::Miss);
+        assert!(restored.task.is_none());
+        assert!(restored.files.is_empty());
+        assert!(service.tasks.lock().expect("任务锁被污染").is_empty());
+    }
+
+    #[test]
+    fn reports_stale_cache_after_branch_head_changes_without_reanalysis() {
+        let fixture = create_linear_repo();
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let service = ReviewService::default();
+        service
+            .start_analysis(&projects, review_filters(project.id.clone()))
+            .expect("执行项目分析失败");
+        write_file(fixture.path(), "src/app.txt", "one\ntwo\nthree\n");
+        git_commit_with_author(
+            fixture.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-13T00:00:00Z",
+            "feat: 新增第三行",
+        );
+
+        let restored = service
+            .restore_branch_analysis(&projects, &project.id, "main")
+            .expect("恢复过期项目分析失败");
+
+        assert!(restored.cache_hit);
+        assert!(restored.stale);
+        assert_eq!(restored.cache_state, CacheState::Stale);
+        assert_ne!(
+            restored.cached_head.as_deref(),
+            Some(restored.current_head.as_str())
+        );
     }
 
     #[test]

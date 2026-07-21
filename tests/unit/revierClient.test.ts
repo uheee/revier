@@ -111,7 +111,7 @@ describe('revierClient', () => {
       .mockResolvedValueOnce(overlay)
       .mockResolvedValueOnce(overlay);
 
-    await revierClient.review.startAnalysis(filters);
+    await revierClient.review.startAnalysis(filters, 'operation-1');
     await revierClient.review.listChangedFiles(task.taskId);
     await revierClient.review.getFileOverlay({
       taskId: task.taskId,
@@ -123,7 +123,10 @@ describe('revierClient', () => {
       commitHash: 'abc123'
     });
 
-    expect(invoke).toHaveBeenNthCalledWith(1, 'review_start_analysis', { filters });
+    expect(invoke).toHaveBeenNthCalledWith(1, 'review_start_analysis', {
+      filters,
+      operationId: 'operation-1'
+    });
     expect(invoke).toHaveBeenNthCalledWith(2, 'review_list_changed_files', {
       taskId: task.taskId
     });
@@ -148,6 +151,56 @@ describe('revierClient', () => {
 
     expect(listen).toHaveBeenCalledWith('review://task-updated', expect.any(Function));
     expect(callback).toHaveBeenCalledWith(task);
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('调用分支缓存恢复与选中文件持久化命令', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+
+    await revierClient.review.restoreBranchAnalysis('project-1', 'develop');
+    await revierClient.review.getBranchCacheStatus('project-1', 'develop');
+    await revierClient.review.setBranchSelectedFile('project-1', 'develop', 'src/main.ts');
+
+    expect(invoke).toHaveBeenNthCalledWith(1, 'review_restore_branch_analysis', {
+      projectId: 'project-1',
+      branch: 'develop'
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, 'review_get_branch_cache_status', {
+      projectId: 'project-1',
+      branch: 'develop'
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, 'review_set_branch_selected_file', {
+      projectId: 'project-1',
+      branch: 'develop',
+      filePath: 'src/main.ts'
+    });
+  });
+
+  it('订阅统一操作进度事件', async () => {
+    const unlisten = vi.fn();
+    const progress = {
+      operationId: 'operation-1',
+      kind: 'project-analysis' as const,
+      status: 'running' as const,
+      projectId: 'project-1',
+      branch: 'develop',
+      stage: 'index-commits' as const,
+      message: '正在更新索引',
+      startedAt: '2026-07-22T00:00:00Z',
+      elapsedMs: 100,
+      cacheState: 'refresh' as const
+    };
+    vi.mocked(listen).mockImplementation(async (_eventName, handler) => {
+      handler({ payload: progress } as Parameters<typeof handler>[0]);
+      return unlisten;
+    });
+    const callback = vi.fn();
+
+    const unsubscribe = await revierClient.review.onOperationProgress(callback);
+    unsubscribe();
+
+    expect(listen).toHaveBeenCalledWith('review://operation-progress', expect.any(Function));
+    expect(callback).toHaveBeenCalledWith(progress);
     expect(unlisten).toHaveBeenCalledTimes(1);
   });
 });

@@ -34,6 +34,8 @@ pub fn export_typescript_bindings(output: &Path) -> Result<(), std::io::Error> {
         .register::<OperationStage>()
         .register::<CacheState>()
         .register::<OperationProgressSnapshot>()
+        .register::<BranchCacheStatus>()
+        .register::<BranchAnalysisRestoreResult>()
         .register::<ChangedFileStatus>()
         .register::<ChangedFile>()
         .register::<FileOverlayRequest>()

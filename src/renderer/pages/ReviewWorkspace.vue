@@ -8,6 +8,7 @@ import DiffDrilldownOverlay from '../components/review/DiffDrilldownOverlay.vue'
 import DiffViewer from '../components/review/DiffViewer.vue';
 import FilterPanel from '../components/review/FilterPanel.vue';
 import ReviewLayoutResizer from '../components/review/ReviewLayoutResizer.vue';
+import OperationStatusBar from '../components/review/OperationStatusBar.vue';
 import TaskProgress from '../components/review/TaskProgress.vue';
 import { revierClient } from '../api/revierClient';
 import { toErrorMessage } from '../api/errors';
@@ -49,6 +50,8 @@ const {
   authors,
   authorsLoading,
   loading,
+  branchCacheState,
+  operation,
   error,
   diffComputationState
 } = storeToRefs(reviewStore);
@@ -69,12 +72,15 @@ const defaultBranch = computed(() => project.value?.preferences.defaultBranch ??
 const defaultDays = computed(() => project.value?.preferences.defaultDays ?? 30);
 const defaultGlobRules = computed(() => project.value?.preferences.defaultGlobRules ?? []);
 const savedFilters = computed(() => project.value?.preferences.reviewFilters);
-const initialAuthorBranch = computed(() => savedFilters.value?.branch ?? defaultBranch.value);
+const effectiveSavedFilters = computed(() => reviewStore.restoredFilters ?? savedFilters.value);
+const initialAuthorBranch = computed(() => effectiveSavedFilters.value?.branch ?? defaultBranch.value);
 let unsubscribe: (() => void) | undefined;
+let unsubscribeOperation: (() => void) | undefined;
 let pendingReviewFilterSave: number | undefined;
 let latestReviewFilters: ReviewFilters | undefined;
 let workspaceActive = false;
 let metadataRequestId = 0;
+let activeBranch = '';
 
 onMounted(async () => {
   workspaceActive = true;
@@ -100,6 +106,24 @@ onMounted(async () => {
       });
     }
   }
+  if (revierClient.review.onOperationProgress) {
+    try {
+      const stop = await revierClient.review.onOperationProgress((progress) => {
+        reviewStore.handleOperationProgress(progress);
+      });
+      if (workspaceActive) unsubscribeOperation = stop;
+      else stop();
+    } catch (error) {
+      if (workspaceActive) {
+        addNotification({
+          type: 'error',
+          title: '操作进度事件订阅失败',
+          message: `${subscribedProjectId}：${toErrorMessage(error)}`,
+          source: 'Review'
+        });
+      }
+    }
+  }
 });
 
 onBeforeUnmount(() => {
@@ -107,10 +131,10 @@ onBeforeUnmount(() => {
   ++metadataRequestId;
   flushPendingReviewFilterSave();
   unsubscribe?.();
+  unsubscribeOperation?.();
 });
 
 async function runAnalysis(filters: ReviewFilters): Promise<void> {
-  selectedFilePath.value = undefined;
   await reviewStore.start(filters);
   if (reviewStore.task?.status === 'completed' && reviewStore.files[0]) {
     await selectFile(reviewStore.files[0].path);
@@ -118,12 +142,9 @@ async function runAnalysis(filters: ReviewFilters): Promise<void> {
 }
 
 async function handleTaskUpdate(snapshot: AnalysisTaskSnapshot): Promise<void> {
-  const selectedBeforeUpdate = selectedFilePath.value;
   await reviewStore.handleTaskUpdate(snapshot);
   if (
     snapshot.status === 'completed' &&
-    !selectedBeforeUpdate &&
-    !selectedFilePath.value &&
     reviewStore.files[0]
   ) {
     await selectFile(reviewStore.files[0].path);
@@ -156,10 +177,26 @@ async function loadReviewMetadata(): Promise<void> {
     });
   }
   if (!workspaceActive || requestId !== metadataRequestId) return;
+  if (reviewStore.task?.projectId === metadataProjectId && reviewStore.files.length > 0) {
+    activeBranch = initialAuthorBranch.value;
+  } else {
+    await restoreWorkspaceBranch(initialAuthorBranch.value);
+  }
+  if (!workspaceActive || requestId !== metadataRequestId) return;
   await reviewStore.loadAuthors({
     projectId: metadataProjectId,
     branch: initialAuthorBranch.value
   });
+}
+
+async function restoreWorkspaceBranch(branch: string): Promise<void> {
+  activeBranch = branch;
+  selectedFilePath.value = undefined;
+  const restored = await reviewStore.restoreBranch(projectId.value, branch);
+  if (!workspaceActive || activeBranch !== branch || !restored) return;
+  if (restored.lastSelectedPath) {
+    await selectFile(restored.lastSelectedPath);
+  }
 }
 
 function scheduleReviewFilterSave(filters: ReviewFilters): void {
@@ -171,6 +208,14 @@ function scheduleReviewFilterSave(filters: ReviewFilters): void {
   pendingReviewFilterSave = window.setTimeout(() => {
     flushPendingReviewFilterSave();
   }, 300);
+}
+
+function handleFiltersChange(filters: ReviewFilters): void {
+  scheduleReviewFilterSave(filters);
+  if (activeBranch && filters.branch !== activeBranch) {
+    void restoreWorkspaceBranch(filters.branch);
+    void reviewStore.loadAuthors({ projectId: filters.projectId, branch: filters.branch });
+  }
 }
 
 function flushPendingReviewFilterSave(): void {
@@ -204,6 +249,18 @@ async function selectFile(filePath: string): Promise<void> {
   selectedFilePath.value = filePath;
   isEditorDraft.value = false;
   requestedEncoding.value = editorSettingsSnapshot.value.settings.defaultEncoding;
+  if (activeBranch) {
+    void revierClient.review
+      .setBranchSelectedFile(projectId.value, activeBranch, filePath)
+      .catch((error) => {
+        addNotification({
+          type: 'error',
+          title: '选中文件状态保存失败',
+          message: `${filePath}：${toErrorMessage(error)}`,
+          source: 'Review'
+        });
+      });
+  }
   if (await reviewStore.loadOverlay(filePath, requestedEncoding.value)) {
     isEditorDraft.value = false;
   }
@@ -278,12 +335,13 @@ function closeCommitDrilldown(): void {
         :default-branch="defaultBranch"
         :default-days="defaultDays"
         :default-glob-rules="defaultGlobRules"
-        :saved-filters="savedFilters"
+        :saved-filters="effectiveSavedFilters"
         :branches="branches"
         :authors="authors"
         :authors-loading="authorsLoading"
         :loading="loading"
-        @change="scheduleReviewFilterSave"
+        :cache-state="branchCacheState"
+        @change="handleFiltersChange"
         @submit="runAnalysis"
         @cancel="reviewStore.cancelAnalysis"
       />
@@ -344,5 +402,6 @@ function closeCommitDrilldown(): void {
       @commit-selected="openCommitDrilldown"
       @cancel-commit="closeCommitDrilldown"
     />
+    <OperationStatusBar :operation="operation" />
   </main>
 </template>

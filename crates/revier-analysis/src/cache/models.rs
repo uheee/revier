@@ -27,6 +27,7 @@ pub struct CachedAnalysisSnapshot {
     pub started_at: String,
     pub completed_at: String,
     pub elapsed_ms: u64,
+    pub last_selected_path: Option<String>,
     pub author_keys: Vec<String>,
     pub globs: Vec<String>,
     pub files: Vec<CachedAnalysisFile>,

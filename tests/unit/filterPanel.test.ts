@@ -160,6 +160,27 @@ describe('FilterPanel', () => {
       branch: 'main'
     });
   });
+
+  it('按分支缓存状态显示分析或重新分析项目', async () => {
+    const wrapper = mount(FilterPanel, {
+      props: {
+        projectId: 'project-1',
+        defaultBranch: 'develop',
+        defaultGlobRules: [],
+        branches: [{ name: 'develop', current: true }],
+        authors: [],
+        cacheState: 'miss'
+      },
+      global: { stubs: filterPanelStubs() }
+    });
+
+    expect(wrapper.text()).toContain('分析项目');
+    expect(wrapper.text()).not.toContain('缓存可能已过期');
+
+    await wrapper.setProps({ cacheState: 'stale' });
+    expect(wrapper.text()).toContain('重新分析项目');
+    expect(wrapper.text()).toContain('缓存可能已过期');
+  });
 });
 
 const SelectStub = defineComponent({
