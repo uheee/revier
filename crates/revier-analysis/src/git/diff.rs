@@ -28,6 +28,8 @@ pub struct CommitFileChange {
     pub is_binary: bool,
     pub is_previewable: bool,
     pub similarity: Option<f32>,
+    pub old_blob_id: Option<String>,
+    pub new_blob_id: Option<String>,
 }
 
 pub fn pairwise_parent_changes(
@@ -221,6 +223,7 @@ pub fn commit_file_changes(
             &empty_tree.id.to_string(),
             &commit,
             0,
+            true,
         );
     }
 
@@ -229,7 +232,13 @@ pub fn commit_file_changes(
         let parent = repo
             .find_commit(*parent_id)
             .map_err(|error| AppError::Repository(error.to_string()))?;
-        changes.extend(pairwise_file_changes(repo, &parent, &commit, parent_index)?);
+        changes.extend(pairwise_file_changes(
+            repo,
+            &parent,
+            &commit,
+            parent_index,
+            true,
+        )?);
     }
     Ok(changes)
 }
@@ -254,11 +263,31 @@ pub fn range_file_changes(
 ) -> Result<Vec<CommitFileChange>, AppError> {
     let base = resolve_commit(repo, base_commit)?;
     let head = resolve_commit(repo, head_commit)?;
-    let mut changes = pairwise_file_changes(repo, &base, &head, 0)?;
-    for change in &mut changes {
+    let mut changes = pairwise_file_changes(repo, &base, &head, 0, true)?;
+    populate_range_file_statistics(repo, base_commit, head_commit, &mut changes)?;
+    Ok(changes)
+}
+
+pub fn range_file_tree_changes(
+    repo: &gix::Repository,
+    base_commit: &str,
+    head_commit: &str,
+) -> Result<Vec<CommitFileChange>, AppError> {
+    let base = resolve_commit(repo, base_commit)?;
+    let head = resolve_commit(repo, head_commit)?;
+    pairwise_file_changes(repo, &base, &head, 0, false)
+}
+
+pub fn populate_range_file_statistics(
+    repo: &gix::Repository,
+    base_commit: &str,
+    head_commit: &str,
+    changes: &mut [CommitFileChange],
+) -> Result<(), AppError> {
+    for change in changes {
         populate_range_line_counts(repo, base_commit, head_commit, change)?;
     }
-    Ok(changes)
+    Ok(())
 }
 
 fn populate_range_line_counts(
@@ -267,30 +296,39 @@ fn populate_range_line_counts(
     head_commit: &str,
     change: &mut CommitFileChange,
 ) -> Result<(), AppError> {
-    if change.is_binary {
-        return Ok(());
-    }
-
-    let old_text_result = if change.status == "added" {
-        Ok(String::new())
+    let old_bytes_result = if change.status == "added" {
+        Ok(Vec::new())
     } else {
-        crate::git::blob::read_text_at_commit(
+        crate::git::blob::read_blob_at_commit(
             repo,
             base_commit,
             change.old_path.as_deref().unwrap_or(&change.path),
         )
+        .map(|bytes| bytes.unwrap_or_default())
     };
-    let new_text_result = if change.status == "deleted" {
-        Ok(String::new())
+    let new_bytes_result = if change.status == "deleted" {
+        Ok(Vec::new())
     } else {
-        crate::git::blob::read_text_at_commit(repo, head_commit, &change.path)
+        crate::git::blob::read_blob_at_commit(repo, head_commit, &change.path)
+            .map(|bytes| bytes.unwrap_or_default())
     };
-    let (old_text, new_text) = match (old_text_result, new_text_result) {
-        (Ok(old_text), Ok(new_text)) => (old_text, new_text),
-        (Err(AppError::FileNotAnalyzable(_)), _) | (_, Err(AppError::FileNotAnalyzable(_))) => {
-            return Ok(())
-        }
+    let (old_bytes, new_bytes) = match (old_bytes_result, new_bytes_result) {
+        (Ok(old_bytes), Ok(new_bytes)) => (old_bytes, new_bytes),
         (Err(error), _) | (_, Err(error)) => return Err(error),
+    };
+    change.is_binary = crate::git::blob::is_binary_bytes(&old_bytes)
+        || crate::git::blob::is_binary_bytes(&new_bytes);
+    change.is_previewable = !change.is_binary;
+    if change.is_binary {
+        return Ok(());
+    }
+    let old_text = match String::from_utf8(old_bytes) {
+        Ok(text) => text,
+        Err(_) => return Ok(()),
+    };
+    let new_text = match String::from_utf8(new_bytes) {
+        Ok(text) => text,
+        Err(_) => return Ok(()),
     };
 
     for part in crate::overlay::line_diff::diff_lines(&old_text, &new_text) {
@@ -312,6 +350,7 @@ fn pairwise_file_changes(
     parent: &gix::Commit<'_>,
     commit: &gix::Commit<'_>,
     parent_index: usize,
+    inspect_content: bool,
 ) -> Result<Vec<CommitFileChange>, AppError> {
     let parent_tree = parent
         .tree()
@@ -326,6 +365,7 @@ fn pairwise_file_changes(
         &parent.id.to_string(),
         commit,
         parent_index,
+        inspect_content,
     )
 }
 
@@ -336,12 +376,21 @@ fn file_changes_between_trees(
     parent_hash: &str,
     commit: &gix::Commit<'_>,
     parent_index: usize,
+    inspect_content: bool,
 ) -> Result<Vec<CommitFileChange>, AppError> {
     let parent_iter = gix_object::TreeRefIter::from_bytes(&parent_tree.data, parent_tree.id.kind());
     let commit_iter = gix_object::TreeRefIter::from_bytes(&commit_tree.data, commit_tree.id.kind());
     let mut resource_cache = diff_resource_cache()?;
     let mut state = gix_diff::tree::State::default();
     let mut changes = Vec::new();
+    let rewrites = if inspect_content {
+        gix_diff::Rewrites::default()
+    } else {
+        gix_diff::Rewrites {
+            percentage: None,
+            ..gix_diff::Rewrites::default()
+        }
+    };
 
     gix_diff::tree_with_rewrites(
         parent_iter,
@@ -350,9 +399,14 @@ fn file_changes_between_trees(
         &mut state,
         &repo.objects,
         |change| {
-            if let Some(file_change) =
-                map_tree_change(repo, parent_hash, commit, parent_index, change)?
-            {
+            if let Some(file_change) = map_tree_change(
+                repo,
+                parent_hash,
+                commit,
+                parent_index,
+                change,
+                inspect_content,
+            )? {
                 changes.push(file_change);
             }
             Ok::<gix_diff::tree_with_rewrites::Action, AppError>(
@@ -361,7 +415,7 @@ fn file_changes_between_trees(
         },
         gix_diff::tree_with_rewrites::Options {
             location: Some(gix_diff::tree::recorder::Location::Path),
-            rewrites: Some(gix_diff::Rewrites::default()),
+            rewrites: Some(rewrites),
         },
     )
     .map_err(|error| AppError::Repository(error.to_string()))?;
@@ -375,6 +429,7 @@ fn map_tree_change(
     commit: &gix::Commit<'_>,
     parent_index: usize,
     change: gix_diff::tree_with_rewrites::ChangeRef<'_>,
+    inspect_content: bool,
 ) -> Result<Option<CommitFileChange>, AppError> {
     match change {
         gix_diff::tree_with_rewrites::ChangeRef::Addition {
@@ -386,7 +441,7 @@ fn map_tree_change(
             if entry_mode.is_tree() {
                 return Ok(None);
             }
-            let is_binary = blob_contains_nul(repo, entry_mode, id)?;
+            let is_binary = inspect_content && blob_contains_nul(repo, entry_mode, id)?;
             Ok(Some(file_change(
                 commit,
                 parent_hash,
@@ -397,6 +452,8 @@ fn map_tree_change(
                     status: "added",
                     is_binary,
                     similarity: None,
+                    old_blob_id: None,
+                    new_blob_id: Some(id),
                 },
             )))
         }
@@ -409,7 +466,7 @@ fn map_tree_change(
             if entry_mode.is_tree() {
                 return Ok(None);
             }
-            let is_binary = blob_contains_nul(repo, entry_mode, id)?;
+            let is_binary = inspect_content && blob_contains_nul(repo, entry_mode, id)?;
             Ok(Some(file_change(
                 commit,
                 parent_hash,
@@ -420,6 +477,8 @@ fn map_tree_change(
                     status: "deleted",
                     is_binary,
                     similarity: None,
+                    old_blob_id: Some(id),
+                    new_blob_id: None,
                 },
             )))
         }
@@ -433,8 +492,9 @@ fn map_tree_change(
             if previous_entry_mode.is_tree() || entry_mode.is_tree() {
                 return Ok(None);
             }
-            let is_binary = blob_contains_nul(repo, previous_entry_mode, previous_id)?
-                || blob_contains_nul(repo, entry_mode, id)?;
+            let is_binary = inspect_content
+                && (blob_contains_nul(repo, previous_entry_mode, previous_id)?
+                    || blob_contains_nul(repo, entry_mode, id)?);
             Ok(Some(file_change(
                 commit,
                 parent_hash,
@@ -445,6 +505,8 @@ fn map_tree_change(
                     status: "modified",
                     is_binary,
                     similarity: None,
+                    old_blob_id: Some(previous_id),
+                    new_blob_id: Some(id),
                 },
             )))
         }
@@ -454,6 +516,7 @@ fn map_tree_change(
             copy: false,
             diff,
             source_entry_mode,
+            source_id,
             entry_mode,
             id,
             ..
@@ -461,7 +524,9 @@ fn map_tree_change(
             if source_entry_mode.is_tree() || entry_mode.is_tree() {
                 return Ok(None);
             }
-            let is_binary = blob_contains_nul(repo, entry_mode, id)?;
+            let is_binary = inspect_content
+                && (blob_contains_nul(repo, source_entry_mode, source_id)?
+                    || blob_contains_nul(repo, entry_mode, id)?);
             Ok(Some(file_change(
                 commit,
                 parent_hash,
@@ -472,6 +537,8 @@ fn map_tree_change(
                     status: "renamed",
                     is_binary,
                     similarity: diff.map(|stats| stats.similarity),
+                    old_blob_id: Some(source_id),
+                    new_blob_id: Some(id),
                 },
             )))
         }
@@ -499,6 +566,8 @@ fn file_change(
         is_binary: details.is_binary,
         is_previewable: !details.is_binary,
         similarity: details.similarity,
+        old_blob_id: details.old_blob_id.map(|id| id.to_string()),
+        new_blob_id: details.new_blob_id.map(|id| id.to_string()),
     }
 }
 
@@ -508,6 +577,8 @@ struct FileChangeDetails<'a> {
     status: &'a str,
     is_binary: bool,
     similarity: Option<f32>,
+    old_blob_id: Option<gix::ObjectId>,
+    new_blob_id: Option<gix::ObjectId>,
 }
 
 fn blob_contains_nul(

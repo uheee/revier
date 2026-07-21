@@ -1,23 +1,27 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use revier_analysis::api::QueryFilesRequest;
+use revier_analysis::cache::models::{CachedAnalysisFile, CachedAnalysisSnapshot};
 use revier_analysis::cli::{IndexBuildArgs, IndexCommonArgs, OutputFormat, OverlayCommonArgs};
 use revier_analysis::contracts::{
     AnalysisRange, AnalysisStage, AnalysisTaskSnapshot, AnalysisTaskStatus, AttributeBlocksRequest,
     AttributeBlocksResult, AttributionConfidence, AttributionMethod, AttributionWarning,
     AttributionWarningCode, AuthorFilterOption, AuthorSummary, BlockAttributionSummary,
     ChangedFile, ChangedFileStatus, CommitOverlayRequest, DiffBlock, DiffBlockAttribution,
-    DiffBlockChangeType, FileOverlay, FileOverlayMode, FileOverlayRequest, ProjectId,
-    RelatedCommit, RelatedCommitAttribution, ResolvedTextEncoding, ReviewAuthorOptionsRequest,
-    ReviewFilters, ReviewProject, SideBySideDiffRow, SideBySideDiffRowType, TaskId, TextEncoding,
-    TouchedRange, WordChange,
+    DiffBlockChangeType, FileOverlay, FileOverlayMode, FileOverlayRequest, OperationStage,
+    ProjectId, RelatedCommit, RelatedCommitAttribution, ResolvedTextEncoding,
+    ReviewAuthorOptionsRequest, ReviewFilters, ReviewProject, SideBySideDiffRow,
+    SideBySideDiffRowType, TaskId, TextEncoding, TouchedRange, WordChange,
 };
 use revier_analysis::error::AppError as AnalysisAppError;
-use revier_analysis::execution::AnalysisExecutionContext;
+use revier_analysis::execution::{
+    AnalysisExecutionContext, OperationProgressReporter, OperationProgressUpdate,
+};
 use revier_analysis::json::{
     AttributionWarningOutput, AuthorOutput, BlockAttributionOutput, ChangedFileOutput,
     DiffBlockOutput, RelatedCommitAttributionOutput, RelatedCommitOutput, SideBySideDiffRowOutput,
@@ -30,7 +34,7 @@ use crate::services::projects::ProjectService;
 
 #[derive(Default)]
 pub struct ReviewService {
-    tasks: Mutex<HashMap<TaskId, AnalysisTaskSnapshot>>,
+    tasks: Arc<Mutex<HashMap<TaskId, AnalysisTaskSnapshot>>>,
     filters_by_task: Mutex<HashMap<TaskId, ReviewFilters>>,
     files_by_task: Mutex<HashMap<TaskId, Vec<ChangedFile>>>,
     contexts_by_task: Mutex<HashMap<TaskId, ReviewTaskContext>>,
@@ -47,6 +51,56 @@ struct ReviewTaskContext {
 struct AnalysisRunResult {
     files: Vec<ChangedFile>,
     context: ReviewTaskContext,
+}
+
+struct TaskProgressReporter {
+    tasks: Arc<Mutex<HashMap<TaskId, AnalysisTaskSnapshot>>>,
+    task_id: TaskId,
+    started: Instant,
+}
+
+impl OperationProgressReporter for TaskProgressReporter {
+    fn report(&self, update: OperationProgressUpdate) {
+        #[cfg(debug_assertions)]
+        if std::env::var_os("REVIER_TRACE_OPERATIONS").is_some() {
+            eprintln!(
+                "分析进度 task={} stage={:?} completed={:?} total={:?} elapsed_ms={}",
+                self.task_id,
+                update.stage,
+                update.completed_units,
+                update.total_units,
+                self.started.elapsed().as_millis()
+            );
+        }
+        let mut tasks = self.tasks.lock().expect("任务锁被污染");
+        let Some(task) = tasks.get_mut(&self.task_id) else {
+            return;
+        };
+        if matches!(task.status, AnalysisTaskStatus::Cancelled) {
+            return;
+        }
+        task.status = AnalysisTaskStatus::Running;
+        task.stage = analysis_stage_for_operation(&update.stage);
+        task.progress = match (update.completed_units, update.total_units) {
+            (Some(completed), Some(total)) if total > 0 => {
+                Some((completed as f64 / total as f64).clamp(0.0, 1.0))
+            }
+            (Some(0), Some(0)) => Some(1.0),
+            _ => None,
+        };
+        task.message = Some(update.message);
+        task.error = None;
+    }
+}
+
+fn analysis_stage_for_operation(stage: &OperationStage) -> AnalysisStage {
+    match stage {
+        OperationStage::ReadRepository => AnalysisStage::ReadRepository,
+        OperationStage::ResolveRange => AnalysisStage::ResolveRange,
+        OperationStage::IndexCommits => AnalysisStage::LoadCommits,
+        OperationStage::Ready => AnalysisStage::Ready,
+        _ => AnalysisStage::LoadChangedFiles,
+    }
 }
 
 impl ReviewService {
@@ -533,6 +587,8 @@ impl ReviewService {
         task_id: &str,
         filters: ReviewFilters,
     ) -> CommandResult<AnalysisRunResult> {
+        let analysis_started_at = Utc::now().to_rfc3339();
+        let analysis_started = Instant::now();
         let context = self.analysis_context_for_task(task_id);
         self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::ReadRepository, "读取项目仓库");
@@ -563,19 +619,13 @@ impl ReviewService {
 
         self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::LoadChangedFiles, "准备仓库索引");
-        ensure_analysis_index(
-            &repo_path,
-            &range.branch,
-            &range.base_commit,
-            &range.head_commit,
-        )
-        .map_err(map_analysis_error)?;
+        ensure_analysis_index(&repo_path, &range.branch, &context).map_err(map_analysis_error)?;
 
         self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::LoadChangedFiles, "读取变更文件");
         let output = revier_analysis::api::query_files_with_context(
             QueryFilesRequest {
-                repo: repo_path,
+                repo: repo_path.clone(),
                 db: None,
                 base: range.base_commit.clone(),
                 head: range.head_commit.clone(),
@@ -592,11 +642,87 @@ impl ReviewService {
         .map_err(map_analysis_error)?;
 
         self.ensure_not_cancelled(task_id)?;
+        let repo = revier_analysis::git::repository::open_repository(&repo_path)
+            .map_err(map_analysis_error)?;
+        let identity = revier_analysis::git::repository::repository_identity(&repo)
+            .map_err(map_analysis_error)?;
+        let locally_reachable =
+            revier_analysis::git::commits::all_local_branch_reachable_hashes(&repo, &context)
+                .map_err(map_analysis_error)?;
+        let cache_files = output
+            .files
+            .iter()
+            .map(cached_analysis_file)
+            .collect::<CommandResult<Vec<_>>>()?;
         let files = output
             .files
-            .into_iter()
+            .iter()
+            .cloned()
             .map(adapt_changed_file)
             .collect::<CommandResult<Vec<_>>>()?;
+        let author_keys = filters.author_keys.clone().unwrap_or_default();
+        let author_part = author_keys.join("\0");
+        let glob_part = filters.glob_rules.join("\0");
+        let filter_fingerprint = revier_analysis::cache::filter_fingerprint(&[
+            &range.branch,
+            range.start_at.as_deref().unwrap_or_default(),
+            range.end_at.as_deref().unwrap_or_default(),
+            &author_part,
+            filters.author_query.as_deref().unwrap_or_default(),
+            filters.message_query.as_deref().unwrap_or_default(),
+            &glob_part,
+        ]);
+        let snapshot = CachedAnalysisSnapshot {
+            analysis_id: uuid::Uuid::new_v4().to_string(),
+            repo_id: identity.repo_id.clone(),
+            branch: range.branch.clone(),
+            base_commit: range.base_commit.clone(),
+            head_commit: range.head_commit.clone(),
+            start_at: range.start_at.clone(),
+            end_at: range.end_at.clone(),
+            author_query: filters.author_query.clone(),
+            message_query: filters.message_query.clone(),
+            filter_fingerprint,
+            analysis_version: revier_analysis::cache::ANALYSIS_VERSION,
+            started_at: analysis_started_at,
+            completed_at: Utc::now().to_rfc3339(),
+            elapsed_ms: analysis_started.elapsed().as_millis() as u64,
+            author_keys,
+            globs: filters.glob_rules.clone(),
+            files: cache_files,
+        };
+        let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
+            .map_err(map_analysis_error)?;
+        let conn = revier_analysis::index::connection::open_database(&db_path)
+            .map_err(map_analysis_error)?;
+        self.ensure_not_cancelled(task_id)?;
+        context.check_cancelled().map_err(map_analysis_error)?;
+        revier_analysis::index::writer::checkpoint(&conn).map_err(map_analysis_error)?;
+        context.report_progress(OperationProgressUpdate {
+            stage: OperationStage::PublishCache,
+            message: format!("发布项目缓存：{}", range.branch),
+            completed_units: Some(0),
+            total_units: Some(1),
+        });
+        revier_analysis::cache::repository::publish_branch_snapshot_and_prune_with_completion(
+            &conn,
+            &snapshot,
+            &locally_reachable,
+            || {
+                (
+                    Utc::now().to_rfc3339(),
+                    analysis_started.elapsed().as_millis() as u64,
+                )
+            },
+        )
+        .map_err(map_analysis_error)?;
+        context.report_progress(OperationProgressUpdate {
+            stage: OperationStage::PublishCache,
+            message: format!("项目缓存发布完成：{}", range.branch),
+            completed_units: Some(1),
+            total_units: Some(1),
+        });
+
         Ok(AnalysisRunResult {
             files,
             context: ReviewTaskContext {
@@ -632,13 +758,23 @@ impl ReviewService {
     }
 
     fn analysis_context_for_task(&self, task_id: &str) -> AnalysisExecutionContext {
+        let reporter = Arc::new(TaskProgressReporter {
+            tasks: Arc::clone(&self.tasks),
+            task_id: task_id.to_string(),
+            started: Instant::now(),
+        });
         self.cancellations_by_task
             .lock()
             .expect("取消令牌锁被污染")
             .get(task_id)
             .cloned()
-            .map(|token| AnalysisExecutionContext::with_cancel(move || token.is_cancelled()))
-            .unwrap_or_else(AnalysisExecutionContext::none)
+            .map(|token| {
+                AnalysisExecutionContext::with_cancel_and_progress(
+                    move || token.is_cancelled(),
+                    reporter.clone(),
+                )
+            })
+            .unwrap_or_else(|| AnalysisExecutionContext::with_progress(reporter))
     }
 
     fn is_cancelled(&self, task_id: &str) -> bool {
@@ -737,34 +873,24 @@ impl ReviewService {
 fn ensure_analysis_index(
     repo_path: &Path,
     branch: &str,
-    base: &str,
-    head: &str,
+    context: &AnalysisExecutionContext,
 ) -> Result<(), AnalysisAppError> {
     let repo = revier_analysis::git::repository::open_repository(repo_path)?;
     let identity = revier_analysis::git::repository::repository_identity(&repo)?;
     let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)?;
-    if db_path.exists() && range_is_indexed(&db_path, base, head)? {
-        return Ok(());
-    }
-
-    revier_analysis::commands::index_build::run(IndexBuildArgs {
-        common: IndexCommonArgs {
-            repo: repo_path.to_path_buf(),
-            db: Some(db_path),
-            format: OutputFormat::Json,
-            pretty: false,
+    revier_analysis::commands::index_build::run_with_context(
+        IndexBuildArgs {
+            common: IndexCommonArgs {
+                repo: repo_path.to_path_buf(),
+                db: Some(db_path),
+                format: OutputFormat::Json,
+                pretty: false,
+            },
+            branch: branch.to_string(),
         },
-        branch: branch.to_string(),
-    })?;
+        context,
+    )?;
     Ok(())
-}
-
-fn range_is_indexed(db_path: &Path, base: &str, head: &str) -> Result<bool, AnalysisAppError> {
-    let conn = revier_analysis::index::connection::open_database(db_path)?;
-    revier_analysis::index::migrations::ensure_compatible_schema(&conn)?;
-    let base_indexed = revier_analysis::index::queries::commit_exists(&conn, base)?;
-    let head_indexed = revier_analysis::index::queries::commit_exists(&conn, head)?;
-    Ok(base_indexed && head_indexed)
 }
 
 fn overlay_common_args(context: &ReviewTaskContext) -> OverlayCommonArgs {
@@ -962,6 +1088,35 @@ fn adapt_changed_file(file: ChangedFileOutput) -> CommandResult<ChangedFile> {
         is_binary: file.is_binary,
         is_previewable: file.is_previewable,
     })
+}
+
+fn cached_analysis_file(file: &ChangedFileOutput) -> CommandResult<CachedAnalysisFile> {
+    Ok(CachedAnalysisFile {
+        path: file.path.clone(),
+        old_path: file.old_path.clone(),
+        status: changed_file_status_code(&file.status)?,
+        additions: file.additions,
+        deletions: file.deletions,
+        is_binary: file.is_binary,
+        is_previewable: file.is_previewable,
+        old_blob_id: file.old_blob_id.clone(),
+        new_blob_id: file.new_blob_id.clone(),
+    })
+}
+
+fn changed_file_status_code(status: &str) -> CommandResult<i16> {
+    match status {
+        "added" => Ok(0),
+        "modified" => Ok(1),
+        "deleted" => Ok(2),
+        "renamed" => Ok(3),
+        "binary" => Ok(4),
+        other => Err(command_error_with_detail(
+            "UNKNOWN_CHANGED_FILE_STATUS",
+            format!("未知变更文件状态：{other}"),
+            other,
+        )),
+    }
 }
 
 fn adapt_changed_file_status(status: &str) -> CommandResult<ChangedFileStatus> {
@@ -1566,6 +1721,8 @@ mod tests {
                 file: ChangedFileOutput {
                     path: "src/app.txt".to_string(),
                     old_path: None,
+                    old_blob_id: None,
+                    new_blob_id: None,
                     status: "modified".to_string(),
                     additions: 1,
                     deletions: 1,
@@ -1696,6 +1853,27 @@ mod tests {
             .expect_err("未完成任务不应返回文件列表");
 
         assert_eq!(error.code, "TASK_NOT_COMPLETED");
+    }
+
+    #[test]
+    fn operation_progress_updates_task_stage_message_and_ratio() {
+        let service = ReviewService::default();
+        let task = service
+            .start_analysis_task(review_filters("project-1".to_string()))
+            .expect("创建分析任务失败");
+        let context = service.analysis_context_for_task(&task.task_id);
+
+        context.report_progress(OperationProgressUpdate {
+            stage: OperationStage::IndexCommits,
+            message: "索引提交 2/4".to_string(),
+            completed_units: Some(2),
+            total_units: Some(4),
+        });
+
+        let snapshot = service.get_task(&task.task_id).expect("读取任务失败");
+        assert!(matches!(snapshot.stage, AnalysisStage::LoadCommits));
+        assert_eq!(snapshot.progress, Some(0.5));
+        assert_eq!(snapshot.message.as_deref(), Some("索引提交 2/4"));
     }
 
     #[test]
@@ -1926,6 +2104,120 @@ mod tests {
             .expect("读取缓存文件失败");
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "src/app.txt");
+    }
+
+    #[test]
+    fn successful_analysis_publishes_branch_snapshot_with_blob_ids() {
+        let fixture = create_linear_repo();
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let service = ReviewService::default();
+
+        service
+            .start_analysis(&projects, review_filters(project.id))
+            .expect("执行项目分析失败");
+
+        let snapshot = load_cached_snapshot(fixture.path()).expect("成功分析应发布分支快照");
+        assert_eq!(snapshot.branch, "main");
+        assert_eq!(snapshot.files.len(), 1);
+        assert!(snapshot.files[0].old_blob_id.is_some());
+        assert!(snapshot.files[0].new_blob_id.is_some());
+    }
+
+    #[test]
+    fn failed_or_cancelled_analysis_keeps_previous_branch_snapshot() {
+        let fixture = create_linear_repo();
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let service = ReviewService::default();
+        let filters = review_filters(project.id);
+        service
+            .start_analysis(&projects, filters.clone())
+            .expect("首次分析失败");
+        let original_id = load_cached_snapshot(fixture.path())
+            .expect("首次快照应存在")
+            .analysis_id;
+
+        let mut invalid = filters.clone();
+        invalid.start_at = Some("2026-06-30T00:00:00Z".to_string());
+        invalid.end_at = Some("2026-06-01T00:00:00Z".to_string());
+        assert!(service.start_analysis(&projects, invalid).is_err());
+        assert_eq!(
+            load_cached_snapshot(fixture.path())
+                .expect("失败后旧快照应保留")
+                .analysis_id,
+            original_id
+        );
+
+        let task = service
+            .start_analysis_task(filters.clone())
+            .expect("创建待取消任务失败");
+        service
+            .cancel_analysis(&task.task_id)
+            .expect("取消分析失败");
+        service
+            .execute_analysis_task(&projects, &task.task_id, filters)
+            .expect("取消任务应返回任务状态");
+        assert_eq!(
+            load_cached_snapshot(fixture.path())
+                .expect("取消后旧快照应保留")
+                .analysis_id,
+            original_id
+        );
+    }
+
+    #[test]
+    fn records_initial_and_incremental_project_analysis_elapsed_time() {
+        let fixture = create_linear_repo();
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let service = ReviewService::default();
+        let filters = review_filters(project.id);
+
+        service
+            .start_analysis(&projects, filters.clone())
+            .expect("首次项目分析失败");
+        let initial = load_cached_snapshot(fixture.path()).expect("首次快照应存在");
+        write_file(fixture.path(), "src/app.txt", "one\ntwo\nthree\n");
+        git_commit_with_author(
+            fixture.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-12T00:00:00Z",
+            "feat: add third line",
+        );
+        service
+            .start_analysis(&projects, filters)
+            .expect("增量项目分析失败");
+        let incremental = load_cached_snapshot(fixture.path()).expect("增量快照应存在");
+
+        eprintln!(
+            "首次项目分析={}ms，增量项目刷新={}ms",
+            initial.elapsed_ms, incremental.elapsed_ms
+        );
+        assert_ne!(initial.analysis_id, incremental.analysis_id);
+        assert_eq!(incremental.files.len(), 1);
     }
 
     #[test]
@@ -2240,6 +2532,8 @@ mod tests {
         let error = adapt_changed_file(revier_analysis::json::ChangedFileOutput {
             path: "src/app.txt".to_string(),
             old_path: None,
+            old_blob_id: None,
+            new_blob_id: None,
             status: "copied".to_string(),
             additions: 0,
             deletions: 0,
@@ -2520,6 +2814,21 @@ mod tests {
             branch: "main".to_string(),
         })
         .expect("构建测试索引失败");
+    }
+
+    fn load_cached_snapshot(
+        repo_path: &Path,
+    ) -> Option<revier_analysis::cache::models::CachedAnalysisSnapshot> {
+        let repo =
+            revier_analysis::git::repository::open_repository(repo_path).expect("打开测试仓库失败");
+        let identity =
+            revier_analysis::git::repository::repository_identity(&repo).expect("读取仓库标识失败");
+        let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
+            .expect("生成默认索引路径失败");
+        let conn =
+            revier_analysis::index::connection::open_database(&db_path).expect("打开测试索引失败");
+        revier_analysis::cache::repository::load_branch_snapshot(&conn, &identity.repo_id, "main")
+            .expect("读取分支快照失败")
     }
 
     fn write_file(repo_path: &Path, path: &str, content: &str) {

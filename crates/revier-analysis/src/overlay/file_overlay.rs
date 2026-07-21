@@ -146,6 +146,8 @@ fn changed_file_output(change: &CommitFileChange) -> ChangedFileOutput {
     ChangedFileOutput {
         path: change.path.clone(),
         old_path: change.old_path.clone(),
+        old_blob_id: change.old_blob_id.clone(),
+        new_blob_id: change.new_blob_id.clone(),
         status: change.status.clone(),
         additions: change.additions,
         deletions: change.deletions,

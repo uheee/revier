@@ -53,6 +53,48 @@ pub fn list_reachable_commits_with_context(
     Ok(commits)
 }
 
+pub fn all_local_branch_reachable_hashes(
+    repo: &gix::Repository,
+    context: &AnalysisExecutionContext,
+) -> Result<Vec<String>, AppError> {
+    context.check_cancelled()?;
+    let references = repo
+        .references()
+        .map_err(|error| AppError::Repository(error.to_string()))?;
+    let mut tips = Vec::new();
+    for reference in references
+        .local_branches()
+        .map_err(|error| AppError::Repository(error.to_string()))?
+    {
+        context.check_cancelled()?;
+        let mut reference = reference.map_err(|error| AppError::Repository(error.to_string()))?;
+        tips.push(
+            reference
+                .peel_to_id()
+                .map_err(|error| AppError::Repository(error.to_string()))?
+                .detach(),
+        );
+    }
+    if tips.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let walk = repo
+        .rev_walk(tips)
+        .all()
+        .map_err(|error| AppError::Repository(error.to_string()))?;
+    let mut hashes = Vec::new();
+    for item in walk {
+        context.check_cancelled()?;
+        hashes.push(
+            item.map_err(|error| AppError::Repository(error.to_string()))?
+                .id
+                .to_string(),
+        );
+    }
+    Ok(hashes)
+}
+
 pub fn get_commit(repo: &gix::Repository, commit_hash: &str) -> Result<IndexedCommit, AppError> {
     let object = repo
         .rev_parse_single(commit_hash)

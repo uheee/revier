@@ -48,6 +48,17 @@ pub fn commit_exists(conn: &duckdb::Connection, hash: &str) -> Result<bool, AppE
     .map_err(|error| AppError::DuckDb(error.to_string()))
 }
 
+pub fn indexed_commit_hashes(conn: &duckdb::Connection) -> Result<HashSet<String>, AppError> {
+    let mut statement = conn
+        .prepare("select hash from commits")
+        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+    rows.collect::<Result<HashSet<_>, _>>()
+        .map_err(|error| AppError::DuckDb(error.to_string()))
+}
+
 pub fn parent_hashes(conn: &duckdb::Connection, hash: &str) -> Result<Vec<String>, AppError> {
     let mut stmt = conn
         .prepare(
@@ -181,6 +192,8 @@ fn query_files_internal(
                 Ok(ChangedFileOutput {
                     path: row.get(0)?,
                     old_path: (!old_path.is_empty()).then_some(old_path),
+                    old_blob_id: None,
+                    new_blob_id: None,
                     status: row.get(2)?,
                     additions: row.get::<_, i64>(3)? as u64,
                     deletions: row.get::<_, i64>(4)? as u64,

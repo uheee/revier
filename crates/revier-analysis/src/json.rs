@@ -97,11 +97,15 @@ pub struct QueryFilesRangeOutput {
     pub head_commit: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangedFileOutput {
     pub path: String,
     pub old_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_blob_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_blob_id: Option<String>,
     pub status: String,
     pub additions: u64,
     pub deletions: u64,

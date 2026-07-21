@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::cli::FileOverlayArgs;
-use crate::contracts::{AnalysisRange, GitBranch, RepositoryValidation};
+use crate::contracts::{AnalysisRange, GitBranch, OperationStage, RepositoryValidation};
 use crate::error::AppError;
-use crate::execution::AnalysisExecutionContext;
+use crate::execution::{AnalysisExecutionContext, OperationProgressUpdate};
 use crate::git::commits::IndexedCommit;
 use crate::json::{FileOverlayCommandOutput, QueryFilesOutput};
 use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
@@ -118,6 +118,12 @@ pub fn resolve_analysis_range_with_context(
     context: &AnalysisExecutionContext,
 ) -> Result<AnalysisRange, AppError> {
     context.check_cancelled()?;
+    context.report_progress(OperationProgressUpdate {
+        stage: OperationStage::ResolveRange,
+        message: format!("解析分析范围：{branch}"),
+        completed_units: None,
+        total_units: None,
+    });
     let repo = gix::discover(repo_path).map_err(|error| AppError::Repository(error.to_string()))?;
     let end = normalize_utc_second(parse_or_default_time(
         end_at.as_deref(),
@@ -164,13 +170,20 @@ pub fn resolve_analysis_range_with_context(
         .map(|(_, commit)| commit)
         .ok_or_else(|| no_available_commits_error(branch))?;
 
-    Ok(AnalysisRange {
+    let range = AnalysisRange {
         branch: branch.to_string(),
         base_commit: base_commit.hash.clone(),
         head_commit: head_commit.hash.clone(),
         start_at: Some(format_utc_second(start)),
         end_at: Some(format_utc_second(end)),
-    })
+    };
+    context.report_progress(OperationProgressUpdate {
+        stage: OperationStage::ResolveRange,
+        message: format!("分析范围解析完成：{branch}"),
+        completed_units: Some(1),
+        total_units: Some(1),
+    });
+    Ok(range)
 }
 
 pub fn file_overlay(args: FileOverlayArgs) -> Result<FileOverlayCommandOutput, AppError> {

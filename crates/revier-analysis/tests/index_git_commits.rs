@@ -68,6 +68,34 @@ fn range_commit_hashes_uses_base_dotdot_head_for_diverged_commits() {
     assert_eq!(hashes, vec![fixture.head]);
 }
 
+#[test]
+fn local_branch_reachable_set_tracks_force_moved_refs_once() {
+    let fixture = fixtures::linear();
+    git(fixture.repo.path(), ["branch", "feature", &fixture.base]);
+    let repo =
+        revier_analysis::git::repository::open_repository(fixture.repo.path()).expect("打开仓库");
+    let before = revier_analysis::git::commits::all_local_branch_reachable_hashes(
+        &repo,
+        &revier_analysis::execution::AnalysisExecutionContext::none(),
+    )
+    .expect("读取本地分支可达集合");
+    assert!(before.contains(&fixture.base));
+    assert!(before.contains(&fixture.head));
+    drop(repo);
+
+    git(fixture.repo.path(), ["switch", "feature"]);
+    git(fixture.repo.path(), ["branch", "-f", "main", &fixture.base]);
+    let repo = revier_analysis::git::repository::open_repository(fixture.repo.path())
+        .expect("重新打开仓库");
+    let after = revier_analysis::git::commits::all_local_branch_reachable_hashes(
+        &repo,
+        &revier_analysis::execution::AnalysisExecutionContext::none(),
+    )
+    .expect("读取 force-move 后可达集合");
+    assert!(after.contains(&fixture.base));
+    assert!(!after.contains(&fixture.head));
+}
+
 struct DivergedFixture {
     repo: tempfile::TempDir,
     base: String,

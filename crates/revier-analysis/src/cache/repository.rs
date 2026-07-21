@@ -43,6 +43,46 @@ pub fn publish_branch_snapshot(
     })
 }
 
+pub fn publish_branch_snapshot_and_prune(
+    conn: &Connection,
+    snapshot: &CachedAnalysisSnapshot,
+    locally_reachable_hashes: &[String],
+) -> Result<u64, AppError> {
+    publish_branch_snapshot_and_prune_with_completion(
+        conn,
+        snapshot,
+        locally_reachable_hashes,
+        || (snapshot.completed_at.clone(), snapshot.elapsed_ms),
+    )
+}
+
+pub fn publish_branch_snapshot_and_prune_with_completion(
+    conn: &Connection,
+    snapshot: &CachedAnalysisSnapshot,
+    locally_reachable_hashes: &[String],
+    completion: impl FnOnce() -> (String, u64),
+) -> Result<u64, AppError> {
+    transaction(conn, || {
+        delete_branch_snapshot(conn, &snapshot.repo_id, &snapshot.branch)?;
+        insert_snapshot(conn, snapshot)?;
+        let pruned = crate::index::writer::prune_unreferenced_commits_in_transaction(
+            conn,
+            locally_reachable_hashes,
+        )?;
+        let (completed_at, elapsed_ms) = completion();
+        conn.execute(
+            "update analysis_snapshots set completed_at = ?, elapsed_ms = ? where analysis_id = ?",
+            params![
+                completed_at,
+                as_i64(elapsed_ms, "elapsed_ms")?,
+                snapshot.analysis_id
+            ],
+        )
+        .map_err(duckdb_error)?;
+        Ok(pruned)
+    })
+}
+
 pub fn load_branch_snapshot(
     conn: &Connection,
     repo_id: &str,

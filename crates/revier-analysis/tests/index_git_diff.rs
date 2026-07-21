@@ -160,3 +160,50 @@ fn omits_tree_entries_from_file_changes() {
         .any(|change| change.path == "assets/logo.bin"));
     assert!(!changes.iter().any(|change| change.path == "assets"));
 }
+
+#[test]
+fn range_tree_diff_returns_blob_ids_before_line_statistics() {
+    let fixture = fixtures::linear();
+    let repo =
+        revier_analysis::git::repository::open_repository(fixture.repo.path()).expect("打开仓库");
+
+    let changes =
+        revier_analysis::git::diff::range_file_tree_changes(&repo, &fixture.base, &fixture.head)
+            .expect("读取范围文件树差异");
+
+    let file = changes
+        .iter()
+        .find(|change| change.path == "src/app.txt")
+        .expect("存在文本文件变更");
+    assert!(file.old_blob_id.is_some());
+    assert!(file.new_blob_id.is_some());
+    assert_ne!(file.old_blob_id, file.new_blob_id);
+    assert_eq!(file.additions, 0);
+    assert_eq!(file.deletions, 0);
+}
+
+#[test]
+fn computes_line_statistics_only_for_selected_tree_changes() {
+    let fixture = fixtures::added_and_deleted_text_files();
+    let repo =
+        revier_analysis::git::repository::open_repository(fixture.repo.path()).expect("打开仓库");
+    let tree_changes =
+        revier_analysis::git::diff::range_file_tree_changes(&repo, &fixture.base, &fixture.head)
+            .expect("读取范围文件树差异");
+    let mut selected = tree_changes
+        .into_iter()
+        .filter(|change| change.path == "src/added.txt")
+        .collect::<Vec<_>>();
+
+    revier_analysis::git::diff::populate_range_file_statistics(
+        &repo,
+        &fixture.base,
+        &fixture.head,
+        &mut selected,
+    )
+    .expect("计算选中文件统计");
+
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].additions, 3);
+    assert_eq!(selected[0].deletions, 0);
+}

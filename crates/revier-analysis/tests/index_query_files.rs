@@ -178,6 +178,24 @@ fn query_files_glob_matches_renamed_old_path() {
 }
 
 #[test]
+fn query_files_coalesces_modified_rename_from_index_hints() {
+    let fixture = fixtures::rename_merge();
+    let dir = tempfile::tempdir().expect("创建临时目录");
+    let db_path = dir.path().join("index.duckdb");
+    run_index_build(&fixture, &db_path);
+    let mut request = fixture.query_files_request();
+    request.db = Some(db_path);
+
+    let output = revier_analysis::api::query_files(request).expect("查询重命名文件");
+
+    assert_eq!(output.files.len(), 1);
+    assert_eq!(output.files[0].path, "src/new.txt");
+    assert_eq!(output.files[0].old_path.as_deref(), Some("src/old.txt"));
+    assert_eq!(output.files[0].status, "renamed");
+    assert_eq!(output.files[0].additions, 1);
+}
+
+#[test]
 fn index_query_files_with_context_returns_cancelled_before_schema_query() {
     let conn = duckdb::Connection::open_in_memory().expect("创建内存数据库");
     let context = AnalysisExecutionContext::with_cancel(|| true);

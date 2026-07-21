@@ -5,7 +5,7 @@ use revier_analysis::cache::models::{
 use revier_analysis::cache::repository::{
     branch_cache_state, cleanup_orphaned_cache_rows, delete_file_commit_overlays,
     load_branch_snapshot, load_commit_overlay, load_file_analysis, publish_branch_snapshot,
-    replace_commit_overlay, replace_file_analysis,
+    publish_branch_snapshot_and_prune, replace_commit_overlay, replace_file_analysis,
 };
 use revier_analysis::contracts::CacheState;
 use tempfile::tempdir;
@@ -107,6 +107,64 @@ fn failed_replacement_keeps_previous_snapshot() {
         .expect("旧快照应保留");
     assert_eq!(loaded.analysis_id, original.analysis_id);
     assert_eq!(loaded.head_commit, original.head_commit);
+}
+
+#[test]
+fn failed_pruning_rolls_back_candidate_snapshot_publication() {
+    let (_dir, conn) = database();
+    let original = snapshot("analysis-main-1", "main", "head-main-1");
+    publish_branch_snapshot(&conn, &original).expect("发布旧快照");
+    conn.execute(
+        "insert into commits
+         (hash, short_hash, author_name, author_email, author_key, committed_at,
+          subject, parent_count, is_merge)
+         values ('obsolete', 'obsolete', '测试作者', null, '测试作者',
+                 '2026-07-22T00:00:00Z', '废弃提交', 0, false)",
+        [],
+    )
+    .expect("写入废弃提交");
+    conn.execute_batch("drop table commit_files")
+        .expect("破坏清理依赖表");
+    let candidate = snapshot("analysis-main-2", "main", "head-main-2");
+
+    let result = publish_branch_snapshot_and_prune(&conn, &candidate, &[]);
+
+    assert!(result.is_err());
+    let loaded = load_branch_snapshot(&conn, "repo-1", "main")
+        .expect("读取 main")
+        .expect("旧快照应存在");
+    assert_eq!(loaded.analysis_id, original.analysis_id);
+    assert_eq!(loaded.head_commit, original.head_commit);
+}
+
+#[test]
+fn successful_snapshot_replacement_prunes_force_moved_old_head() {
+    let (_dir, conn) = database();
+    insert_index_commit(&conn, "head-main-1");
+    insert_index_commit(&conn, "head-main-2");
+    publish_branch_snapshot(&conn, &snapshot("analysis-main-1", "main", "head-main-1"))
+        .expect("发布旧快照");
+    let candidate = snapshot("analysis-main-2", "main", "head-main-2");
+
+    let pruned = publish_branch_snapshot_and_prune(&conn, &candidate, &["head-main-2".to_string()])
+        .expect("发布新快照并清理旧 HEAD");
+
+    assert_eq!(pruned, 1);
+    let old_exists: bool = conn
+        .query_row(
+            "select count(*) > 0 from commits where hash = 'head-main-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("读取旧 HEAD");
+    assert!(!old_exists);
+    assert_eq!(
+        load_branch_snapshot(&conn, "repo-1", "main")
+            .expect("读取 main")
+            .expect("新快照应存在")
+            .analysis_id,
+        candidate.analysis_id
+    );
 }
 
 #[test]
@@ -285,6 +343,18 @@ fn database() -> (tempfile::TempDir, duckdb::Connection) {
     )
     .expect("初始化 schema");
     (dir, conn)
+}
+
+fn insert_index_commit(conn: &duckdb::Connection, hash: &str) {
+    conn.execute(
+        "insert into commits
+         (hash, short_hash, author_name, author_email, author_key, committed_at,
+          subject, parent_count, is_merge)
+         values (?, ?, '测试作者', null, '测试作者', '2026-07-22T00:00:00Z',
+                 '测试提交', 0, false)",
+        duckdb::params![hash, hash],
+    )
+    .expect("写入索引提交");
 }
 
 fn snapshot(analysis_id: &str, branch: &str, head: &str) -> CachedAnalysisSnapshot {
