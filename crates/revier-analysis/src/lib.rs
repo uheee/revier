@@ -1,6 +1,7 @@
 pub mod api;
 pub mod attribution;
 pub mod bindings;
+pub mod cache;
 pub mod cli;
 pub mod commands;
 pub mod contracts;
