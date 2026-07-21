@@ -805,15 +805,16 @@ describe('renderer reviewStore', () => {
     expect(store.selectedCommitHash).toBeUndefined();
   });
 
-  it('提交初载失败时清除当前选择并保留错误状态', async () => {
+  it('提交初载失败时保留当前选择和专用错误状态，关闭后统一清理', async () => {
     vi.mocked(revierClient.review.getCommitOverlay).mockRejectedValue(new Error('提交加载失败'));
     const store = useReviewStore();
     store.task = task;
 
     expect(await store.loadCommitOverlay(file.path, 'broken', 'utf-8')).toBe(false);
-    expect(store.selectedCommitHash).toBeUndefined();
+    expect(store.selectedCommitHash).toBe('broken');
     expect(store.drilldownOverlay).toBeUndefined();
     expect(store.drilldownLoading).toBe(false);
+    expect(store.drilldownError).toBe('提交加载失败');
     expect(store.error).toBe('提交加载失败');
     expect(useNotifications().notifications.value).toEqual([
       expect.objectContaining({
@@ -823,6 +824,10 @@ describe('renderer reviewStore', () => {
         source: 'Review'
       })
     ]);
+
+    store.closeCommitDrilldown();
+    expect(store.selectedCommitHash).toBeUndefined();
+    expect(store.drilldownError).toBeUndefined();
   });
 
   it('切换提交时立即清除旧 overlay，旧成功不得覆盖新提交', async () => {

@@ -98,6 +98,14 @@ describe('MonacoDiffSurface', () => {
     expect(createSession).toHaveBeenCalledTimes(3);
   });
 
+  it('向 Monaco 会话透传提交级未变更区域折叠开关', () => {
+    mountSurface({ hideUnchangedRegions: true });
+
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({
+      hideUnchangedRegions: true
+    }));
+  });
+
   it('块引用变化只增量更新，同一 tick 的多项上下文变化只重建一次', async () => {
     const first = sessionMock();
     const second = sessionMock();

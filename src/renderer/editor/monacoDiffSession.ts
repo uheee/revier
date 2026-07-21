@@ -30,6 +30,7 @@ export interface MonacoDiffSessionOptions {
   settings: EditorSettings;
   themeName: 'revier-light' | 'revier-dark';
   blocks: DiffBlock[];
+  hideUnchangedRegions?: boolean;
   generation?: number;
   contextKey?: string | number;
   onDraftChange(value: true): void;
@@ -184,6 +185,12 @@ export function createMonacoDiffSession(
       find: { addExtraSpaceOnTop: false },
       automaticLayout: false
     };
+    if (options.hideUnchangedRegions) {
+      editorOptions.hideUnchangedRegions = {
+        enabled: true,
+        contextLineCount: 3
+      };
+    }
     diffEditor = monaco.editor.createDiffEditor(options.container, editorOptions);
     diffEditor.setModel({ original: originalModel, modified: modifiedModel });
 

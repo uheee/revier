@@ -41,6 +41,8 @@ const {
   selectedBlock,
   drilldownOverlay,
   selectedCommitHash,
+  selectedCommit,
+  drilldownError,
   activeOverlayPath,
   activeCommitHash,
   drilldownLoading,
@@ -59,7 +61,7 @@ const branches = ref<GitBranch[]>([]);
 const workspaceEl = ref<HTMLElement>();
 const layout = useReviewLayoutSizes();
 const project = computed(() => projectStore.projects.find((item) => item.id === projectId.value));
-const overlayContextKey = computed(() => `${selectedFilePath.value ?? ''}:${reviewStore.selectedCommitHash ?? ''}`);
+const overlayContextKey = computed(() => selectedFilePath.value ?? '');
 const defaultBranch = computed(() => project.value?.preferences.defaultBranch ?? 'HEAD');
 const defaultDays = computed(() => project.value?.preferences.defaultDays ?? 30);
 const defaultGlobRules = computed(() => project.value?.preferences.defaultGlobRules ?? []);
@@ -214,7 +216,8 @@ async function openCommitDrilldown(commit: RelatedCommit): Promise<void> {
   if (await reviewStore.loadCommitOverlay(
     selectedFilePath.value,
     commit.hash,
-    commitRequestedEncoding.value
+    commitRequestedEncoding.value,
+    commit
   )) {
     isEditorDraft.value = false;
   }
@@ -314,6 +317,9 @@ function closeCommitDrilldown(): void {
         :settings="editorSettings"
         :theme-name="editorThemeName"
         :requested-encoding="commitRequestedEncoding"
+        :selected-commit-hash="selectedCommitHash"
+        :selected-commit="selectedCommit"
+        :error="drilldownError"
         @draft-change="handleDraftChange"
         @encoding-change="changeCommitOverlayEncoding"
         @close="closeCommitDrilldown"

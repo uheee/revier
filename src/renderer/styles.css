@@ -742,6 +742,14 @@ textarea {
   white-space: nowrap;
 }
 
+.diff-drilldown__error {
+  display: grid;
+  flex: 1 1 auto;
+  place-content: center;
+  padding: 24px;
+  background: var(--editor-background);
+}
+
 .notification-center__trigger {
   color: var(--foreground-color);
   background: var(--panel-background);

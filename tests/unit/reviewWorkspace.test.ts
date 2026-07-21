@@ -316,4 +316,53 @@ describe('ReviewWorkspace', () => {
     expect(wrapper.getComponent({ name: 'DiffViewer' }).props('requestedEncoding')).toBe('gb18030');
     expect(wrapper.getComponent({ name: 'DiffViewer' }).props('overlay').newContent).toBe('新内容');
   });
+
+  it('提交下钻失败时保留下钻错误页，且不重建底层文件编辑器上下文', async () => {
+    const commit = {
+      hash: 'abc123', shortHash: 'abc123', authorName: 'Alice',
+      authorEmail: 'alice@example.com', committedAt: '2026-06-12T00:00:00.000Z',
+      subject: 'fix: 单提交变更', matchedByFilter: true, touchedRanges: []
+    };
+    vi.mocked(revierClient.projects.list).mockResolvedValue([project]);
+    vi.mocked(revierClient.projects.listBranches).mockResolvedValue([]);
+    vi.mocked(revierClient.review.listAuthors).mockResolvedValue([]);
+    vi.mocked(revierClient.review.onTaskUpdate).mockResolvedValue(vi.fn());
+    vi.mocked(revierClient.review.getFileOverlay).mockResolvedValue(overlay);
+    vi.mocked(revierClient.review.getCommitOverlay).mockRejectedValue(new Error('提交差异不可用'));
+    const store = useReviewStore();
+    store.task = { taskId: 'task-1', projectId: project.id, status: 'completed', stage: 'ready' };
+    store.files = [overlay.file];
+
+    const wrapper = mount(ReviewWorkspace, { global: { stubs: {
+      FilterPanel: true,
+      TaskProgress: true,
+      ChangedFileList: {
+        emits: ['selected'],
+        template: '<button data-test="select-file" @click="$emit(\'selected\', \'src/app.ts\')" />'
+      },
+      DiffDrilldownOverlay: {
+        name: 'DiffDrilldownOverlay',
+        props: ['selectedCommitHash', 'selectedCommit', 'error'],
+        template: '<aside data-test="drilldown" :data-hash="selectedCommitHash">{{ error }}</aside>'
+      },
+      BlockDetailPanel: {
+        emits: ['commitSelected'],
+        template: '<button data-test="select-commit" @click="$emit(\'commitSelected\', commit)" />',
+        data: () => ({ commit })
+      },
+      ReviewLayoutResizer: true,
+      'n-button': { template: '<button><slot /></button>' }
+    } } });
+    await flushPromises();
+    await wrapper.get('[data-test="select-file"]').trigger('click');
+    await flushPromises();
+    const fileContextKey = wrapper.getComponent({ name: 'DiffViewer' }).props('contextKey');
+
+    await wrapper.get('[data-test="select-commit"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.getComponent({ name: 'DiffViewer' }).props('contextKey')).toBe(fileContextKey);
+    expect(wrapper.get('[data-test="drilldown"]').attributes('data-hash')).toBe(commit.hash);
+    expect(wrapper.get('[data-test="drilldown"]').text()).toContain('提交差异不可用');
+  });
 });

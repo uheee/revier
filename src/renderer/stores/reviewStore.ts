@@ -13,6 +13,7 @@ import type {
   ChangedFile,
   DiffBlock,
   FileOverlay,
+  RelatedCommit,
   ReviewAuthorOptionsRequest,
   ReviewFilters,
   TextEncoding
@@ -25,6 +26,8 @@ interface ReviewState {
   selectedBlock?: DiffBlock;
   drilldownOverlay?: FileOverlay;
   selectedCommitHash?: string;
+  selectedCommit?: RelatedCommit;
+  drilldownError?: string;
   activeOverlayPath?: string;
   activeCommitHash?: string;
   drilldownLoading: boolean;
@@ -89,6 +92,8 @@ export const useReviewStore = defineStore('review', {
     selectedBlock: undefined,
     drilldownOverlay: undefined,
     selectedCommitHash: undefined,
+    selectedCommit: undefined,
+    drilldownError: undefined,
     activeOverlayPath: undefined,
     activeCommitHash: undefined,
     drilldownLoading: false,
@@ -426,7 +431,8 @@ export const useReviewStore = defineStore('review', {
     async loadCommitOverlay(
       filePath: string,
       commitHash: string,
-      encoding?: TextEncoding
+      encoding?: TextEncoding,
+      selectedCommit?: RelatedCommit
     ): Promise<boolean> {
       if (!this.task) {
         this.error = 'No active analysis task';
@@ -437,6 +443,8 @@ export const useReviewStore = defineStore('review', {
       this.drilldownLoading = true;
       this.error = undefined;
       this.selectedCommitHash = commitHash;
+      this.selectedCommit = selectedCommit;
+      this.drilldownError = undefined;
       this.activeCommitHash = commitHash;
       this.drilldownOverlay = undefined;
       try {
@@ -448,12 +456,13 @@ export const useReviewStore = defineStore('review', {
         });
         if (requestId !== this.drilldownRequestId) return false;
         this.drilldownOverlay = overlay;
+        this.drilldownError = undefined;
         return true;
       } catch (error) {
         if (requestId === this.drilldownRequestId) {
-          this.selectedCommitHash = undefined;
           const message = toErrorMessage(error);
           this.error = message;
+          this.drilldownError = message;
           notifyReviewError('提交差异加载失败', `${filePath} @ ${commitHash}：${message}`);
         }
         return false;
@@ -515,6 +524,8 @@ export const useReviewStore = defineStore('review', {
       this.drilldownLoading = false;
       this.drilldownOverlay = undefined;
       this.selectedCommitHash = undefined;
+      this.selectedCommit = undefined;
+      this.drilldownError = undefined;
       this.activeCommitHash = undefined;
     },
 

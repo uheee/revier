@@ -131,7 +131,7 @@ const blocks: DiffBlock[] = [
   }
 ];
 
-function setup() {
+function setup(hideUnchangedRegions = false) {
   const originalModel = createModelMock();
   const modifiedModel = createModelMock();
   const original = createCodeEditorMock();
@@ -162,6 +162,7 @@ function setup() {
     settings,
     themeName: 'revier-dark',
     blocks,
+    hideUnchangedRegions,
     ...callbacks
   });
   return { session, originalModel, modifiedModel, original, modified, diffEditor, callbacks };
@@ -204,6 +205,24 @@ describe('createMonacoDiffSession', () => {
       result.original.editor,
       result.modified.editor
     );
+  });
+
+  it('仅在提交级会话启用带三行上下文的未变更区域折叠', () => {
+    setup(true);
+
+    expect(mocks.createDiffEditor).toHaveBeenCalledWith(
+      expect.any(HTMLElement),
+      expect.objectContaining({
+        hideUnchangedRegions: {
+          enabled: true,
+          contextLineCount: 3
+        }
+      })
+    );
+
+    vi.clearAllMocks();
+    setup(false);
+    expect(mocks.createDiffEditor.mock.calls[0][1]).not.toHaveProperty('hideUnchangedRegions');
   });
 
   it('相同路径的并存会话仍为四个 Model 生成全局唯一 URI', () => {

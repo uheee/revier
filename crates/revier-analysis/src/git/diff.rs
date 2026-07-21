@@ -163,6 +163,42 @@ pub fn rename_changes(
     Ok(renames)
 }
 
+pub fn connected_paths_between(
+    repo: &gix::Repository,
+    base_commit: &str,
+    head_commit: &str,
+    path: &str,
+    old_path: Option<&str>,
+) -> Result<Vec<String>, AppError> {
+    let mut paths = vec![path.to_string()];
+    if let Some(old_path) = old_path {
+        push_unique_path(&mut paths, old_path);
+    }
+    let renames = rename_changes(repo, base_commit, head_commit)?;
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for rename in &renames {
+            if paths
+                .iter()
+                .any(|path| path == &rename.old_path || path == &rename.new_path)
+            {
+                changed |= push_unique_path(&mut paths, &rename.old_path);
+                changed |= push_unique_path(&mut paths, &rename.new_path);
+            }
+        }
+    }
+    Ok(paths)
+}
+
+fn push_unique_path(paths: &mut Vec<String>, path: &str) -> bool {
+    if paths.iter().any(|existing| existing == path) {
+        return false;
+    }
+    paths.push(path.to_string());
+    true
+}
+
 pub fn commit_file_changes(
     repo: &gix::Repository,
     commit_hash: &str,
@@ -174,7 +210,18 @@ pub fn commit_file_changes(
         .collect::<Vec<_>>();
 
     if parent_ids.is_empty() {
-        return Ok(Vec::new());
+        let empty_tree = repo.empty_tree();
+        let commit_tree = commit
+            .tree()
+            .map_err(|error| AppError::Repository(error.to_string()))?;
+        return file_changes_between_trees(
+            repo,
+            &empty_tree,
+            &commit_tree,
+            &empty_tree.id.to_string(),
+            &commit,
+            0,
+        );
     }
 
     let mut changes = Vec::new();
@@ -272,6 +319,24 @@ fn pairwise_file_changes(
     let commit_tree = commit
         .tree()
         .map_err(|error| AppError::Repository(error.to_string()))?;
+    file_changes_between_trees(
+        repo,
+        &parent_tree,
+        &commit_tree,
+        &parent.id.to_string(),
+        commit,
+        parent_index,
+    )
+}
+
+fn file_changes_between_trees(
+    repo: &gix::Repository,
+    parent_tree: &gix::Tree<'_>,
+    commit_tree: &gix::Tree<'_>,
+    parent_hash: &str,
+    commit: &gix::Commit<'_>,
+    parent_index: usize,
+) -> Result<Vec<CommitFileChange>, AppError> {
     let parent_iter = gix_object::TreeRefIter::from_bytes(&parent_tree.data, parent_tree.id.kind());
     let commit_iter = gix_object::TreeRefIter::from_bytes(&commit_tree.data, commit_tree.id.kind());
     let mut resource_cache = diff_resource_cache()?;
@@ -285,7 +350,8 @@ fn pairwise_file_changes(
         &mut state,
         &repo.objects,
         |change| {
-            if let Some(file_change) = map_tree_change(repo, parent, commit, parent_index, change)?
+            if let Some(file_change) =
+                map_tree_change(repo, parent_hash, commit, parent_index, change)?
             {
                 changes.push(file_change);
             }
@@ -305,7 +371,7 @@ fn pairwise_file_changes(
 
 fn map_tree_change(
     repo: &gix::Repository,
-    parent: &gix::Commit<'_>,
+    parent_hash: &str,
     commit: &gix::Commit<'_>,
     parent_index: usize,
     change: gix_diff::tree_with_rewrites::ChangeRef<'_>,
@@ -323,7 +389,7 @@ fn map_tree_change(
             let is_binary = blob_contains_nul(repo, entry_mode, id)?;
             Ok(Some(file_change(
                 commit,
-                parent,
+                parent_hash,
                 parent_index,
                 FileChangeDetails {
                     path: location,
@@ -346,7 +412,7 @@ fn map_tree_change(
             let is_binary = blob_contains_nul(repo, entry_mode, id)?;
             Ok(Some(file_change(
                 commit,
-                parent,
+                parent_hash,
                 parent_index,
                 FileChangeDetails {
                     path: location,
@@ -371,7 +437,7 @@ fn map_tree_change(
                 || blob_contains_nul(repo, entry_mode, id)?;
             Ok(Some(file_change(
                 commit,
-                parent,
+                parent_hash,
                 parent_index,
                 FileChangeDetails {
                     path: location,
@@ -398,7 +464,7 @@ fn map_tree_change(
             let is_binary = blob_contains_nul(repo, entry_mode, id)?;
             Ok(Some(file_change(
                 commit,
-                parent,
+                parent_hash,
                 parent_index,
                 FileChangeDetails {
                     path: location,
@@ -415,13 +481,13 @@ fn map_tree_change(
 
 fn file_change(
     commit: &gix::Commit<'_>,
-    parent: &gix::Commit<'_>,
+    parent_hash: &str,
     parent_index: usize,
     details: FileChangeDetails<'_>,
 ) -> CommitFileChange {
     CommitFileChange {
         commit_hash: commit.id.to_string(),
-        parent_hash: parent.id.to_string(),
+        parent_hash: parent_hash.to_string(),
         parent_index,
         path: String::from_utf8_lossy(details.path.as_ref()).into_owned(),
         old_path: details

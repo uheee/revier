@@ -19,6 +19,7 @@ const props = defineProps<{
   themeName: 'revier-light' | 'revier-dark';
   blocks: DiffBlock[];
   selectedBlock?: DiffBlock;
+  hideUnchangedRegions?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -61,6 +62,7 @@ function createSession(): void {
       settings: props.settings,
       themeName: props.themeName,
       blocks: props.blocks,
+      hideUnchangedRegions: props.hideUnchangedRegions,
       generation: sessionGeneration,
       contextKey: props.contextKey,
       onDraftChange: (value) => emit('draftChange', value),

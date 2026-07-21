@@ -7,7 +7,7 @@ import type { FileOverlay } from '../../src/renderer/generated/bindings';
 vi.mock('../../src/renderer/components/review/DiffViewer.vue', () => ({
   default: {
     name: 'DiffViewer',
-    props: ['overlay', 'loading', 'settings', 'themeName', 'requestedEncoding', 'contextKey'],
+    props: ['overlay', 'loading', 'settings', 'themeName', 'requestedEncoding', 'contextKey', 'hideUnchangedRegions'],
     emits: ['draftChange', 'encodingChange'],
     template: '<button data-testid="diff-viewer-stub" @click="$emit(\'draftChange\', true)" @contextmenu.prevent="$emit(\'encodingChange\', \'gb18030\')" />'
   }
@@ -89,18 +89,50 @@ describe('DiffDrilldownOverlay', () => {
     const settings = { defaultEncoding: 'utf-8' } as never;
     const wrapper = mount(DiffDrilldownOverlay, {
       props: { overlay: commitOverlay, settings, themeName: 'revier-dark', requestedEncoding: 'utf-16le' },
-      global: { stubs: { 'n-button': { template: '<button><slot /></button>' } } }
+      global: { stubs: {
+        'n-button': { template: '<button><slot /></button>' },
+        'n-alert': true
+      } }
     });
     const viewer = wrapper.getComponent({ name: 'DiffViewer' });
     expect(viewer.props()).toMatchObject({
       settings,
       themeName: 'revier-dark',
       requestedEncoding: 'utf-16le',
-      contextKey: 'abc123:parent'
+      contextKey: 'abc123:parent',
+      hideUnchangedRegions: true
     });
     await wrapper.get('[data-testid="diff-viewer-stub"]').trigger('click');
     await wrapper.get('[data-testid="diff-viewer-stub"]').trigger('contextmenu');
     expect(wrapper.emitted('draftChange')).toEqual([[true]]);
     expect(wrapper.emitted('encodingChange')).toEqual([['gb18030']]);
+  });
+
+  it('提交加载失败后仍保留下钻容器、提交摘要和返回入口', async () => {
+    const wrapper = mount(DiffDrilldownOverlay, {
+      props: {
+        selectedCommitHash: commitOverlay.commit!.hash,
+        selectedCommit: commitOverlay.commit,
+        error: '该提交未修改当前文件',
+        settings: { defaultEncoding: 'utf-8' } as never,
+        themeName: 'revier-dark',
+        requestedEncoding: 'utf-8'
+      },
+      global: {
+        stubs: {
+          'n-button': { template: '<button type="button"><slot /></button>' },
+          'n-alert': { props: ['title'], template: '<div role="alert"><strong>{{ title }}</strong><slot /></div>' }
+        }
+      }
+    });
+
+    expect(wrapper.find('.diff-drilldown').exists()).toBe(true);
+    expect(wrapper.text()).toContain('abc123');
+    expect(wrapper.text()).toContain('fix: 修复下钻闪烁');
+    expect(wrapper.text()).toContain('该提交未修改当前文件');
+    expect(wrapper.findComponent({ name: 'DiffViewer' }).exists()).toBe(false);
+
+    await wrapper.get('button').trigger('click');
+    expect(wrapper.emitted('close')).toEqual([[]]);
   });
 });

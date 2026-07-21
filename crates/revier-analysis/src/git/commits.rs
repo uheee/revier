@@ -114,6 +114,33 @@ pub fn range_commit_hashes(
     Ok(hashes)
 }
 
+pub fn is_commit_reachable_from(
+    repo: &gix::Repository,
+    commit_hash: &str,
+    head_hash: &str,
+) -> Result<bool, AppError> {
+    let target = repo
+        .rev_parse_single(commit_hash)
+        .map_err(|error| AppError::Repository(format!("无法解析目标提交 {commit_hash}：{error}")))?
+        .detach();
+    let head = repo
+        .rev_parse_single(head_hash)
+        .map_err(|error| AppError::Repository(format!("无法解析 head 提交 {head_hash}：{error}")))?
+        .detach();
+    let walk = repo
+        .rev_walk([head])
+        .all()
+        .map_err(|error| AppError::Repository(error.to_string()))?;
+
+    for item in walk {
+        let info = item.map_err(|error| AppError::Repository(error.to_string()))?;
+        if info.id == target {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub fn indexed_commit_from_gix(commit: &gix::Commit<'_>) -> Result<IndexedCommit, AppError> {
     let author = commit
         .author()

@@ -395,33 +395,41 @@ impl ReviewService {
             &context.project.repo_path,
         ))
         .map_err(map_analysis_error)?;
-        let range_hashes = revier_analysis::git::commits::range_commit_hashes(
+        let commit_reachable = revier_analysis::git::commits::is_commit_reachable_from(
             &repo,
-            &context.range.base_commit,
+            &request.commit_hash,
             &context.range.head_commit,
         )
         .map_err(map_analysis_error)?;
-        if !range_hashes.iter().any(|hash| hash == &request.commit_hash) {
+        if !commit_reachable {
             return Err(command_error_with_detail(
-                "COMMIT_NOT_IN_RANGE",
-                "该提交不在当前分析范围内",
+                "COMMIT_NOT_REACHABLE",
+                "该提交无法从当前分析目标提交追溯",
                 request.commit_hash,
             ));
         }
 
         let commit = revier_analysis::git::commits::get_commit(&repo, &request.commit_hash)
             .map_err(map_analysis_error)?;
-        let parent_hash = commit.parents.first().cloned().ok_or_else(|| {
-            command_error_with_detail(
-                "COMMIT_PARENT_NOT_FOUND",
-                "该提交没有父提交，无法生成提交级 overlay",
-                request.commit_hash.clone(),
-            )
-        })?;
+        let parent_hash = commit
+            .parents
+            .first()
+            .cloned()
+            .unwrap_or_else(|| repo.empty_tree().id.to_string());
+        let path_candidates = revier_analysis::git::diff::connected_paths_between(
+            &repo,
+            &request.commit_hash,
+            &context.range.head_commit,
+            &file.path,
+            file.old_path.as_deref(),
+        )
+        .map_err(map_analysis_error)?;
         let change = revier_analysis::git::diff::commit_file_changes(&repo, &request.commit_hash)
             .map_err(map_analysis_error)?
             .into_iter()
-            .find(|change| change.parent_index == 0 && change_matches_file(change, &file))
+            .find(|change| {
+                change.parent_index == 0 && change_matches_paths(change, &path_candidates)
+            })
             .ok_or_else(|| {
                 command_error_with_detail(
                     "FILE_NOT_CHANGED_IN_COMMIT",
@@ -905,15 +913,13 @@ fn parse_commit_time(
         })
 }
 
-fn change_matches_file(
+fn change_matches_paths(
     change: &revier_analysis::git::diff::CommitFileChange,
-    file: &ChangedFile,
+    paths: &[String],
 ) -> bool {
-    change.path == file.path
-        || change.old_path.as_deref() == Some(file.path.as_str())
-        || file.old_path.as_deref().is_some_and(|old_path| {
-            change.path == old_path || change.old_path.as_deref() == Some(old_path)
-        })
+    paths
+        .iter()
+        .any(|path| change.path == *path || change.old_path.as_deref() == Some(path.as_str()))
 }
 
 fn old_text_path(change: &revier_analysis::git::diff::CommitFileChange) -> Option<&str> {
@@ -2138,7 +2144,7 @@ mod tests {
     }
 
     #[test]
-    fn get_commit_overlay_rejects_commit_outside_cached_range() {
+    fn get_commit_overlay_supports_reachable_root_commit_outside_cached_range() {
         let fixture = create_linear_repo();
         let root = git_output(fixture.path(), ["rev-list", "--max-parents=0", "HEAD"]);
         let app_data_dir = tempdir().expect("创建应用数据目录失败");
@@ -2156,16 +2162,77 @@ mod tests {
             .start_analysis(&projects, review_filters(project.id))
             .expect("执行真实分析失败");
 
-        let error = service
+        let overlay = service
             .get_commit_overlay(CommitOverlayRequest {
                 task_id: task.task_id,
                 file_path: "src/app.txt".to_string(),
-                commit_hash: root,
+                commit_hash: root.clone(),
                 encoding: None,
             })
-            .expect_err("范围外提交不应返回 overlay");
+            .expect("可从 head 追溯的根提交应返回 overlay");
 
-        assert_eq!(error.code, "COMMIT_NOT_IN_RANGE");
+        assert_eq!(
+            overlay.commit.as_ref().map(|commit| &commit.hash),
+            Some(&root)
+        );
+        assert_eq!(overlay.old_content, "");
+        assert_eq!(overlay.new_content, "one\n");
+        assert!(!overlay.blocks.is_empty());
+    }
+
+    #[test]
+    fn get_commit_overlay_rejects_commit_not_reachable_from_task_head() {
+        let (fixture, unrelated) = create_unrelated_commit_repo();
+        let root = git_output(fixture.path(), ["rev-list", "--max-parents=0", "main"]);
+        let head = git_output(fixture.path(), ["rev-parse", "main"]);
+        let (service, task_id) = completed_review_service(
+            fixture.path(),
+            root,
+            head,
+            vec![changed_file(
+                "src/app.txt",
+                None,
+                ChangedFileStatus::Modified,
+            )],
+        );
+
+        let error = service
+            .get_commit_overlay(CommitOverlayRequest {
+                task_id,
+                file_path: "src/app.txt".to_string(),
+                commit_hash: unrelated,
+                encoding: None,
+            })
+            .expect_err("不可从任务 head 追溯的提交不应返回 overlay");
+
+        assert_eq!(error.code, "COMMIT_NOT_REACHABLE");
+    }
+
+    #[test]
+    fn get_commit_overlay_resolves_path_before_multiple_renames() {
+        let (fixture, target, base, head) = create_historical_rename_repo();
+        let (service, task_id) = completed_review_service(
+            fixture.path(),
+            base,
+            head,
+            vec![changed_file(
+                "src/current.txt",
+                Some("src/middle.txt"),
+                ChangedFileStatus::Renamed,
+            )],
+        );
+
+        let overlay = service
+            .get_commit_overlay(CommitOverlayRequest {
+                task_id,
+                file_path: "src/current.txt".to_string(),
+                commit_hash: target,
+                encoding: None,
+            })
+            .expect("多次重命名前的来源提交应返回 overlay");
+
+        assert_eq!(overlay.old_content, "one\n");
+        assert_eq!(overlay.new_content, "one\ntwo\n");
     }
 
     #[test]
@@ -2217,6 +2284,64 @@ mod tests {
             "feat: add second line",
         );
         repo
+    }
+
+    fn create_unrelated_commit_repo() -> (TempDir, String) {
+        let repo = create_linear_repo();
+        git(repo.path(), ["checkout", "--orphan", "unrelated"]);
+        git(repo.path(), ["rm", "-rf", "."]);
+        write_file(repo.path(), "src/app.txt", "unrelated\n");
+        git_commit_with_author(
+            repo.path(),
+            "Unrelated Author",
+            "unrelated@example.com",
+            "2026-06-12T00:00:00Z",
+            "feat: unrelated history",
+        );
+        let unrelated = git_output(repo.path(), ["rev-parse", "HEAD"]);
+        git(repo.path(), ["checkout", "main"]);
+        (repo, unrelated)
+    }
+
+    fn create_historical_rename_repo() -> (TempDir, String, String, String) {
+        let repo = tempdir().expect("创建临时仓库失败");
+        git(repo.path(), ["init", "-b", "main"]);
+        write_file(repo.path(), "src/old.txt", "one\n");
+        git_commit_with_author(
+            repo.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-09T00:00:00Z",
+            "feat: initial historical path",
+        );
+        write_file(repo.path(), "src/old.txt", "one\ntwo\n");
+        git_commit_with_author(
+            repo.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-10T00:00:00Z",
+            "feat: update historical path",
+        );
+        let target = git_output(repo.path(), ["rev-parse", "HEAD"]);
+        git(repo.path(), ["mv", "src/old.txt", "src/middle.txt"]);
+        git_commit_with_author(
+            repo.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-11T00:00:00Z",
+            "refactor: first rename",
+        );
+        let base = git_output(repo.path(), ["rev-parse", "HEAD"]);
+        git(repo.path(), ["mv", "src/middle.txt", "src/current.txt"]);
+        git_commit_with_author(
+            repo.path(),
+            "Fixture Author",
+            "fixture@example.com",
+            "2026-06-12T00:00:00Z",
+            "refactor: second rename",
+        );
+        let head = git_output(repo.path(), ["rev-parse", "HEAD"]);
+        (repo, target, base, head)
     }
 
     fn create_author_repo() -> TempDir {

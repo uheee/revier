@@ -39,6 +39,7 @@ const props = withDefaults(defineProps<{
   requestedEncoding?: TextEncoding;
   contextKey?: string | number;
   diffState?: 'computing' | 'attributing' | 'ready' | 'empty' | 'failed';
+  hideUnchangedRegions?: boolean;
 }>(), {
   selectedBlockId: undefined,
   loading: false,
@@ -46,7 +47,8 @@ const props = withDefaults(defineProps<{
   themeName: undefined,
   requestedEncoding: undefined,
   contextKey: undefined,
-  diffState: 'computing'
+  diffState: 'computing',
+  hideUnchangedRegions: false
 });
 
 const emit = defineEmits<{
@@ -244,6 +246,7 @@ watch(
               :theme-name="activeThemeName"
               :blocks="overlay.blocks"
               :selected-block="selectedBlock"
+              :hide-unchanged-regions="hideUnchangedRegions"
               @draft-change="enterDraft"
               @selected="selectBlock"
               @diff-blocks-change="handleDiffBlocksChange"
