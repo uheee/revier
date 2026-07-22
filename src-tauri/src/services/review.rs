@@ -3477,6 +3477,7 @@ mod tests {
         assert_eq!(restored.cache_state, CacheState::Hit);
         assert_eq!(restored.files.len(), 1);
         assert_eq!(restored.last_selected_path.as_deref(), Some("src/app.txt"));
+        eprintln!("分支快照热缓存恢复={}ms", restored.cache_read_elapsed_ms);
         let task = restored.task.expect("恢复结果应包含任务快照");
         assert!(matches!(task.status, AnalysisTaskStatus::Completed));
         assert_eq!(
@@ -3800,12 +3801,14 @@ mod tests {
             .attribute_blocks(request.clone())
             .expect("缓存文件归因失败");
         let hot_elapsed = hot_started.elapsed();
+        let refresh_started = Instant::now();
         let refreshed = service
             .attribute_blocks(AttributeBlocksRequest {
                 cache_mode: CacheMode::Refresh,
                 ..request.clone()
             })
             .expect("刷新文件归因失败");
+        let refresh_elapsed = refresh_started.elapsed();
         let after_refresh = service
             .attribute_blocks(request)
             .expect("刷新后读取文件归因缓存失败");
@@ -3822,9 +3825,10 @@ mod tests {
             first.attributions[0].related_commits[0].hash
         );
         eprintln!(
-            "文件归因冷缓存={}ms，热缓存={}ms",
+            "文件归因冷缓存={}ms，热缓存={}ms，强制刷新={}ms",
             cold_elapsed.as_millis(),
-            hot_elapsed.as_millis()
+            hot_elapsed.as_millis(),
+            refresh_elapsed.as_millis()
         );
     }
 

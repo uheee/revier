@@ -133,6 +133,20 @@ gix / DuckDB / 文件系统
 
 仓库索引数据库按“项目 + 分支”保存一份最近成功的分析快照，并以规范化结构保存文件块、作者归因、相关提交引用和已经打开过的提交下钻，不复制源码正文。再次打开项目、文件或同一提交时优先读取缓存；分支 HEAD 变化会将快照标记为过期，不会自动混入新提交。此时需先点击“重新分析项目”，项目缓存有效时也可单独点击“重新分析当前文件”。所有载入操作都会在底部状态栏持续显示当前对象、阶段、缓存状态和耗时。
 
+缓存数据库当前为 schema v3。每个仓库的不同分支分别保留一份最近成功快照；同一分支的新快照以事务替换旧快照。文件归因按当前项目快照与文件保存一份，提交下钻按当前文件分析与提交分别保存一份，源码正文不进入 DuckDB，只记录 Git Blob ID、块坐标和归因关系。详细表结构、迁移和失效规则见 [`docs/cache-schema.md`](docs/cache-schema.md)。
+
+## 性能诊断
+
+开发构建可通过环境变量输出后端分析阶段、完成量、总量和累计耗时：
+
+```powershell
+$env:REVIER_TRACE_OPERATIONS = '1'
+pnpm tauri dev
+Remove-Item Env:REVIER_TRACE_OPERATIONS
+```
+
+`REVIER_TRACE_OPERATIONS` 只在 Rust debug 构建中生效，日志写入启动终端，不改变缓存或分析结果。前端底部状态栏会显示当前操作、目标、缓存状态和耗时；未知总量的阶段不会显示虚假的百分比。最终冷热路径验证数据见 [`阶段八验收记录`](docs/superpowers/verification/2026-07-23-revier-performance-cache-progress-phase-8.md)。
+
 ## 测试说明
 
 常规开发建议至少运行：
