@@ -152,7 +152,13 @@ async function handleTaskUpdate(snapshot: AnalysisTaskSnapshot): Promise<void> {
 }
 
 async function initializeProject(): Promise<void> {
+  const operationId = reviewStore.beginProjectMetadata(projectId.value, '正在加载项目列表');
   await projectStore.loadProjects();
+  reviewStore.finishProjectMetadata(
+    operationId,
+    projectStore.error ? `项目列表加载失败：${projectStore.error}` : '项目列表加载完成',
+    Boolean(projectStore.error)
+  );
   await loadReviewMetadata();
 }
 
@@ -163,12 +169,15 @@ async function loadReviewMetadata(): Promise<void> {
 
   const requestId = ++metadataRequestId;
   const metadataProjectId = projectId.value;
+  const operationId = reviewStore.beginProjectMetadata(metadataProjectId, '正在加载项目分支');
   try {
     const loadedBranches = await revierClient.projects.listBranches(metadataProjectId);
     if (!workspaceActive || requestId !== metadataRequestId) return;
     branches.value = loadedBranches;
+    reviewStore.finishProjectMetadata(operationId, '项目分支加载完成');
   } catch (error) {
     if (!workspaceActive || requestId !== metadataRequestId) return;
+    reviewStore.finishProjectMetadata(operationId, `项目分支加载失败：${toErrorMessage(error)}`, true);
     addNotification({
       type: 'error',
       title: '项目分支加载失败',

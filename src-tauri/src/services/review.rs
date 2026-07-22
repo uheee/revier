@@ -307,6 +307,7 @@ impl ReviewService {
             return;
         };
         let elapsed_ms = registration.started.elapsed().as_millis() as u64;
+        let progress = matches!(status, OperationStatus::Completed).then_some(1.0);
         (registration.sink)(OperationProgressSnapshot {
             operation_id: registration.operation_id,
             kind: registration.kind,
@@ -319,11 +320,22 @@ impl ReviewService {
             message,
             completed_units: None,
             total_units: None,
-            progress: if terminal { Some(1.0) } else { None },
+            progress,
             started_at: registration.started_at,
             elapsed_ms,
             cache_state: cache_state.unwrap_or(registration.cache_state),
         });
+    }
+
+    pub fn set_file_operation_kind(&self, operation_id: &str, kind: OperationKind) {
+        if let Some(registration) = self
+            .progress_by_file_operation
+            .lock()
+            .expect("文件进度注册锁被污染")
+            .get_mut(operation_id)
+        {
+            registration.kind = kind;
+        }
     }
 
     pub fn get_branch_cache_status(
@@ -616,6 +628,7 @@ impl ReviewService {
             .lock()
             .expect("进度注册锁被污染")
             .remove(task_id)?;
+        let progress = matches!(status, OperationStatus::Completed).then_some(1.0);
         Some(OperationProgressSnapshot {
             operation_id: registration.operation_id,
             kind: OperationKind::ProjectAnalysis,
@@ -628,7 +641,7 @@ impl ReviewService {
             message,
             completed_units: None,
             total_units: None,
-            progress: None,
+            progress,
             started_at: registration.started_at,
             elapsed_ms: registration.started.elapsed().as_millis() as u64,
             cache_state: CacheState::Refresh,
@@ -2820,7 +2833,7 @@ mod tests {
             "项目分析完成".to_string(),
         );
 
-        assert!(terminal.is_some());
+        assert_eq!(terminal.expect("应返回终态").progress, Some(1.0));
         assert!(service
             .take_operation_terminal_snapshot(
                 &task.task_id,
@@ -3994,6 +4007,7 @@ mod tests {
                 }),
             )
             .expect("启动文件进度失败");
+        service.set_file_operation_kind(&request.operation_id, OperationKind::MonacoDiff);
         service.report_file_operation(
             &request.operation_id,
             OperationStatus::Running,
@@ -4001,6 +4015,7 @@ mod tests {
             "正在计算差异".to_string(),
             None,
         );
+        service.set_file_operation_kind(&request.operation_id, OperationKind::FileAttribution);
         service.report_file_operation(
             &request.operation_id,
             OperationStatus::Completed,
@@ -4016,7 +4031,10 @@ mod tests {
             .all(|event| event.operation_id == request.operation_id));
         assert_eq!(events[0].stage, OperationStage::ReadFileContent);
         assert_eq!(events[1].stage, OperationStage::ComputeDiff);
+        assert_eq!(events[1].kind, OperationKind::MonacoDiff);
         assert_eq!(events[2].status, OperationStatus::Completed);
+        assert_eq!(events[2].kind, OperationKind::FileAttribution);
+        assert_eq!(events[2].progress, Some(1.0));
         assert!(events
             .windows(2)
             .all(|pair| pair[0].elapsed_ms <= pair[1].elapsed_ms));

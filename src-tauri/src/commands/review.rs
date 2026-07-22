@@ -167,13 +167,19 @@ pub fn review_get_file_overlay(
     let file_path = request.file_path.clone();
     let result = state.review.get_file_overlay(request);
     match &result {
-        Ok(_) => state.review.report_file_operation(
-            &operation_id,
-            OperationStatus::Running,
-            OperationStage::ComputeDiff,
-            format!("正在计算差异 {file_path}"),
-            None,
-        ),
+        Ok(_) => {
+            state.review.set_file_operation_kind(
+                &operation_id,
+                revier_analysis::contracts::OperationKind::MonacoDiff,
+            );
+            state.review.report_file_operation(
+                &operation_id,
+                OperationStatus::Running,
+                OperationStage::ComputeDiff,
+                format!("正在计算差异 {file_path}"),
+                None,
+            )
+        }
         Err(error) => state.review.report_file_operation(
             &operation_id,
             OperationStatus::Failed,
@@ -232,6 +238,10 @@ pub async fn review_attribute_blocks(
 ) -> CommandResult<AttributeBlocksResult> {
     let operation_id = request.operation_id.clone();
     let review = state.review.clone();
+    review.set_file_operation_kind(
+        &operation_id,
+        revier_analysis::contracts::OperationKind::FileAttribution,
+    );
     review.report_file_operation(
         &operation_id,
         OperationStatus::Running,

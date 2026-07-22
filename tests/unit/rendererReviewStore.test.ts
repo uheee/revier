@@ -149,6 +149,7 @@ describe('renderer reviewStore', () => {
     expect(store.branchCacheState).toBe('hit');
     expect(revierClient.review.startAnalysis).not.toHaveBeenCalled();
     expect(store.operation).toEqual(expect.objectContaining({
+      kind: 'project-metadata',
       status: 'completed',
       message: '已从缓存加载',
       elapsedMs: 12
@@ -674,6 +675,11 @@ describe('renderer reviewStore', () => {
     }));
     expect(store.overlay).toEqual(overlay);
     expect(store.selectedBlock).toEqual(block);
+    expect(store.operation).toEqual(expect.objectContaining({
+      kind: 'monaco-diff',
+      status: 'running',
+      stage: 'compute-diff'
+    }));
   });
 
   it('切换文件时立即清除旧 overlay，且旧请求不得覆盖新请求', async () => {
@@ -726,6 +732,10 @@ describe('renderer reviewStore', () => {
     store.overlay = overlay;
     const request = store.reloadOverlayEncoding(file.path, 'gb18030');
     expect(store.overlay).toStrictEqual(overlay);
+    expect(store.operation).toEqual(expect.objectContaining({
+      kind: 'encoding-reload',
+      status: 'running'
+    }));
     resolveReload(reloaded);
 
     expect(await request).toBe(true);
@@ -793,6 +803,10 @@ describe('renderer reviewStore', () => {
     });
     expect(await store.loadOverlay(file.path, 'utf-8', 'refresh')).toBe(true);
     store.acceptDiffBlocks({ contextKey: 'refresh-2', generation: 2, signature: 'signature-2', blocks: [canonicalBlock] }, 'refresh-2');
+    expect(store.operation).toEqual(expect.objectContaining({
+      kind: 'file-attribution',
+      status: 'running'
+    }));
     await vi.waitFor(() => {
       expect(store.diffComputationState).toBe('ready');
     });
@@ -804,6 +818,10 @@ describe('renderer reviewStore', () => {
     expect(store.overlay?.newContent).toBe('刷新后的内容');
     expect(store.drilldownOverlay).toBeUndefined();
     expect(store.selectedCommitHash).toBeUndefined();
+    expect(store.lastTerminalOperation).toEqual(expect.objectContaining({
+      kind: 'file-attribution',
+      status: 'completed'
+    }));
   });
 
   it('编码重载失败时保留旧 overlay、选中块并记录错误', async () => {
@@ -817,6 +835,9 @@ describe('renderer reviewStore', () => {
     expect(store.overlay).toStrictEqual(overlay);
     expect(store.selectedBlock).toStrictEqual(block);
     expect(store.error).toBe('解码失败');
+    expect(store.operation).toEqual(expect.objectContaining({
+      status: 'failed'
+    }));
     expect(useNotifications().notifications.value).toEqual([
       expect.objectContaining({
         type: 'error',

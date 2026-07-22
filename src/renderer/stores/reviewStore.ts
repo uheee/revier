@@ -42,6 +42,8 @@ interface ReviewState {
   branchCacheState: CacheState;
   restoredFilters?: ReviewFilters;
   operation?: OperationProgressSnapshot;
+  activeOperationId?: string;
+  lastTerminalOperation?: OperationProgressSnapshot;
   error?: string;
   diffComputationState: 'computing' | 'attributing' | 'ready' | 'empty' | 'failed';
   diffBlocksSignature?: string;
@@ -151,6 +153,8 @@ export const useReviewStore = defineStore('review', {
     branchCacheState: 'none',
     restoredFilters: undefined,
     operation: undefined,
+    activeOperationId: undefined,
+    lastTerminalOperation: undefined,
     error: undefined,
     diffComputationState: 'computing',
     diffBlocksSignature: undefined,
@@ -166,8 +170,46 @@ export const useReviewStore = defineStore('review', {
     fileRefreshFallback: undefined
   }),
   actions: {
+    setForegroundOperation(progress: OperationProgressSnapshot): void {
+      this.operation = progress;
+      if (progress.status === 'running') {
+        this.activeOperationId = progress.operationId;
+      } else {
+        this.activeOperationId = undefined;
+        this.lastTerminalOperation = progress;
+      }
+    },
+
+    beginProjectMetadata(projectId: string, message: string): string {
+      const operationId = createOperationId();
+      this.setForegroundOperation({
+        operationId,
+        kind: 'project-metadata',
+        status: 'running',
+        projectId,
+        stage: 'read-repository',
+        message,
+        startedAt: new Date().toISOString(),
+        elapsedMs: 0,
+        cacheState: 'none'
+      });
+      return operationId;
+    },
+
+    finishProjectMetadata(operationId: string, message: string, failed = false): void {
+      if (this.operation?.operationId !== operationId) return;
+      this.setForegroundOperation(finishLocalOperation(
+        this.operation,
+        failed ? 'failed' : 'completed',
+        message,
+        'none'
+      ));
+    },
+
     async restoreBranch(projectId: string, branch: string): Promise<BranchAnalysisRestoreResult | undefined> {
       const requestId = ++this.analysisRequestId;
+      const operationId = `restore:${projectId}:${branch}:${requestId}`;
+      const startedAt = new Date().toISOString();
       this.pendingAnalysis = undefined;
       this.loading = true;
       this.error = undefined;
@@ -177,6 +219,18 @@ export const useReviewStore = defineStore('review', {
       this.branchCacheState = 'none';
       this.cancelOverlay();
       this.closeCommitDrilldown();
+      this.setForegroundOperation({
+        operationId,
+        kind: 'project-metadata',
+        status: 'running',
+        projectId,
+        branch,
+        stage: 'restore-cache',
+        message: `正在恢复 ${branch} 的分析缓存`,
+        startedAt,
+        elapsedMs: 0,
+        cacheState: 'none'
+      });
       try {
         const restored = await revierClient.review.restoreBranchAnalysis(projectId, branch);
         if (requestId !== this.analysisRequestId) return undefined;
@@ -184,9 +238,9 @@ export const useReviewStore = defineStore('review', {
         this.task = restored.task;
         this.files = restored.files;
         this.restoredFilters = restored.filters;
-        this.operation = {
-          operationId: `restore:${projectId}:${branch}:${requestId}`,
-          kind: 'project-analysis',
+        this.setForegroundOperation({
+          operationId,
+          kind: 'project-metadata',
           status: 'completed',
           projectId,
           branch,
@@ -194,16 +248,25 @@ export const useReviewStore = defineStore('review', {
           message: restored.cacheHit
             ? (restored.stale ? '已加载缓存，当前分支已有新提交' : '已从缓存加载')
             : '未找到分支缓存',
-          startedAt: new Date().toISOString(),
+          startedAt,
           elapsedMs: restored.cacheReadElapsedMs,
-          cacheState: restored.cacheState
-        };
+          cacheState: restored.cacheState,
+          progress: 1
+        });
         return restored;
       } catch (error) {
         if (requestId === this.analysisRequestId) {
           const message = toErrorMessage(error);
           this.error = message;
           this.branchCacheState = 'miss';
+          if (this.operation?.operationId === operationId) {
+            this.setForegroundOperation(finishLocalOperation(
+              this.operation,
+              'failed',
+              message,
+              'miss'
+            ));
+          }
           notifyReviewError('分支缓存恢复失败', `${projectId} / ${branch}：${message}`);
         }
         return undefined;
@@ -219,7 +282,14 @@ export const useReviewStore = defineStore('review', {
         && this.operation.status !== 'running'
         && progress.status === 'running'
       ) return;
-      this.operation = progress;
+      const currentKind = this.operation?.kind;
+      const effectiveProgress = this.operation?.operationId === progress.operationId
+        && progress.kind === 'file-overlay'
+        && currentKind !== undefined
+        && ['monaco-diff', 'file-attribution', 'encoding-reload'].includes(currentKind)
+        ? { ...progress, kind: currentKind }
+        : progress;
+      this.setForegroundOperation(effectiveProgress);
       if (progress.status === 'completed' && progress.kind === 'project-analysis') {
         this.branchCacheState = 'hit';
       }
@@ -233,7 +303,7 @@ export const useReviewStore = defineStore('review', {
       this.error = undefined;
       this.loading = true;
       this.branchCacheState = 'refresh';
-      this.operation = {
+      this.setForegroundOperation({
         operationId,
         kind: 'project-analysis',
         status: 'running',
@@ -244,7 +314,7 @@ export const useReviewStore = defineStore('review', {
         startedAt: new Date().toISOString(),
         elapsedMs: 0,
         cacheState: 'refresh'
-      };
+      });
       try {
         const task = await revierClient.review.startAnalysis(filters, operationId);
         if (requestId !== this.analysisRequestId) return;
@@ -273,6 +343,14 @@ export const useReviewStore = defineStore('review', {
           const message = toErrorMessage(error);
           this.error = message;
           this.loading = false;
+          if (this.operation?.operationId === operationId) {
+            this.setForegroundOperation(finishLocalOperation(
+              this.operation,
+              'failed',
+              message,
+              'refresh'
+            ));
+          }
           if (this.refreshFallbackTask) {
             this.task = this.refreshFallbackTask;
             this.refreshFallbackTask = undefined;
@@ -438,7 +516,7 @@ export const useReviewStore = defineStore('review', {
       }
       this.activeFileOperationId = operationId;
       this.activeFileCacheMode = cacheMode;
-      this.operation = {
+      this.setForegroundOperation({
         operationId,
         kind: 'file-overlay',
         status: 'running',
@@ -449,7 +527,7 @@ export const useReviewStore = defineStore('review', {
         startedAt: new Date().toISOString(),
         elapsedMs: 0,
         cacheState: cacheMode === 'refresh' ? 'refresh' : 'none'
-      };
+      });
       this.loading = true;
       this.activeOverlayPath = filePath;
       this.error = undefined;
@@ -474,6 +552,7 @@ export const useReviewStore = defineStore('review', {
         if (this.operation?.operationId === operationId) {
           this.operation = {
             ...this.operation,
+            kind: 'monaco-diff',
             stage: 'compute-diff',
             message: `正在计算差异 ${filePath}`
           };
@@ -484,12 +563,12 @@ export const useReviewStore = defineStore('review', {
           const message = toErrorMessage(error);
           this.restoreFileRefreshFallback();
           if (this.operation?.operationId === operationId) {
-            this.operation = finishLocalOperation(
+            this.setForegroundOperation(finishLocalOperation(
               this.operation,
               'failed',
               message,
               cacheMode === 'refresh' ? 'refresh' : 'miss'
-            );
+            ));
           }
           this.error = message;
           notifyReviewError('文件差异加载失败', `${filePath}：${message}`);
@@ -512,9 +591,9 @@ export const useReviewStore = defineStore('review', {
       const operationId = createOperationId();
       this.activeFileOperationId = operationId;
       this.activeFileCacheMode = 'prefer-cache';
-      this.operation = {
+      this.setForegroundOperation({
         operationId,
-        kind: 'file-overlay',
+        kind: 'encoding-reload',
         status: 'running',
         projectId: this.task.projectId,
         filePath,
@@ -523,7 +602,7 @@ export const useReviewStore = defineStore('review', {
         startedAt: new Date().toISOString(),
         elapsedMs: 0,
         cacheState: 'none'
-      };
+      });
       this.loading = true;
       this.activeOverlayPath = filePath;
       this.error = undefined;
@@ -540,10 +619,26 @@ export const useReviewStore = defineStore('review', {
         this.selectedBlock = undefined;
         this.invalidateAttribution();
         this.diffComputationState = 'computing';
+        if (this.operation?.operationId === operationId) {
+          this.operation = {
+            ...this.operation,
+            kind: 'monaco-diff',
+            stage: 'compute-diff',
+            message: `正在重新计算差异 ${filePath}`
+          };
+        }
         return true;
       } catch (error) {
         if (requestId === this.overlayRequestId) {
           const message = toErrorMessage(error);
+          if (this.operation?.operationId === operationId) {
+            this.setForegroundOperation(finishLocalOperation(
+              this.operation,
+              'failed',
+              message,
+              'miss'
+            ));
+          }
           this.error = message;
           notifyReviewError('文件编码重载失败', `${filePath}（${encoding}）：${message}`);
         }
@@ -590,12 +685,12 @@ export const useReviewStore = defineStore('review', {
         this.diffComputationState = 'empty';
         this.completeFileRefresh();
         if (this.operation && this.activeFileOperationId === this.operation.operationId) {
-          this.operation = finishLocalOperation(
-            this.operation,
+          this.setForegroundOperation(finishLocalOperation(
+            { ...this.operation, kind: 'monaco-diff' },
             'completed',
             '文件没有可归因变更',
             this.activeFileCacheMode === 'refresh' ? 'refresh' : 'hit'
-          );
+          ));
         }
         return;
       }
@@ -603,6 +698,7 @@ export const useReviewStore = defineStore('review', {
       if (this.operation && this.activeFileOperationId === this.operation.operationId) {
         this.operation = {
           ...this.operation,
+          kind: 'file-attribution',
           stage: 'attribute-candidates',
           message: `正在归因 ${this.overlay.file.path}`
         };
@@ -655,12 +751,12 @@ export const useReviewStore = defineStore('review', {
         this.diffComputationState = 'ready';
         this.completeFileRefresh();
         if (this.operation?.operationId === operationId) {
-          this.operation = finishLocalOperation(
+          this.setForegroundOperation(finishLocalOperation(
             this.operation,
             'completed',
             result.cacheState === 'hit' ? `已从缓存加载 ${filePath}` : `文件归因完成 ${filePath}`,
             result.cacheState
-          );
+          ));
         }
       } catch (error) {
         if (requestId !== this.attributionRequestId) return;
@@ -669,7 +765,7 @@ export const useReviewStore = defineStore('review', {
           this.diffComputationState = 'failed';
         }
         if (this.operation?.operationId === operationId) {
-          this.operation = finishLocalOperation(this.operation, 'failed', message, cacheMode === 'refresh' ? 'refresh' : 'miss');
+          this.setForegroundOperation(finishLocalOperation(this.operation, 'failed', message, cacheMode === 'refresh' ? 'refresh' : 'miss'));
         }
         notifyReviewError('变更块归因失败', `${this.overlay?.file.path ?? filePath}：${message}`);
       }
@@ -709,7 +805,7 @@ export const useReviewStore = defineStore('review', {
 
       const requestId = ++this.drilldownRequestId;
       const operationId = createOperationId();
-      this.operation = {
+      this.setForegroundOperation({
         operationId,
         kind: 'commit-overlay',
         status: 'running',
@@ -721,7 +817,7 @@ export const useReviewStore = defineStore('review', {
         startedAt: new Date().toISOString(),
         elapsedMs: 0,
         cacheState: 'none'
-      };
+      });
       this.drilldownLoading = true;
       this.error = undefined;
       this.selectedCommitHash = commitHash;
@@ -742,12 +838,12 @@ export const useReviewStore = defineStore('review', {
         this.drilldownOverlay = overlay;
         this.drilldownError = undefined;
         if (this.operation?.operationId === operationId && this.operation.status === 'running') {
-          this.operation = finishLocalOperation(
+          this.setForegroundOperation(finishLocalOperation(
             this.operation,
             'completed',
             `提交下钻加载完成 ${commitHash}`,
             'miss'
-          );
+          ));
         }
         return true;
       } catch (error) {
@@ -756,7 +852,7 @@ export const useReviewStore = defineStore('review', {
           this.error = message;
           this.drilldownError = message;
           if (this.operation?.operationId === operationId && this.operation.status === 'running') {
-            this.operation = finishLocalOperation(this.operation, 'failed', message, 'miss');
+            this.setForegroundOperation(finishLocalOperation(this.operation, 'failed', message, 'miss'));
           }
           notifyReviewError('提交差异加载失败', `${filePath} @ ${commitHash}：${message}`);
         }
@@ -784,7 +880,7 @@ export const useReviewStore = defineStore('review', {
 
       const requestId = ++this.drilldownRequestId;
       const operationId = createOperationId();
-      this.operation = {
+      this.setForegroundOperation({
         operationId,
         kind: 'commit-overlay',
         status: 'running',
@@ -796,7 +892,7 @@ export const useReviewStore = defineStore('review', {
         startedAt: new Date().toISOString(),
         elapsedMs: 0,
         cacheState: 'none'
-      };
+      });
       this.drilldownLoading = true;
       this.activeCommitHash = commitHash;
       this.error = undefined;
@@ -812,12 +908,12 @@ export const useReviewStore = defineStore('review', {
         if (requestId !== this.drilldownRequestId) return false;
         this.drilldownOverlay = overlay;
         if (this.operation?.operationId === operationId && this.operation.status === 'running') {
-          this.operation = finishLocalOperation(
+          this.setForegroundOperation(finishLocalOperation(
             this.operation,
             'completed',
             `提交下钻编码加载完成 ${commitHash}`,
             'miss'
-          );
+          ));
         }
         return true;
       } catch (error) {
@@ -825,7 +921,7 @@ export const useReviewStore = defineStore('review', {
           const message = toErrorMessage(error);
           this.error = message;
           if (this.operation?.operationId === operationId && this.operation.status === 'running') {
-            this.operation = finishLocalOperation(this.operation, 'failed', message, 'miss');
+            this.setForegroundOperation(finishLocalOperation(this.operation, 'failed', message, 'miss'));
           }
           notifyReviewError(
             '提交编码重载失败',
