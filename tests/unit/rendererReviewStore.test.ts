@@ -932,18 +932,46 @@ describe('renderer reviewStore', () => {
     store.task = task;
     expect(await store.loadCommitOverlay(file.path, 'abc123', 'utf-8')).toBe(true);
 
-    expect(revierClient.review.getCommitOverlay).toHaveBeenCalledWith({
+    expect(revierClient.review.getCommitOverlay).toHaveBeenCalledWith(expect.objectContaining({
       taskId: task.taskId,
       filePath: file.path,
       commitHash: 'abc123',
+      cacheMode: 'prefer-cache',
       encoding: 'utf-8'
+    }));
+    const request = vi.mocked(revierClient.review.getCommitOverlay).mock.calls[0][0];
+    store.handleOperationProgress({
+      operationId: request.operationId,
+      kind: 'commit-overlay',
+      status: 'completed',
+      projectId: task.projectId,
+      filePath: file.path,
+      commitHash: 'abc123',
+      stage: 'ready',
+      message: '已从缓存加载提交 abc123',
+      startedAt: new Date().toISOString(),
+      elapsedMs: 12,
+      cacheState: 'hit'
     });
+    expect(store.operation).toEqual(expect.objectContaining({
+      kind: 'commit-overlay',
+      status: 'completed',
+      cacheState: 'hit'
+    }));
     expect(store.drilldownOverlay).toEqual(commitOverlay);
     expect(store.selectedCommitHash).toBe('abc123');
 
     store.closeCommitDrilldown();
     expect(store.drilldownOverlay).toBeUndefined();
     expect(store.selectedCommitHash).toBeUndefined();
+
+    expect(await store.loadCommitOverlay(file.path, 'abc123', 'utf-8')).toBe(true);
+    expect(revierClient.review.getCommitOverlay).toHaveBeenCalledTimes(2);
+    expect(store.drilldownOverlay).toEqual(commitOverlay);
+    expect(store.operation).toEqual(expect.objectContaining({
+      kind: 'commit-overlay',
+      status: 'completed'
+    }));
   });
 
   it('提交初载失败时保留当前选择和专用错误状态，关闭后统一清理', async () => {

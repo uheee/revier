@@ -708,6 +708,20 @@ export const useReviewStore = defineStore('review', {
       }
 
       const requestId = ++this.drilldownRequestId;
+      const operationId = createOperationId();
+      this.operation = {
+        operationId,
+        kind: 'commit-overlay',
+        status: 'running',
+        projectId: this.task.projectId,
+        filePath,
+        commitHash,
+        stage: 'read-file-content',
+        message: `正在打开提交 ${commitHash}`,
+        startedAt: new Date().toISOString(),
+        elapsedMs: 0,
+        cacheState: 'none'
+      };
       this.drilldownLoading = true;
       this.error = undefined;
       this.selectedCommitHash = commitHash;
@@ -720,17 +734,30 @@ export const useReviewStore = defineStore('review', {
           taskId: this.task.taskId,
           filePath,
           commitHash,
+          operationId,
+          cacheMode: 'prefer-cache',
           encoding
         });
         if (requestId !== this.drilldownRequestId) return false;
         this.drilldownOverlay = overlay;
         this.drilldownError = undefined;
+        if (this.operation?.operationId === operationId && this.operation.status === 'running') {
+          this.operation = finishLocalOperation(
+            this.operation,
+            'completed',
+            `提交下钻加载完成 ${commitHash}`,
+            'miss'
+          );
+        }
         return true;
       } catch (error) {
         if (requestId === this.drilldownRequestId) {
           const message = toErrorMessage(error);
           this.error = message;
           this.drilldownError = message;
+          if (this.operation?.operationId === operationId && this.operation.status === 'running') {
+            this.operation = finishLocalOperation(this.operation, 'failed', message, 'miss');
+          }
           notifyReviewError('提交差异加载失败', `${filePath} @ ${commitHash}：${message}`);
         }
         return false;
@@ -756,6 +783,20 @@ export const useReviewStore = defineStore('review', {
       }
 
       const requestId = ++this.drilldownRequestId;
+      const operationId = createOperationId();
+      this.operation = {
+        operationId,
+        kind: 'commit-overlay',
+        status: 'running',
+        projectId: this.task.projectId,
+        filePath,
+        commitHash,
+        stage: 'read-file-content',
+        message: `正在按编码重新加载提交 ${commitHash}`,
+        startedAt: new Date().toISOString(),
+        elapsedMs: 0,
+        cacheState: 'none'
+      };
       this.drilldownLoading = true;
       this.activeCommitHash = commitHash;
       this.error = undefined;
@@ -764,15 +805,28 @@ export const useReviewStore = defineStore('review', {
           taskId: this.task.taskId,
           filePath,
           commitHash,
+          operationId,
+          cacheMode: 'prefer-cache',
           encoding
         });
         if (requestId !== this.drilldownRequestId) return false;
         this.drilldownOverlay = overlay;
+        if (this.operation?.operationId === operationId && this.operation.status === 'running') {
+          this.operation = finishLocalOperation(
+            this.operation,
+            'completed',
+            `提交下钻编码加载完成 ${commitHash}`,
+            'miss'
+          );
+        }
         return true;
       } catch (error) {
         if (requestId === this.drilldownRequestId) {
           const message = toErrorMessage(error);
           this.error = message;
+          if (this.operation?.operationId === operationId && this.operation.status === 'running') {
+            this.operation = finishLocalOperation(this.operation, 'failed', message, 'miss');
+          }
           notifyReviewError(
             '提交编码重载失败',
             `${filePath} @ ${commitHash}（${encoding}）：${message}`

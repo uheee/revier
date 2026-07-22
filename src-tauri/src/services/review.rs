@@ -7,8 +7,8 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 use revier_analysis::api::QueryFilesRequest;
 use revier_analysis::cache::models::{
-    CachedAnalysisFile, CachedAnalysisSnapshot, CachedBlockCommit, CachedFileAnalysis,
-    CachedFileBlock, CachedTouchedRange,
+    CachedAnalysisFile, CachedAnalysisSnapshot, CachedBlockCommit, CachedCommitOverlay,
+    CachedCommitOverlayBlock, CachedFileAnalysis, CachedFileBlock, CachedTouchedRange,
 };
 use revier_analysis::cli::{IndexBuildArgs, IndexCommonArgs, OutputFormat, OverlayCommonArgs};
 use revier_analysis::contracts::{
@@ -65,6 +65,8 @@ struct FileProgressRegistration {
     project_id: String,
     branch: String,
     file_path: String,
+    kind: OperationKind,
+    commit_hash: Option<String>,
     started_at: String,
     started: Instant,
     cache_state: CacheState,
@@ -81,6 +83,11 @@ struct ReviewTaskContext {
 struct AnalysisRunResult {
     files: Vec<ChangedFile>,
     context: ReviewTaskContext,
+}
+
+pub struct CommitOverlayLoadResult {
+    pub overlay: FileOverlay,
+    pub cache_state: CacheState,
 }
 
 struct TaskProgressReporter {
@@ -191,6 +198,8 @@ impl ReviewService {
             project_id: context.project.id,
             branch: context.range.branch,
             file_path: request.file_path.clone(),
+            kind: OperationKind::FileOverlay,
+            commit_hash: None,
             started_at: Utc::now().to_rfc3339(),
             started: Instant::now(),
             cache_state: match request.cache_mode {
@@ -225,6 +234,55 @@ impl ReviewService {
         Ok(())
     }
 
+    pub fn start_commit_operation(
+        &self,
+        request: &CommitOverlayRequest,
+        sink: ProgressEventSink,
+    ) -> CommandResult<()> {
+        self.ensure_completed_task(&request.task_id)?;
+        let context = self.context_for_task(&request.task_id)?;
+        self.file_for_task(&request.task_id, &request.file_path)?;
+        let registration = FileProgressRegistration {
+            operation_id: request.operation_id.clone(),
+            project_id: context.project.id,
+            branch: context.range.branch,
+            file_path: request.file_path.clone(),
+            kind: OperationKind::CommitOverlay,
+            commit_hash: Some(request.commit_hash.clone()),
+            started_at: Utc::now().to_rfc3339(),
+            started: Instant::now(),
+            cache_state: match request.cache_mode {
+                CacheMode::PreferCache => CacheState::None,
+                CacheMode::Refresh => CacheState::Refresh,
+            },
+            sink,
+        };
+        let mut operations = self
+            .progress_by_file_operation
+            .lock()
+            .expect("文件进度注册锁被污染");
+        operations.retain(|_, item| item.started.elapsed().as_secs() < 3600);
+        if operations.len() >= 128 {
+            if let Some(oldest) = operations
+                .iter()
+                .max_by_key(|(_, item)| item.started.elapsed())
+                .map(|(key, _)| key.clone())
+            {
+                operations.remove(&oldest);
+            }
+        }
+        operations.insert(request.operation_id.clone(), registration);
+        drop(operations);
+        self.report_file_operation(
+            &request.operation_id,
+            OperationStatus::Running,
+            OperationStage::ReadFileContent,
+            format!("正在打开提交 {}", request.commit_hash),
+            None,
+        );
+        Ok(())
+    }
+
     pub fn report_file_operation(
         &self,
         operation_id: &str,
@@ -251,12 +309,12 @@ impl ReviewService {
         let elapsed_ms = registration.started.elapsed().as_millis() as u64;
         (registration.sink)(OperationProgressSnapshot {
             operation_id: registration.operation_id,
-            kind: OperationKind::FileOverlay,
+            kind: registration.kind,
             status,
             project_id: registration.project_id,
             branch: Some(registration.branch),
             file_path: Some(registration.file_path),
-            commit_hash: None,
+            commit_hash: registration.commit_hash,
             stage,
             message,
             completed_units: None,
@@ -883,10 +941,71 @@ impl ReviewService {
         })
     }
 
-    pub fn get_commit_overlay(&self, request: CommitOverlayRequest) -> CommandResult<FileOverlay> {
+    #[cfg(test)]
+    fn get_commit_overlay(&self, request: CommitOverlayRequest) -> CommandResult<FileOverlay> {
+        self.get_commit_overlay_with_cache(request)
+            .map(|result| result.overlay)
+    }
+
+    pub fn get_commit_overlay_with_cache(
+        &self,
+        request: CommitOverlayRequest,
+    ) -> CommandResult<CommitOverlayLoadResult> {
+        let started = Instant::now();
         self.ensure_completed_task(&request.task_id)?;
         let context = self.context_for_task(&request.task_id)?;
         let file = self.file_for_task(&request.task_id, &request.file_path)?;
+        let cacheable_task = self
+            .filters_by_task
+            .lock()
+            .expect("筛选条件锁被污染")
+            .contains_key(&request.task_id);
+        let mut file_analysis = None;
+        if cacheable_task {
+            let (repo_id, conn) = cache_connection_for_context(&context)?;
+            let analysis_file = revier_analysis::cache::repository::load_branch_analysis_file(
+                &conn,
+                &repo_id,
+                &context.range.branch,
+                &file.path,
+            )
+            .map_err(map_analysis_error)?;
+            file_analysis = match analysis_file {
+                Some((analysis_id, _)) => revier_analysis::cache::repository::load_file_analysis(
+                    &conn,
+                    &analysis_id,
+                    &file.path,
+                )
+                .map_err(map_analysis_error)?,
+                None => None,
+            }
+            .filter(|cached| cached.analysis_version == revier_analysis::cache::ANALYSIS_VERSION);
+            if matches!(request.cache_mode, CacheMode::PreferCache) {
+                if let Some(file_analysis) = file_analysis.as_ref() {
+                    if let Some(cached) = revier_analysis::cache::repository::load_commit_overlay(
+                        &conn,
+                        &file_analysis.file_analysis_id,
+                        &request.commit_hash,
+                    )
+                    .map_err(map_analysis_error)?
+                    .filter(|cached| {
+                        cached.analysis_version == revier_analysis::cache::ANALYSIS_VERSION
+                    }) {
+                        if let Some(overlay) = restore_cached_commit_overlay(
+                            &context,
+                            &file,
+                            &cached,
+                            request.encoding.unwrap_or(TextEncoding::Auto),
+                        )? {
+                            return Ok(CommitOverlayLoadResult {
+                                overlay,
+                                cache_state: CacheState::Hit,
+                            });
+                        }
+                    }
+                }
+            }
+        }
         let repo = revier_analysis::git::repository::open_repository(Path::new(
             &context.project.repo_path,
         ))
@@ -984,6 +1103,12 @@ impl ReviewService {
             ));
         }
         let diff = revier_analysis::overlay::diff_builder::build_overlay_diff(&old_text, &new_text);
+        let cached_blocks = diff
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(ordinal, block)| cached_commit_overlay_block(ordinal as u32, block))
+            .collect::<CommandResult<Vec<_>>>()?;
         let rows = adapt_rows(diff.rows)?;
         let related_commit = RelatedCommit {
             hash: commit.hash,
@@ -1008,18 +1133,45 @@ impl ReviewService {
             block.related_commits = vec![related_commit.clone()];
         }
 
-        Ok(FileOverlay {
+        let overlay = FileOverlay {
             mode: Some(FileOverlayMode::Commit),
             file,
-            range: context.range,
+            range: context.range.clone(),
             rows: Some(rows),
             blocks,
             warnings: Vec::new(),
             commit: Some(related_commit),
-            parent_hash: Some(parent_hash),
+            parent_hash: Some(parent_hash.clone()),
             old_content: old_text,
             new_content: new_text,
             resolved_encoding,
+        };
+        if let Some(file_analysis) = file_analysis {
+            let cached = CachedCommitOverlay {
+                commit_overlay_id: uuid::Uuid::new_v4().to_string(),
+                file_analysis_id: file_analysis.file_analysis_id,
+                commit_hash: request.commit_hash,
+                parent_hash,
+                historical_path: change.path,
+                old_blob_id: change.old_blob_id,
+                new_blob_id: change.new_blob_id,
+                resolved_encoding: resolved_encoding_code(resolved_encoding),
+                analysis_version: revier_analysis::cache::ANALYSIS_VERSION,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                completed_at: Utc::now().to_rfc3339(),
+                blocks: cached_blocks,
+            };
+            let (_, conn) = cache_connection_for_context(&context)?;
+            revier_analysis::cache::repository::replace_commit_overlay(&conn, &cached)
+                .map_err(map_analysis_error)?;
+        }
+        Ok(CommitOverlayLoadResult {
+            overlay,
+            cache_state: if matches!(request.cache_mode, CacheMode::Refresh) {
+                CacheState::Refresh
+            } else {
+                CacheState::Miss
+            },
         })
     }
 
@@ -1926,6 +2078,137 @@ fn cached_file_block(ordinal: u32, block: &DiffBlockOutput) -> CommandResult<Cac
     })
 }
 
+fn cached_commit_overlay_block(
+    ordinal: u32,
+    block: &DiffBlockOutput,
+) -> CommandResult<CachedCommitOverlayBlock> {
+    Ok(CachedCommitOverlayBlock {
+        ordinal,
+        old_start: block.old_start as u64,
+        old_end: block.old_end as u64,
+        new_start: block.new_start as u64,
+        new_end: block.new_end as u64,
+        change_type: diff_block_change_type_code(&block.change_type)?,
+    })
+}
+
+fn restore_cached_commit_overlay(
+    context: &ReviewTaskContext,
+    file: &ChangedFile,
+    cached: &CachedCommitOverlay,
+    requested_encoding: TextEncoding,
+) -> CommandResult<Option<FileOverlay>> {
+    if cached.historical_path.is_empty()
+        || (cached.old_blob_id.is_none() && cached.new_blob_id.is_none())
+    {
+        return Ok(None);
+    }
+    let repo =
+        revier_analysis::git::repository::open_repository(Path::new(&context.project.repo_path))
+            .map_err(map_analysis_error)?;
+    let commit = revier_analysis::git::commits::get_commit(&repo, &cached.commit_hash)
+        .map_err(map_analysis_error)?;
+    let actual_parent = commit
+        .parents
+        .first()
+        .cloned()
+        .unwrap_or_else(|| repo.empty_tree().id.to_string());
+    if actual_parent != cached.parent_hash {
+        return Ok(None);
+    }
+    let old_bytes = cached
+        .old_blob_id
+        .as_deref()
+        .map(|blob_id| revier_analysis::git::blob::read_blob_by_id(&repo, blob_id))
+        .transpose()
+        .map_err(map_analysis_error)?
+        .unwrap_or_default();
+    let new_bytes = cached
+        .new_blob_id
+        .as_deref()
+        .map(|blob_id| revier_analysis::git::blob::read_blob_by_id(&repo, blob_id))
+        .transpose()
+        .map_err(map_analysis_error)?
+        .unwrap_or_default();
+    let preferred_bytes = if cached.new_blob_id.is_some() {
+        &new_bytes
+    } else {
+        &old_bytes
+    };
+    let resolved_encoding =
+        revier_analysis::text_encoding::decode_text_bytes(preferred_bytes, requested_encoding)
+            .map_err(map_analysis_error)?
+            .encoding;
+    if resolved_encoding_code(resolved_encoding) != cached.resolved_encoding {
+        return Ok(None);
+    }
+    let concrete_encoding =
+        revier_analysis::text_encoding::resolved_as_requested(resolved_encoding);
+    let old_text = revier_analysis::text_encoding::decode_text_bytes(&old_bytes, concrete_encoding)
+        .map_err(map_analysis_error)?
+        .text;
+    let new_text = revier_analysis::text_encoding::decode_text_bytes(&new_bytes, concrete_encoding)
+        .map_err(map_analysis_error)?
+        .text;
+    if cached.blocks.iter().enumerate().any(|(ordinal, block)| {
+        block.ordinal != ordinal as u32
+            || block.old_start > block.old_end
+            || block.new_start > block.new_end
+    }) {
+        return Ok(None);
+    }
+    let related_commit = RelatedCommit {
+        hash: commit.hash,
+        short_hash: commit.short_hash,
+        author_name: commit.author_name,
+        author_email: commit.author_email,
+        committed_at: commit.committed_at,
+        subject: commit.subject,
+        matched_by_filter: false,
+        touched_ranges: Vec::new(),
+        attribution: None,
+    };
+    let author = AuthorSummary {
+        name: related_commit.author_name.clone(),
+        email: related_commit.author_email.clone(),
+        commit_count: 1,
+        last_committed_at: related_commit.committed_at.clone(),
+    };
+    let blocks = cached
+        .blocks
+        .iter()
+        .map(|block| {
+            Ok(DiffBlock {
+                id: format!("block-{}", block.ordinal + 1),
+                old_start: block.old_start,
+                old_end: block.old_end,
+                new_start: block.new_start,
+                new_end: block.new_end,
+                row_start_index: None,
+                row_end_index: None,
+                change_type: cached_diff_block_change_type(block.change_type)?,
+                authors: vec![author.clone()],
+                rows: Vec::new(),
+                related_commits: vec![related_commit.clone()],
+                attribution: None,
+            })
+        })
+        .collect::<CommandResult<Vec<_>>>()?;
+    Ok(Some(FileOverlay {
+        mode: Some(FileOverlayMode::Commit),
+        file: file.clone(),
+        range: context.range.clone(),
+        rows: None,
+        blocks,
+        warnings: Vec::new(),
+        commit: Some(related_commit),
+        parent_hash: Some(cached.parent_hash.clone()),
+        old_content: old_text,
+        new_content: new_text,
+        resolved_encoding,
+    }))
+}
+
 fn restore_cached_attributions(
     conn: &duckdb::Connection,
     cached: &CachedFileAnalysis,
@@ -2079,6 +2362,19 @@ fn diff_block_change_type_code(change_type: &str) -> CommandResult<i16> {
             "UNKNOWN_DIFF_BLOCK_CHANGE_TYPE",
             format!("未知 diff 块类型：{other}"),
             other,
+        )),
+    }
+}
+
+fn cached_diff_block_change_type(change_type: i16) -> CommandResult<DiffBlockChangeType> {
+    match change_type {
+        0 => Ok(DiffBlockChangeType::Added),
+        1 => Ok(DiffBlockChangeType::Deleted),
+        2 => Ok(DiffBlockChangeType::Modified),
+        other => Err(command_error_with_detail(
+            "UNKNOWN_DIFF_BLOCK_CHANGE_TYPE",
+            format!("未知缓存 diff 块类型：{other}"),
+            other.to_string(),
         )),
     }
 }
@@ -3520,6 +3816,152 @@ mod tests {
     }
 
     #[test]
+    fn commit_overlay_is_cached_by_file_analysis_commit_and_current_encoding() {
+        let fixture = create_linear_repo();
+        let head = git_output(fixture.path(), ["rev-parse", "HEAD"]);
+        let root = git_output(fixture.path(), ["rev-list", "--max-parents=0", "HEAD"]);
+        let app_data_dir = tempdir().expect("创建应用数据目录失败");
+        let _env = isolated_app_data(app_data_dir.path());
+        let projects = ProjectService::new(app_data_dir.path().join("projects.json"));
+        let project = projects
+            .add_project(
+                fixture.path().to_string_lossy().to_string(),
+                Some("fixture".to_string()),
+            )
+            .expect("添加项目失败");
+        let service = ReviewService::default();
+        let task = service
+            .start_analysis(&projects, review_filters(project.id))
+            .expect("执行真实分析失败");
+        service
+            .attribute_blocks(AttributeBlocksRequest {
+                task_id: task.task_id.clone(),
+                file_path: "src/app.txt".to_string(),
+                operation_id: "operation-file-before-drilldown".to_string(),
+                cache_mode: CacheMode::PreferCache,
+                block_signature: "signature-added-line".to_string(),
+                resolved_encoding: ResolvedTextEncoding::Utf8,
+                blocks: vec![revier_analysis::contracts::DiffBlockRange {
+                    id: "block-added".to_string(),
+                    old_start: 0,
+                    old_end: 0,
+                    new_start: 2,
+                    new_end: 2,
+                    change_type: DiffBlockChangeType::Added,
+                }],
+            })
+            .expect("准备文件分析缓存失败");
+        let request = CommitOverlayRequest {
+            task_id: task.task_id.clone(),
+            file_path: "src/app.txt".to_string(),
+            commit_hash: head.clone(),
+            operation_id: "operation-commit-cache".to_string(),
+            cache_mode: CacheMode::PreferCache,
+            encoding: None,
+        };
+
+        let cold_started = Instant::now();
+        let cold = service
+            .get_commit_overlay_with_cache(request.clone())
+            .expect("首次提交下钻失败");
+        let cold_elapsed = cold_started.elapsed();
+        let hot_started = Instant::now();
+        let hot = service
+            .get_commit_overlay_with_cache(request.clone())
+            .expect("提交下钻缓存读取失败");
+        let hot_elapsed = hot_started.elapsed();
+        assert_eq!(cold.cache_state, CacheState::Miss);
+        assert_eq!(hot.cache_state, CacheState::Hit);
+        assert_eq!(hot.overlay.old_content, cold.overlay.old_content);
+        assert_eq!(hot.overlay.new_content, cold.overlay.new_content);
+        assert_eq!(hot.overlay.blocks.len(), cold.overlay.blocks.len());
+        assert!(cold.overlay.rows.is_some());
+        assert!(hot.overlay.rows.is_none());
+
+        let (_, conn) = cache_connection_for_context(
+            &service
+                .context_for_task(&task.task_id)
+                .expect("读取任务上下文失败"),
+        )
+        .expect("打开缓存失败");
+        let count: i64 = conn
+            .query_row("select count(*) from commit_overlays", [], |row| row.get(0))
+            .expect("读取下钻缓存数量失败");
+        assert_eq!(count, 1);
+        let file_analysis_id: String = conn
+            .query_row("select file_analysis_id from file_analyses", [], |row| {
+                row.get(0)
+            })
+            .expect("读取文件分析 ID 失败");
+        let cached = revier_analysis::cache::repository::load_commit_overlay(
+            &conn,
+            &file_analysis_id,
+            &head,
+        )
+        .expect("读取下钻缓存失败")
+        .expect("首次下钻应写入缓存");
+        assert_eq!(cached.historical_path, "src/app.txt");
+        assert!(cached.old_blob_id.is_some());
+        assert!(cached.new_blob_id.is_some());
+        assert!(!cached.blocks.is_empty());
+        drop(conn);
+
+        let gb18030 = service
+            .get_commit_overlay_with_cache(CommitOverlayRequest {
+                encoding: Some(TextEncoding::Gb18030),
+                ..request.clone()
+            })
+            .expect("切换下钻编码失败");
+        assert_eq!(gb18030.cache_state, CacheState::Miss);
+        assert_eq!(
+            gb18030.overlay.resolved_encoding,
+            ResolvedTextEncoding::Gb18030
+        );
+
+        let root_result = service
+            .get_commit_overlay_with_cache(CommitOverlayRequest {
+                commit_hash: root,
+                operation_id: "operation-root-commit-cache".to_string(),
+                encoding: None,
+                ..request.clone()
+            })
+            .expect("缓存另一提交下钻失败");
+        assert_eq!(root_result.cache_state, CacheState::Miss);
+        let (_, conn) = cache_connection_for_context(
+            &service
+                .context_for_task(&task.task_id)
+                .expect("读取任务上下文失败"),
+        )
+        .expect("打开缓存失败");
+        let count: i64 = conn
+            .query_row("select count(*) from commit_overlays", [], |row| row.get(0))
+            .expect("读取下钻缓存数量失败");
+        assert_eq!(count, 2);
+        drop(conn);
+
+        {
+            let mut contexts = service.contexts_by_task.lock().expect("任务上下文锁被污染");
+            contexts
+                .get_mut(&task.task_id)
+                .expect("任务上下文应存在")
+                .range
+                .head_commit = "invalid-head-that-cache-hit-must-not-resolve".to_string();
+        }
+        let cached_after_context_damage = service
+            .get_commit_overlay_with_cache(CommitOverlayRequest {
+                encoding: Some(TextEncoding::Gb18030),
+                ..request
+            })
+            .expect("热缓存不应重新解析范围历史");
+        assert_eq!(cached_after_context_damage.cache_state, CacheState::Hit);
+        eprintln!(
+            "提交下钻冷缓存={}ms，热缓存={}ms",
+            cold_elapsed.as_millis(),
+            hot_elapsed.as_millis()
+        );
+    }
+
+    #[test]
     fn file_operation_progress_uses_one_operation_and_continuous_elapsed_time() {
         let fixture = create_linear_repo();
         let app_data_dir = tempdir().expect("创建应用数据目录失败");
@@ -3536,7 +3978,7 @@ mod tests {
             .start_analysis(&projects, review_filters(project.id))
             .expect("执行真实分析失败");
         let request = FileOverlayRequest {
-            task_id: task.task_id,
+            task_id: task.task_id.clone(),
             file_path: "src/app.txt".to_string(),
             operation_id: "operation-file-progress".to_string(),
             cache_mode: CacheMode::Refresh,
@@ -3578,6 +4020,43 @@ mod tests {
         assert!(events
             .windows(2)
             .all(|pair| pair[0].elapsed_ms <= pair[1].elapsed_ms));
+        drop(events);
+
+        let commit_hash = git_output(fixture.path(), ["rev-parse", "HEAD"]);
+        let commit_request = CommitOverlayRequest {
+            task_id: task.task_id,
+            file_path: "src/app.txt".to_string(),
+            commit_hash: commit_hash.clone(),
+            operation_id: "operation-commit-progress".to_string(),
+            cache_mode: CacheMode::PreferCache,
+            encoding: None,
+        };
+        let commit_events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&commit_events);
+        service
+            .start_commit_operation(
+                &commit_request,
+                Arc::new(move |progress| {
+                    captured.lock().expect("事件锁被污染").push(progress);
+                }),
+            )
+            .expect("启动提交下钻进度失败");
+        service.report_file_operation(
+            &commit_request.operation_id,
+            OperationStatus::Completed,
+            OperationStage::Ready,
+            "已从缓存加载提交".to_string(),
+            Some(CacheState::Hit),
+        );
+        let commit_events = commit_events.lock().expect("事件锁被污染");
+        assert_eq!(commit_events.len(), 2);
+        assert!(commit_events
+            .iter()
+            .all(|event| event.kind == OperationKind::CommitOverlay));
+        assert!(commit_events
+            .iter()
+            .all(|event| event.commit_hash.as_deref() == Some(commit_hash.as_str())));
+        assert_eq!(commit_events[1].cache_state, CacheState::Hit);
     }
 
     #[test]
@@ -3604,6 +4083,8 @@ mod tests {
                 task_id: task.task_id,
                 file_path: "src/app.txt".to_string(),
                 commit_hash: head.clone(),
+                operation_id: "commit-overlay-test".to_string(),
+                cache_mode: CacheMode::PreferCache,
                 encoding: None,
             })
             .expect("读取提交 overlay 失败");
@@ -3652,6 +4133,8 @@ mod tests {
                 task_id: task_id.clone(),
                 file_path: "src/added.txt".to_string(),
                 commit_hash: commits[1].clone(),
+                operation_id: "commit-overlay-added".to_string(),
+                cache_mode: CacheMode::PreferCache,
                 encoding: None,
             })
             .expect("读取新增文件提交失败");
@@ -3660,6 +4143,8 @@ mod tests {
                 task_id: task_id.clone(),
                 file_path: "src/deleted.txt".to_string(),
                 commit_hash: commits[2].clone(),
+                operation_id: "commit-overlay-deleted".to_string(),
+                cache_mode: CacheMode::PreferCache,
                 encoding: None,
             })
             .expect("读取删除文件提交失败");
@@ -3668,6 +4153,8 @@ mod tests {
                 task_id,
                 file_path: "src/renamed.txt".to_string(),
                 commit_hash: commits[3].clone(),
+                operation_id: "commit-overlay-renamed".to_string(),
+                cache_mode: CacheMode::PreferCache,
                 encoding: None,
             })
             .expect("读取重命名文件提交失败");
@@ -3700,6 +4187,8 @@ mod tests {
                 task_id: task_id.clone(),
                 file_path: "src/utf16.txt".to_string(),
                 commit_hash: head.clone(),
+                operation_id: "commit-overlay-utf16".to_string(),
+                cache_mode: CacheMode::PreferCache,
                 encoding: Some(TextEncoding::Utf16Le),
             })
             .expect("显式 UTF-16LE 应成功");
@@ -3708,6 +4197,8 @@ mod tests {
                 task_id: task_id.clone(),
                 file_path: "src/utf16.txt".to_string(),
                 commit_hash: head.clone(),
+                operation_id: "commit-overlay-conflict".to_string(),
+                cache_mode: CacheMode::PreferCache,
                 encoding: Some(TextEncoding::Utf16Be),
             })
             .expect_err("冲突 BOM 应失败");
@@ -3716,6 +4207,8 @@ mod tests {
                 task_id,
                 file_path: "src/binary.bin".to_string(),
                 commit_hash: head,
+                operation_id: "commit-overlay-binary".to_string(),
+                cache_mode: CacheMode::PreferCache,
                 encoding: None,
             })
             .expect_err("明显二进制文件应失败");
@@ -3751,6 +4244,8 @@ mod tests {
                 task_id: task.task_id,
                 file_path: "src/app.txt".to_string(),
                 commit_hash: root.clone(),
+                operation_id: "commit-overlay-root".to_string(),
+                cache_mode: CacheMode::PreferCache,
                 encoding: None,
             })
             .expect("可从 head 追溯的根提交应返回 overlay");
@@ -3785,6 +4280,8 @@ mod tests {
                 task_id,
                 file_path: "src/app.txt".to_string(),
                 commit_hash: unrelated,
+                operation_id: "commit-overlay-unreachable".to_string(),
+                cache_mode: CacheMode::PreferCache,
                 encoding: None,
             })
             .expect_err("不可从任务 head 追溯的提交不应返回 overlay");
@@ -3811,6 +4308,8 @@ mod tests {
                 task_id,
                 file_path: "src/current.txt".to_string(),
                 commit_hash: target,
+                operation_id: "commit-overlay-rename-history".to_string(),
+                cache_mode: CacheMode::PreferCache,
                 encoding: None,
             })
             .expect("多次重命名前的来源提交应返回 overlay");

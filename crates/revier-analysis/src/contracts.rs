@@ -475,6 +475,8 @@ pub struct CommitOverlayRequest {
     pub task_id: TaskId,
     pub file_path: String,
     pub commit_hash: String,
+    pub operation_id: String,
+    pub cache_mode: CacheMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[specta(optional, type = crate::contracts::TextEncoding)]
     pub encoding: Option<TextEncoding>,

@@ -221,6 +221,8 @@ export type CommitOverlayRequest_Deserialize = {
 	taskId: string,
 	filePath: string,
 	commitHash: string,
+	operationId: string,
+	cacheMode: CacheMode,
 	encoding?: TextEncoding,
 };
 
@@ -228,6 +230,8 @@ export type CommitOverlayRequest_Serialize = {
 	taskId: string,
 	filePath: string,
 	commitHash: string,
+	operationId: string,
+	cacheMode: CacheMode,
 	encoding?: TextEncoding,
 };
 

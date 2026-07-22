@@ -187,10 +187,42 @@ pub fn review_get_file_overlay(
 
 #[tauri::command]
 pub fn review_get_commit_overlay(
+    app: AppHandle,
     state: State<'_, AppState>,
     request: CommitOverlayRequest,
 ) -> CommandResult<FileOverlay> {
-    state.review.get_commit_overlay(request)
+    let progress_app = app.clone();
+    let sink = Arc::new(move |progress: OperationProgressSnapshot| {
+        let _ = progress_app.emit(OPERATION_PROGRESS_EVENT, progress);
+    });
+    state.review.start_commit_operation(&request, sink)?;
+    let operation_id = request.operation_id.clone();
+    let commit_hash = request.commit_hash.clone();
+    let result = state.review.get_commit_overlay_with_cache(request);
+    match &result {
+        Ok(output) => state.review.report_file_operation(
+            &operation_id,
+            OperationStatus::Completed,
+            OperationStage::Ready,
+            if matches!(
+                output.cache_state,
+                revier_analysis::contracts::CacheState::Hit
+            ) {
+                format!("已从缓存加载提交 {commit_hash}")
+            } else {
+                format!("提交下钻加载完成 {commit_hash}")
+            },
+            Some(output.cache_state.clone()),
+        ),
+        Err(error) => state.review.report_file_operation(
+            &operation_id,
+            OperationStatus::Failed,
+            OperationStage::Ready,
+            error.message.clone(),
+            None,
+        ),
+    }
+    result.map(|output| output.overlay)
 }
 
 #[tauri::command]

@@ -122,7 +122,9 @@ describe('revierClient', () => {
     await revierClient.review.getCommitOverlay({
       taskId: task.taskId,
       filePath: file.path,
-      commitHash: 'abc123'
+      commitHash: 'abc123',
+      operationId: 'commit-operation-1',
+      cacheMode: 'prefer-cache'
     });
 
     expect(invoke).toHaveBeenNthCalledWith(1, 'review_start_analysis', {
@@ -141,7 +143,13 @@ describe('revierClient', () => {
       }
     });
     expect(invoke).toHaveBeenNthCalledWith(4, 'review_get_commit_overlay', {
-      request: { taskId: task.taskId, filePath: file.path, commitHash: 'abc123' }
+      request: {
+        taskId: task.taskId,
+        filePath: file.path,
+        commitHash: 'abc123',
+        operationId: 'commit-operation-1',
+        cacheMode: 'prefer-cache'
+      }
     });
   });
 
