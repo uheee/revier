@@ -100,6 +100,14 @@ pub fn query_files_with_context(
     crate::commands::query_files::query_request_with_context(request, context)
 }
 
+pub fn query_files_with_connection(
+    request: QueryFilesRequest,
+    connection: &duckdb::Connection,
+    context: &AnalysisExecutionContext,
+) -> Result<QueryFilesOutput, AppError> {
+    crate::commands::query_files::query_request_with_connection(request, connection, context)
+}
+
 pub fn resolve_analysis_range(
     repo_path: &Path,
     branch: &str,

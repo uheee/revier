@@ -17,15 +17,7 @@ pub fn run_with_context(
 ) -> Result<String, AppError> {
     let started_at = Utc::now().to_rfc3339();
     let started = Instant::now();
-    report(
-        context,
-        OperationStage::ReadRepository,
-        "读取 Git 仓库",
-        None,
-        None,
-    );
-    context.check_cancelled()?;
-    let repo = crate::git::repository::open_repository(&args.common.repo)?;
+    let repo = begin_index_build(&args, context)?;
     let identity = crate::git::repository::repository_identity(&repo)?;
     let db_path =
         args.common
@@ -35,9 +27,48 @@ pub fn run_with_context(
                 &identity.repo_id,
             )?);
     let conn = crate::index::connection::open_database(&db_path)?;
-    crate::index::migrations::ensure_compatible_schema(&conn)?;
+    run_with_resources(args, context, repo, identity, &conn, started_at, started)
+}
+
+pub fn run_with_connection(
+    args: IndexBuildArgs,
+    conn: &duckdb::Connection,
+    context: &AnalysisExecutionContext,
+) -> Result<String, AppError> {
+    let started_at = Utc::now().to_rfc3339();
+    let started = Instant::now();
+    let repo = begin_index_build(&args, context)?;
+    let identity = crate::git::repository::repository_identity(&repo)?;
+    run_with_resources(args, context, repo, identity, conn, started_at, started)
+}
+
+fn begin_index_build(
+    args: &IndexBuildArgs,
+    context: &AnalysisExecutionContext,
+) -> Result<gix::Repository, AppError> {
+    report(
+        context,
+        OperationStage::ReadRepository,
+        "读取 Git 仓库",
+        None,
+        None,
+    );
+    context.check_cancelled()?;
+    crate::git::repository::open_repository(&args.common.repo)
+}
+
+fn run_with_resources(
+    args: IndexBuildArgs,
+    context: &AnalysisExecutionContext,
+    repo: gix::Repository,
+    identity: crate::git::repository::RepositoryIdentity,
+    conn: &duckdb::Connection,
+    started_at: String,
+    started: Instant,
+) -> Result<String, AppError> {
+    crate::index::migrations::ensure_compatible_schema(conn)?;
     crate::index::schema::initialize_schema(
-        &conn,
+        conn,
         &identity.repo_id,
         &identity.repo_root,
         &identity.git_common_dir,
@@ -45,7 +76,7 @@ pub fn run_with_context(
 
     let commits =
         crate::git::commits::list_reachable_commits_with_context(&repo, &args.branch, context)?;
-    let indexed_hashes = crate::index::queries::indexed_commit_hashes(&conn)?;
+    let indexed_hashes = crate::index::queries::indexed_commit_hashes(conn)?;
     let missing_commits = commits
         .into_iter()
         .filter(|commit| !indexed_hashes.contains(&commit.hash))
@@ -63,7 +94,7 @@ pub fn run_with_context(
     );
     let (summary, elapsed_ms) = elapsed_ms_after_write(started, || {
         crate::index::writer::write_incremental_index(
-            &conn,
+            conn,
             &identity.repo_id,
             &started_at,
             &missing_commits,
@@ -71,7 +102,7 @@ pub fn run_with_context(
             context,
         )
     })?;
-    crate::index::writer::complete_index_run(&conn, &summary.run_id, elapsed_ms)?;
+    crate::index::writer::complete_index_run(conn, &summary.run_id, elapsed_ms)?;
     report(
         context,
         OperationStage::WriteIndex,

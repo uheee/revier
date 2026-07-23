@@ -59,13 +59,32 @@ pub fn query_request_with_context(
 
     context.check_cancelled()?;
     let conn = crate::index::connection::open_database(&db_path)?;
+    query_request_with_resources(args, repo, &conn, context)
+}
+
+pub fn query_request_with_connection(
+    args: QueryFilesRequest,
+    conn: &duckdb::Connection,
+    context: &AnalysisExecutionContext,
+) -> Result<QueryFilesOutput, AppError> {
     context.check_cancelled()?;
-    crate::index::migrations::ensure_compatible_schema(&conn)?;
+    let repo = crate::git::repository::open_repository(&args.repo)?;
+    query_request_with_resources(args, repo, conn, context)
+}
+
+fn query_request_with_resources(
+    args: QueryFilesRequest,
+    repo: gix::Repository,
+    conn: &duckdb::Connection,
+    context: &AnalysisExecutionContext,
+) -> Result<QueryFilesOutput, AppError> {
+    context.check_cancelled()?;
+    crate::index::migrations::ensure_compatible_schema(conn)?;
     context.check_cancelled()?;
     let range_hashes = crate::git::commits::range_commit_hashes(&repo, &args.base, &args.head)?;
     context.check_cancelled()?;
     let touched_files = crate::index::queries::query_files_for_commits_with_context(
-        &conn,
+        conn,
         &QueryFilesFilter {
             base: args.base.clone(),
             head: args.head.clone(),

@@ -35,6 +35,24 @@ impl<'repo> AttributionContext<'repo> {
         }
 
         let conn = crate::index::connection::open_database(&db_path)?;
+        Self::open_with_range_hashes(repo, args, range_hashes, conn)
+    }
+
+    pub fn open_with_connection(
+        repo: &'repo gix::Repository,
+        args: &OverlayCommonArgs,
+        conn: duckdb::Connection,
+    ) -> Result<AttributionContext<'repo>, AppError> {
+        let range_hashes = crate::git::commits::range_commit_hashes(repo, &args.base, &args.head)?;
+        Self::open_with_range_hashes(repo, args, range_hashes, conn)
+    }
+
+    fn open_with_range_hashes(
+        repo: &'repo gix::Repository,
+        args: &OverlayCommonArgs,
+        range_hashes: Vec<String>,
+        conn: duckdb::Connection,
+    ) -> Result<AttributionContext<'repo>, AppError> {
         crate::index::migrations::ensure_compatible_schema(&conn)?;
         if !crate::index::queries::commit_exists(&conn, &args.head)? {
             return Self::without_index(

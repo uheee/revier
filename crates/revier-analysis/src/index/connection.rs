@@ -1,5 +1,31 @@
 use crate::error::AppError;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+#[derive(Default)]
+pub struct DatabaseRegistry {
+    roots: Mutex<HashMap<PathBuf, duckdb::Connection>>,
+}
+
+impl DatabaseRegistry {
+    pub fn connect(&self, path: &Path) -> Result<duckdb::Connection, AppError> {
+        let path = absolute_database_path(path)?;
+        let mut roots = self.roots.lock().expect("数据库注册表锁被污染");
+        if let Some(root) = roots.get(&path) {
+            return root
+                .try_clone()
+                .map_err(|error| AppError::DuckDb(error.to_string()));
+        }
+
+        let root = open_database(&path)?;
+        let connection = root
+            .try_clone()
+            .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        roots.insert(path, root);
+        Ok(connection)
+    }
+}
 
 pub fn open_database(path: &Path) -> Result<duckdb::Connection, AppError> {
     if let Some(parent) = path.parent() {
@@ -14,6 +40,15 @@ pub fn default_database_path(repo_id: &str) -> Result<PathBuf, AppError> {
         .join("revier")
         .join("indexes")
         .join(format!("{repo_id}.duckdb")))
+}
+
+fn absolute_database_path(path: &Path) -> Result<PathBuf, AppError> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    std::env::current_dir()
+        .map(|current_dir| current_dir.join(path))
+        .map_err(|error| AppError::DuckDb(error.to_string()))
 }
 
 fn default_app_data_dir() -> Result<PathBuf, AppError> {

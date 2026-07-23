@@ -26,6 +26,7 @@ use revier_analysis::error::AppError as AnalysisAppError;
 use revier_analysis::execution::{
     AnalysisExecutionContext, OperationProgressReporter, OperationProgressUpdate,
 };
+use revier_analysis::index::connection::DatabaseRegistry;
 use revier_analysis::json::{
     AttributionWarningOutput, AuthorOutput, BlockAttributionOutput, ChangedFileOutput,
     DiffBlockOutput, RelatedCommitAttributionOutput, RelatedCommitOutput, SideBySideDiffRowOutput,
@@ -38,6 +39,7 @@ use crate::services::projects::ProjectService;
 
 #[derive(Default)]
 pub struct ReviewService {
+    database_registry: Arc<DatabaseRegistry>,
     tasks: Arc<Mutex<HashMap<TaskId, AnalysisTaskSnapshot>>>,
     filters_by_task: Mutex<HashMap<TaskId, ReviewFilters>>,
     files_by_task: Mutex<HashMap<TaskId, Vec<ChangedFile>>>,
@@ -348,7 +350,9 @@ impl ReviewService {
         let project = projects.get_project(project_id)?;
         let (repo_id, current_head, db_path) = branch_cache_location(&project, branch)?;
         let (cache_state, cached_head) = if db_path.exists() {
-            let conn = revier_analysis::index::connection::open_database(&db_path)
+            let conn = self
+                .database_registry
+                .connect(&db_path)
                 .map_err(map_analysis_error)?;
             revier_analysis::index::migrations::ensure_compatible_schema(&conn)
                 .map_err(map_analysis_error)?;
@@ -399,7 +403,9 @@ impl ReviewService {
                 started.elapsed().as_millis() as u64,
             ));
         }
-        let conn = revier_analysis::index::connection::open_database(&db_path)
+        let conn = self
+            .database_registry
+            .connect(&db_path)
             .map_err(map_analysis_error)?;
         revier_analysis::index::migrations::ensure_compatible_schema(&conn)
             .map_err(map_analysis_error)?;
@@ -502,7 +508,9 @@ impl ReviewService {
                 format!("分支缓存不存在：{branch}"),
             ));
         }
-        let conn = revier_analysis::index::connection::open_database(&db_path)
+        let conn = self
+            .database_registry
+            .connect(&db_path)
             .map_err(map_analysis_error)?;
         revier_analysis::index::migrations::ensure_compatible_schema(&conn)
             .map_err(map_analysis_error)?;
@@ -793,6 +801,7 @@ impl ReviewService {
             &context,
             &request.file_path,
             request.encoding.unwrap_or(TextEncoding::Auto),
+            &self.database_registry,
         )?;
 
         Ok(FileOverlay {
@@ -823,6 +832,7 @@ impl ReviewService {
             &context,
             &request.file_path,
             resolved_encoding_as_requested(request.resolved_encoding),
+            &self.database_registry,
         )?;
         let content_elapsed_ms = content_started.elapsed().as_millis() as u64;
         if document.resolved_encoding != request.resolved_encoding {
@@ -836,7 +846,7 @@ impl ReviewService {
             ));
         }
 
-        let (_, conn) = cache_connection_for_context(&context)?;
+        let (_, conn) = cache_connection_for_context(&context, &self.database_registry)?;
         if matches!(request.cache_mode, CacheMode::PreferCache) {
             if let Some(cached) = revier_analysis::cache::repository::load_file_analysis(
                 &conn,
@@ -868,11 +878,15 @@ impl ReviewService {
             &context.project.repo_path,
         ))
         .map_err(map_analysis_error)?;
-        let attribution_context = revier_analysis::attribution::context::AttributionContext::open(
-            &repo,
-            &overlay_common_args(&context),
-        )
-        .map_err(map_analysis_error)?;
+        let (_, attribution_connection) =
+            cache_connection_for_context(&context, &self.database_registry)?;
+        let attribution_context =
+            revier_analysis::attribution::context::AttributionContext::open_with_connection(
+                &repo,
+                &overlay_common_args(&context),
+                attribution_connection,
+            )
+            .map_err(map_analysis_error)?;
         let mut warnings = document.warnings;
         for warning in attribution_context.warnings.iter() {
             append_app_warning(&mut warnings, warning);
@@ -939,7 +953,7 @@ impl ReviewService {
             attribution_started.elapsed().as_millis() as u64,
             &blocks,
         )?;
-        let (_, conn) = cache_connection_for_context(&context)?;
+        let (_, conn) = cache_connection_for_context(&context, &self.database_registry)?;
         revier_analysis::cache::repository::replace_file_analysis(&conn, &cached)
             .map_err(map_analysis_error)?;
         Ok(AttributeBlocksResult {
@@ -975,7 +989,7 @@ impl ReviewService {
             .contains_key(&request.task_id);
         let mut file_analysis = None;
         if cacheable_task {
-            let (repo_id, conn) = cache_connection_for_context(&context)?;
+            let (repo_id, conn) = cache_connection_for_context(&context, &self.database_registry)?;
             let analysis_file = revier_analysis::cache::repository::load_branch_analysis_file(
                 &conn,
                 &repo_id,
@@ -1174,7 +1188,7 @@ impl ReviewService {
                 completed_at: Utc::now().to_rfc3339(),
                 blocks: cached_blocks,
             };
-            let (_, conn) = cache_connection_for_context(&context)?;
+            let (_, conn) = cache_connection_for_context(&context, &self.database_registry)?;
             revier_analysis::cache::repository::replace_commit_overlay(&conn, &cached)
                 .map_err(map_analysis_error)?;
         }
@@ -1226,11 +1240,22 @@ impl ReviewService {
 
         self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::LoadChangedFiles, "准备仓库索引");
-        ensure_analysis_index(&repo_path, &range.branch, &context).map_err(map_analysis_error)?;
+        ensure_analysis_index(&repo_path, &range.branch, &context, &self.database_registry)
+            .map_err(map_analysis_error)?;
 
         self.ensure_not_cancelled(task_id)?;
         self.mark_running(task_id, AnalysisStage::LoadChangedFiles, "读取变更文件");
-        let output = revier_analysis::api::query_files_with_context(
+        let repo = revier_analysis::git::repository::open_repository(&repo_path)
+            .map_err(map_analysis_error)?;
+        let identity = revier_analysis::git::repository::repository_identity(&repo)
+            .map_err(map_analysis_error)?;
+        let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
+            .map_err(map_analysis_error)?;
+        let conn = self
+            .database_registry
+            .connect(&db_path)
+            .map_err(map_analysis_error)?;
+        let output = revier_analysis::api::query_files_with_connection(
             QueryFilesRequest {
                 repo: repo_path.clone(),
                 db: None,
@@ -1244,15 +1269,12 @@ impl ReviewService {
                 until: range.end_at.clone(),
                 globs: filters.glob_rules.clone(),
             },
+            &conn,
             &context,
         )
         .map_err(map_analysis_error)?;
 
         self.ensure_not_cancelled(task_id)?;
-        let repo = revier_analysis::git::repository::open_repository(&repo_path)
-            .map_err(map_analysis_error)?;
-        let identity = revier_analysis::git::repository::repository_identity(&repo)
-            .map_err(map_analysis_error)?;
         let locally_reachable =
             revier_analysis::git::commits::all_local_branch_reachable_hashes(&repo, &context)
                 .map_err(map_analysis_error)?;
@@ -1299,10 +1321,6 @@ impl ReviewService {
             globs: filters.glob_rules.clone(),
             files: cache_files,
         };
-        let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
-            .map_err(map_analysis_error)?;
-        let conn = revier_analysis::index::connection::open_database(&db_path)
-            .map_err(map_analysis_error)?;
         self.ensure_not_cancelled(task_id)?;
         context.check_cancelled().map_err(map_analysis_error)?;
         revier_analysis::index::writer::checkpoint(&conn).map_err(map_analysis_error)?;
@@ -1490,11 +1508,13 @@ fn ensure_analysis_index(
     repo_path: &Path,
     branch: &str,
     context: &AnalysisExecutionContext,
+    database_registry: &DatabaseRegistry,
 ) -> Result<(), AnalysisAppError> {
     let repo = revier_analysis::git::repository::open_repository(repo_path)?;
     let identity = revier_analysis::git::repository::repository_identity(&repo)?;
     let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)?;
-    revier_analysis::commands::index_build::run_with_context(
+    let connection = database_registry.connect(&db_path)?;
+    revier_analysis::commands::index_build::run_with_connection(
         IndexBuildArgs {
             common: IndexCommonArgs {
                 repo: repo_path.to_path_buf(),
@@ -1504,6 +1524,7 @@ fn ensure_analysis_index(
             },
             branch: branch.to_string(),
         },
+        &connection,
         context,
     )?;
     Ok(())
@@ -1600,6 +1621,7 @@ struct OverlayDocument {
 
 fn cache_connection_for_context(
     context: &ReviewTaskContext,
+    database_registry: &DatabaseRegistry,
 ) -> CommandResult<(String, duckdb::Connection)> {
     let repo =
         revier_analysis::git::repository::open_repository(Path::new(&context.project.repo_path))
@@ -1608,8 +1630,9 @@ fn cache_connection_for_context(
         revier_analysis::git::repository::repository_identity(&repo).map_err(map_analysis_error)?;
     let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
         .map_err(map_analysis_error)?;
-    let conn =
-        revier_analysis::index::connection::open_database(&db_path).map_err(map_analysis_error)?;
+    let conn = database_registry
+        .connect(&db_path)
+        .map_err(map_analysis_error)?;
     revier_analysis::index::migrations::ensure_compatible_schema(&conn)
         .map_err(map_analysis_error)?;
     Ok((identity.repo_id, conn))
@@ -1619,6 +1642,7 @@ fn load_range_overlay_document(
     context: &ReviewTaskContext,
     file_path: &str,
     requested_encoding: TextEncoding,
+    database_registry: &DatabaseRegistry,
 ) -> CommandResult<OverlayDocument> {
     let repo =
         revier_analysis::git::repository::open_repository(Path::new(&context.project.repo_path))
@@ -1627,8 +1651,9 @@ fn load_range_overlay_document(
         revier_analysis::git::repository::repository_identity(&repo).map_err(map_analysis_error)?;
     let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
         .map_err(map_analysis_error)?;
-    let conn =
-        revier_analysis::index::connection::open_database(&db_path).map_err(map_analysis_error)?;
+    let conn = database_registry
+        .connect(&db_path)
+        .map_err(map_analysis_error)?;
     revier_analysis::index::migrations::ensure_compatible_schema(&conn)
         .map_err(map_analysis_error)?;
     let (analysis_id, cached_file) = revier_analysis::cache::repository::load_branch_analysis_file(
@@ -3440,7 +3465,8 @@ mod tests {
             .start_analysis(&projects, review_filters(project.id))
             .expect("执行项目分析失败");
 
-        let snapshot = load_cached_snapshot(fixture.path()).expect("成功分析应发布分支快照");
+        let snapshot =
+            load_cached_snapshot(&service, fixture.path()).expect("成功分析应发布分支快照");
         assert_eq!(snapshot.branch, "main");
         assert_eq!(snapshot.files.len(), 1);
         assert!(snapshot.files[0].old_blob_id.is_some());
@@ -3466,6 +3492,7 @@ mod tests {
         writer
             .set_branch_selected_file(&projects, &project.id, "main", Some("src/app.txt"))
             .expect("保存选中文件失败");
+        drop(writer);
 
         let restored_service = ReviewService::default();
         let restored = restored_service
@@ -3579,7 +3606,7 @@ mod tests {
         service
             .start_analysis(&projects, filters.clone())
             .expect("首次分析失败");
-        let original_id = load_cached_snapshot(fixture.path())
+        let original_id = load_cached_snapshot(&service, fixture.path())
             .expect("首次快照应存在")
             .analysis_id;
 
@@ -3588,7 +3615,7 @@ mod tests {
         invalid.end_at = Some("2026-06-01T00:00:00Z".to_string());
         assert!(service.start_analysis(&projects, invalid).is_err());
         assert_eq!(
-            load_cached_snapshot(fixture.path())
+            load_cached_snapshot(&service, fixture.path())
                 .expect("失败后旧快照应保留")
                 .analysis_id,
             original_id
@@ -3604,7 +3631,7 @@ mod tests {
             .execute_analysis_task(&projects, &task.task_id, filters)
             .expect("取消任务应返回任务状态");
         assert_eq!(
-            load_cached_snapshot(fixture.path())
+            load_cached_snapshot(&service, fixture.path())
                 .expect("取消后旧快照应保留")
                 .analysis_id,
             original_id
@@ -3629,7 +3656,7 @@ mod tests {
         service
             .start_analysis(&projects, filters.clone())
             .expect("首次项目分析失败");
-        let initial = load_cached_snapshot(fixture.path()).expect("首次快照应存在");
+        let initial = load_cached_snapshot(&service, fixture.path()).expect("首次快照应存在");
         write_file(fixture.path(), "src/app.txt", "one\ntwo\nthree\n");
         git_commit_with_author(
             fixture.path(),
@@ -3641,7 +3668,7 @@ mod tests {
         service
             .start_analysis(&projects, filters)
             .expect("增量项目分析失败");
-        let incremental = load_cached_snapshot(fixture.path()).expect("增量快照应存在");
+        let incremental = load_cached_snapshot(&service, fixture.path()).expect("增量快照应存在");
 
         eprintln!(
             "首次项目分析={}ms，增量项目刷新={}ms",
@@ -3899,6 +3926,7 @@ mod tests {
             &service
                 .context_for_task(&task.task_id)
                 .expect("读取任务上下文失败"),
+            &service.database_registry,
         )
         .expect("打开缓存失败");
         let count: i64 = conn
@@ -3948,6 +3976,7 @@ mod tests {
             &service
                 .context_for_task(&task.task_id)
                 .expect("读取任务上下文失败"),
+            &service.database_registry,
         )
         .expect("打开缓存失败");
         let count: i64 = conn
@@ -4630,6 +4659,7 @@ mod tests {
     }
 
     fn load_cached_snapshot(
+        service: &ReviewService,
         repo_path: &Path,
     ) -> Option<revier_analysis::cache::models::CachedAnalysisSnapshot> {
         let repo =
@@ -4638,8 +4668,10 @@ mod tests {
             revier_analysis::git::repository::repository_identity(&repo).expect("读取仓库标识失败");
         let db_path = revier_analysis::index::connection::default_database_path(&identity.repo_id)
             .expect("生成默认索引路径失败");
-        let conn =
-            revier_analysis::index::connection::open_database(&db_path).expect("打开测试索引失败");
+        let conn = service
+            .database_registry
+            .connect(&db_path)
+            .expect("打开测试索引失败");
         revier_analysis::cache::repository::load_branch_snapshot(&conn, &identity.repo_id, "main")
             .expect("读取分支快照失败")
     }
