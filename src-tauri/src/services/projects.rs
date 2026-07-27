@@ -1,7 +1,9 @@
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use atomic_write_file::AtomicWriteFile;
 use revier_analysis::contracts::{
     GitBranch, ProjectPreferences, RepositoryValidation, ReviewProject,
 };
@@ -169,9 +171,31 @@ impl ProjectService {
         }
         let content = serde_json::to_string_pretty(store)
             .map_err(|error| command_error("PROJECT_STORE_SERIALIZE_FAILED", error.to_string()))?;
-        fs::write(&self.file_path, format!("{content}\n"))
-            .map_err(|error| command_error("PROJECT_STORE_WRITE_FAILED", error.to_string()))
+        write_store_content(
+            &self.file_path,
+            format!("{content}\n").as_bytes(),
+            |path| AtomicWriteFile::open(path),
+            |file| file.commit(),
+        )
     }
+}
+
+fn write_store_content<W, Open, Commit>(
+    file_path: &Path,
+    content: &[u8],
+    open: Open,
+    commit: Commit,
+) -> CommandResult<()>
+where
+    W: Write,
+    Open: FnOnce(&Path) -> io::Result<W>,
+    Commit: FnOnce(W) -> io::Result<()>,
+{
+    let mut file = open(file_path)
+        .map_err(|error| command_error("PROJECT_STORE_WRITE_FAILED", error.to_string()))?;
+    file.write_all(content)
+        .map_err(|error| command_error("PROJECT_STORE_WRITE_FAILED", error.to_string()))?;
+    commit(file).map_err(|error| command_error("PROJECT_STORE_WRITE_FAILED", error.to_string()))
 }
 
 #[allow(dead_code)]
@@ -238,7 +262,7 @@ mod tests {
     fn adds_and_lists_projects() {
         let dir = tempdir().expect("创建临时目录失败");
         let store_path = dir.path().join("projects.json");
-        let service = ProjectService::new(store_path);
+        let service = ProjectService::new(store_path.clone());
 
         let project = service
             .add_project("E:/repo/example", Some("Example".to_string()))
@@ -249,15 +273,28 @@ mod tests {
         assert_eq!(projects[0].id, project.id);
         assert_eq!(projects[0].name, "Example");
         assert_eq!(projects[0].repo_path, "E:/repo/example");
+
+        let content = std::fs::read_to_string(&store_path).expect("读取项目存储文件失败");
+        assert!(content.ends_with('\n'));
+
+        let restored = ProjectService::new(store_path)
+            .list_projects()
+            .expect("重新创建服务后读取项目失败");
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].id, project.id);
     }
 
     #[test]
     fn updates_and_removes_projects() {
         let dir = tempdir().expect("创建临时目录失败");
-        let service = ProjectService::new(dir.path().join("projects.json"));
+        let store_path = dir.path().join("projects.json");
+        let service = ProjectService::new(store_path.clone());
         let mut project = service
             .add_project("E:/repo/example", Some("Example".to_string()))
             .expect("添加项目失败");
+        let other = service
+            .add_project("E:/repo/other", Some("Other".to_string()))
+            .expect("添加第二个项目失败");
 
         project.name = "Updated".to_string();
         project.pinned = true;
@@ -281,6 +318,96 @@ mod tests {
                 .expect_err("删除后的项目不应存在")
                 .code
                 == "PROJECT_NOT_FOUND"
+        );
+
+        let content = std::fs::read_to_string(&store_path).expect("读取项目存储文件失败");
+        assert!(content.ends_with('\n'));
+        assert!(!content.contains(&project.id));
+        assert!(content.contains(&other.id));
+    }
+
+    #[test]
+    fn write_store_reports_parent_path_error_without_creating_store() {
+        let dir = tempdir().expect("创建临时目录失败");
+        let occupied_parent = dir.path().join("occupied");
+        std::fs::write(&occupied_parent, "not a directory").expect("写入占位文件失败");
+        let service = ProjectService::new(occupied_parent.join("projects.json"));
+
+        let error = service
+            .add_project("E:/repo/example", Some("Example".to_string()))
+            .expect_err("父路径异常时写入应失败");
+
+        assert_eq!(error.code, "PROJECT_STORE_WRITE_FAILED");
+        assert_eq!(
+            std::fs::read_to_string(&occupied_parent).expect("读取占位文件失败"),
+            "not a directory"
+        );
+    }
+
+    #[test]
+    fn write_store_replaces_existing_file_and_leaves_no_temp_file_after_quick_saves() {
+        let dir = tempdir().expect("创建临时目录失败");
+        let store_path = dir.path().join("projects.json");
+        let service = ProjectService::new(store_path.clone());
+
+        let first = service
+            .add_project("E:/repo/first", Some("First".to_string()))
+            .expect("添加第一个项目失败");
+        service
+            .add_project("E:/repo/second", Some("Second".to_string()))
+            .expect("添加第二个项目失败");
+        service.remove_project(&first.id).expect("删除项目失败");
+
+        let content = std::fs::read_to_string(&store_path).expect("读取项目存储文件失败");
+        assert!(!content.contains(&first.id));
+        assert!(content.ends_with('\n'));
+
+        let entries = std::fs::read_dir(dir.path())
+            .expect("读取临时目录失败")
+            .map(|entry| entry.expect("读取目录项失败").file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(entries, vec![std::ffi::OsString::from("projects.json")]);
+    }
+
+    #[test]
+    fn write_store_content_keeps_old_file_when_write_fails() {
+        let dir = tempdir().expect("创建临时目录失败");
+        let store_path = dir.path().join("projects.json");
+        std::fs::write(&store_path, "old\n").expect("写入旧项目存储失败");
+
+        let error = write_store_content(&store_path, b"new\n", |_| Ok(FailingWriter), |_| Ok(()))
+            .expect_err("写入失败应返回错误");
+
+        assert_eq!(error.code, "PROJECT_STORE_WRITE_FAILED");
+        assert_eq!(
+            std::fs::read_to_string(&store_path).expect("读取旧项目存储失败"),
+            "old\n"
+        );
+    }
+
+    #[test]
+    fn write_store_content_keeps_old_file_when_commit_fails() {
+        let dir = tempdir().expect("创建临时目录失败");
+        let store_path = dir.path().join("projects.json");
+        std::fs::write(&store_path, "old\n").expect("写入旧项目存储失败");
+
+        let error = write_store_content::<Vec<u8>, _, _>(
+            &store_path,
+            b"new\n",
+            |_| Ok(Vec::new()),
+            |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "commit failed",
+                ))
+            },
+        )
+        .expect_err("提交失败应返回错误");
+
+        assert_eq!(error.code, "PROJECT_STORE_WRITE_FAILED");
+        assert_eq!(
+            std::fs::read_to_string(&store_path).expect("读取旧项目存储失败"),
+            "old\n"
         );
     }
 
@@ -343,6 +470,21 @@ mod tests {
             std::fs::create_dir_all(parent).expect("创建父目录失败");
         }
         std::fs::write(full_path, content).expect("写入测试文件失败");
+    }
+
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "write failed",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     fn git<const N: usize>(repo_path: &Path, args: [&str; N]) {
