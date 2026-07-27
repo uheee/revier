@@ -471,6 +471,229 @@ pub fn unrelated_merge_contains_same_block_text() -> FixtureRepo {
     }
 }
 
+pub fn merge_source_followed_by_unrelated_commit() -> FixtureRepo {
+    let repo = init_repo("merge-source-followed-by-unrelated-commit");
+    write_file(repo.path(), "src/app.txt", "base\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "src/app.txt", "base\nfeature line\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: add feature line"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "docs/notes.txt", "docs only\n");
+    git(repo.path(), ["add", "."]);
+    git(
+        repo.path(),
+        ["commit", "-m", "chore: unrelated docs change"],
+    );
+
+    git(
+        repo.path(),
+        [
+            "merge",
+            "--no-ff",
+            "feature",
+            "-m",
+            "merge: bring feature line",
+        ],
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "merge-source-followed-by-unrelated-commit",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn nested_merge_source() -> FixtureRepo {
+    let repo = init_repo("nested-merge-source");
+    write_file(repo.path(), "src/app.txt", "base\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "src/app.txt", "base\nA\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: add A line"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "docs/notes.txt", "main prep\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "chore: main prep"]);
+
+    git(repo.path(), ["checkout", "-b", "integration"]);
+    git(
+        repo.path(),
+        [
+            "merge",
+            "--no-ff",
+            "feature",
+            "-m",
+            "merge: feature into integration",
+        ],
+    );
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "docs/notes.txt", "final prep\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "chore: final prep"]);
+
+    git(
+        repo.path(),
+        [
+            "merge",
+            "--no-ff",
+            "integration",
+            "-m",
+            "merge: integrate feature",
+        ],
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "nested-merge-source",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn merge_only_differs_from_second_parent() -> FixtureRepo {
+    let repo = init_repo("merge-only-second-parent-diff");
+    write_file(repo.path(), "src/app.txt", "base\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "src/app.txt", "base\nfeature line\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: add feature line"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "docs/notes.txt", "main prep\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "chore: main prep"]);
+
+    git(
+        repo.path(),
+        [
+            "merge",
+            "--no-ff",
+            "feature",
+            "-m",
+            "merge: second parent only change",
+        ],
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "merge-only-second-parent-diff",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn ambiguous_nested_merge_sources() -> FixtureRepo {
+    let repo = init_repo("ambiguous-nested-merge-sources");
+    write_file(repo.path(), "src/app.txt", "base\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["checkout", "-b", "left"]);
+    write_file(repo.path(), "src/app.txt", "base\nshared\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: left path"]);
+    let left = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["checkout", "main"]);
+    git(repo.path(), ["checkout", "-b", "right", "main"]);
+    write_file(repo.path(), "src/app.txt", "base\nshared\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: right path"]);
+    let right = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "docs/notes.txt", "main keep\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "chore: main prep"]);
+
+    git(repo.path(), ["checkout", "-b", "integration", &base]);
+    let m1 = git_commit_tree(
+        repo.path(),
+        &rev_parse(repo.path(), &format!("{}^{{tree}}", right)),
+        [left.as_str(), right.as_str()],
+        "merge: ambiguous nested sources",
+    );
+    git(repo.path(), ["reset", "--hard", &m1]);
+
+    git(repo.path(), ["checkout", "main"]);
+    git(
+        repo.path(),
+        [
+            "merge",
+            "--no-ff",
+            "integration",
+            "-m",
+            "merge: lift ambiguous merge",
+        ],
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "ambiguous-nested-merge-sources",
+        repo,
+        base,
+        head,
+    }
+}
+
+pub fn merge_deletion_source_followed_by_unrelated_commit() -> FixtureRepo {
+    let repo = init_repo("merge-deletion-source-followed-by-unrelated-commit");
+    write_file(repo.path(), "src/app.txt", "keep\ndelete me\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "feat: base"]);
+    let base = rev_parse(repo.path(), "HEAD");
+
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "src/app.txt", "keep\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "fix: delete line"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "docs/notes.txt", "docs keep\n");
+    git(repo.path(), ["add", "."]);
+    git(repo.path(), ["commit", "-m", "chore: unrelated docs"]);
+
+    git(
+        repo.path(),
+        [
+            "merge",
+            "--no-ff",
+            "feature",
+            "-m",
+            "merge: delete from feature",
+        ],
+    );
+    let head = rev_parse(repo.path(), "HEAD");
+
+    FixtureRepo {
+        name: "merge-deletion-source-followed-by-unrelated-commit",
+        repo,
+        base,
+        head,
+    }
+}
+
 pub fn rename_merge() -> FixtureRepo {
     let repo = init_repo("rename-merge");
     write_file(repo.path(), "src/old.txt", "alpha\nbeta\n");

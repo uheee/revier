@@ -291,6 +291,148 @@ fn unrelated_later_merge_does_not_pollute_merge_trace() {
 }
 
 #[test]
+fn merge_source_followed_by_unrelated_commit_keeps_real_source() {
+    let fixture = fixtures::merge_source_followed_by_unrelated_commit();
+    let value = run_file_overlay(&fixture, "src/app.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let subjects = related_subjects(block);
+    let source = related_commit_with_subject(block, "feat: add feature line");
+    let source_method = source["attribution"]["method"].as_str().expect("归因方法");
+
+    assert!(
+        subjects.contains(&"feat: add feature line"),
+        "应保留真实来源提交，实际为 {subjects:?}"
+    );
+    assert!(
+        !subjects.contains(&"chore: unrelated docs change"),
+        "不应保留与目标块无关的提交，实际为 {subjects:?}"
+    );
+    assert!(
+        source_method == "merge-trace" || source_method == "blame",
+        "真实来源应可归因到真实提交，实际为 {source_method}"
+    );
+}
+
+#[test]
+fn nested_merge_source_tracks_real_source_and_chain() {
+    let fixture = fixtures::nested_merge_source();
+    let value = run_file_overlay(&fixture, "src/app.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let subjects = related_subjects(block);
+    let source = related_commit_with_subject(block, "feat: add A line");
+    let via_hashes = source["attribution"]["viaMergeHashes"]
+        .as_array()
+        .expect("viaMergeHashes 数组")
+        .iter()
+        .filter_map(|item| item.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(
+        subjects.contains(&"feat: add A line"),
+        "应最终归因到原始来源提交，实际为 {subjects:?}"
+    );
+    assert!(
+        !subjects.contains(&"merge: feature into integration"),
+        "链路 merge 提交不应作为最终来源，实际为 {subjects:?}"
+    );
+    assert!(
+        !subjects.contains(&"merge: integrate feature"),
+        "链路 merge 提交不应作为最终来源，实际为 {subjects:?}"
+    );
+    assert_eq!(
+        via_hashes.len(),
+        2,
+        "多层 merge 的 viaMergeHashes 应保留完整链路，实际为 {via_hashes:?}"
+    );
+}
+
+#[test]
+fn merge_only_second_parent_change_keeps_real_source_not_merge_commit() {
+    let fixture = fixtures::merge_only_differs_from_second_parent();
+    let value = run_file_overlay(&fixture, "src/app.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let subjects = related_subjects(block);
+    let methods = block["relatedCommits"]
+        .as_array()
+        .expect("relatedCommits 数组")
+        .iter()
+        .map(|commit| {
+            (
+                commit["subject"].as_str().expect("提交主题"),
+                commit["attribution"]["method"].as_str().expect("归因方法"),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        subjects.contains(&"feat: add feature line"),
+        "应追踪到真实修改提交，实际为 {subjects:?}"
+    );
+    assert!(
+        !subjects.contains(&"merge: second parent only change"),
+        "仅第二父有差异的 merge 不应作为来源提交，实际为 {subjects:?}"
+    );
+    assert!(
+        methods.iter().all(
+            |(subject, method)| *subject != "merge: second parent only change"
+                || *method != "merge-trace"
+        ),
+        "不应把 merge 提交作为 final 来源，实际为 {methods:?}"
+    );
+}
+
+#[test]
+fn ambiguous_nested_merge_sources_mark_partial_and_keep_branch_sources_only() {
+    let fixture = fixtures::ambiguous_nested_merge_sources();
+    let value = run_file_overlay(&fixture, "src/app.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let subjects = related_subjects(block);
+    let warnings = block["attribution"]["warnings"]
+        .as_array()
+        .expect("warnings 数组");
+
+    assert_eq!(block["attribution"]["confidence"], "partial");
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning["code"] == "MERGE_TRACE_AMBIGUOUS"),
+        "歧义 merge 应产生 MERGE_TRACE_AMBIGUOUS，实际为 {warnings:?}"
+    );
+    assert!(
+        subjects.contains(&"feat: left path") && subjects.contains(&"feat: right path"),
+        "多层歧义应保留左右真实来源，实际为 {subjects:?}"
+    );
+    assert!(
+        !subjects.contains(&"merge: ambiguous nested sources"),
+        "链路 merge 不应作为最终来源，实际为 {subjects:?}"
+    );
+}
+
+#[test]
+fn merge_deletion_source_not_polluted_by_unrelated_and_merge() {
+    let fixture = fixtures::merge_deletion_source_followed_by_unrelated_commit();
+    let value = run_file_overlay(&fixture, "src/app.txt");
+    let block = &value["overlay"]["blocks"].as_array().expect("blocks 数组")[0];
+    let subjects = related_subjects(block);
+    let related_commit = related_commit_with_subject(block, "fix: delete line");
+
+    assert_eq!(block["changeType"], "deleted");
+    assert!(
+        subjects.contains(&"fix: delete line"),
+        "应保留真正的删除来源，实际为 {subjects:?}"
+    );
+    assert_eq!(related_commit["attribution"]["method"], "deletion-trace");
+    assert!(
+        !subjects.contains(&"chore: unrelated docs"),
+        "不应包含无关提交，实际为 {subjects:?}"
+    );
+    assert!(
+        !subjects.contains(&"merge: delete from feature"),
+        "普通 merge 不应成为删除块主要来源，实际为 {subjects:?}"
+    );
+}
+
+#[test]
 fn parent_text_match_outside_block_window_does_not_explain_merge_source() {
     let fixture = fixtures::merge_adds_duplicate_text_with_parent_match_elsewhere();
     let value = run_file_overlay(&fixture, "src/app.txt");

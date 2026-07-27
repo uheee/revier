@@ -41,6 +41,15 @@ pub fn path_candidates(
     })
 }
 
+pub fn parent_path_candidates(
+    context: &AttributionContext<'_>,
+    parent: &str,
+    child: &str,
+    path: &str,
+) -> Result<PathCandidates, AppError> {
+    path_candidates(context, parent, child, path, None)
+}
+
 fn push_unique(paths: &mut Vec<String>, path: &str) -> bool {
     if paths.iter().any(|existing| existing == path) {
         return false;

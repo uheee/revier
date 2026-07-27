@@ -251,6 +251,9 @@ fn apply_merge_trace_to_related_commits(
         };
 
         has_ambiguous_merge_trace |= outcome.ambiguous;
+        if outcome.replaced_merge_commit {
+            related_commits.retain(|commit| commit.hash != merge_hash);
+        }
         for traced_commit in outcome.related_commits {
             merge_related_commit(&mut related_commits, traced_commit);
         }

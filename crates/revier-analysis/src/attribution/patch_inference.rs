@@ -1,5 +1,6 @@
 use crate::attribution::commit_lookup;
 use crate::attribution::context::AttributionContext;
+use crate::attribution::source_validation::SourceValidationCache;
 use crate::contracts::ResolvedTextEncoding;
 use crate::error::AppError;
 use crate::git::blob::read_text_at_commit_with_encoding;
@@ -31,12 +32,19 @@ pub fn attach_patch_inference(
     let filter = FilterMatcher::new(options.authors, options.author_query, options.message);
     let mut candidates = Vec::new();
     let mut active_paths = initial_active_paths(file_path, old_path);
+    let mut source_validation = SourceValidationCache::new();
 
     for hash in &context.range_hashes {
         let commit = commit_lookup::get_commit(context, hash)?;
         let changes = commit_file_changes(context.repo, &commit.hash)?;
-        let touched_ranges =
-            touched_ranges_for_commit(context, &commit, &changes, &active_paths, options.encoding)?;
+        let touched_ranges = touched_ranges_for_commit(
+            context,
+            &commit,
+            &changes,
+            &active_paths,
+            options.encoding,
+            &mut source_validation,
+        )?;
         advance_active_paths(&mut active_paths, &changes);
         if touched_ranges.is_empty() {
             continue;
@@ -67,6 +75,7 @@ fn touched_ranges_for_commit(
     changes: &[CommitFileChange],
     active_paths: &HashSet<String>,
     encoding: ResolvedTextEncoding,
+    source_validation: &mut SourceValidationCache,
 ) -> Result<Vec<TouchedRangeOutput>, AppError> {
     let mut touched_ranges = Vec::new();
     let mut seen = HashSet::new();
@@ -75,6 +84,12 @@ fn touched_ranges_for_commit(
         .iter()
         .filter(|change| change_touches_active_path(change, active_paths))
     {
+        if source_validation
+            .validate_first_parent_source(context, commit, &change.path)?
+            .is_none()
+        {
+            continue;
+        }
         let old_text = match old_change_path(change) {
             Some(path) => read_text_at_commit_with_encoding(
                 context.repo,

@@ -5,3 +5,4 @@ pub mod deletion_trace;
 pub mod merge_trace;
 pub mod patch_inference;
 pub mod path_history;
+pub mod source_validation;

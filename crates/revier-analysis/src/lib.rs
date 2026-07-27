@@ -14,6 +14,10 @@ pub mod overlay;
 pub mod spike;
 pub mod text_encoding;
 
+#[cfg(test)]
+#[path = "../tests/support/git_process.rs"]
+pub(crate) mod git_test_support;
+
 use clap::Parser;
 use cli::{Cli, Command, IndexSubcommand, SpikeSubcommand};
 use error::AppError;

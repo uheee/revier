@@ -1,6 +1,7 @@
 use crate::attribution::commit_lookup;
 use crate::attribution::context::AttributionContext;
 use crate::attribution::patch_inference::{AttributionOptions, FilterMatcher};
+use crate::attribution::source_validation::SourceValidationCache;
 use crate::contracts::ResolvedTextEncoding;
 use crate::error::AppError;
 use crate::git::blob::read_text_at_commit_with_encoding;
@@ -25,6 +26,7 @@ pub fn attach_deletion_trace(
     options: &AttributionOptions<'_>,
 ) -> Result<Vec<DiffBlockOutput>, AppError> {
     let filter = FilterMatcher::new(options.authors, options.author_query, options.message);
+    let mut source_validation = SourceValidationCache::new();
     let scope = DeletionTraceScope {
         candidate_paths,
         file_path,
@@ -35,7 +37,12 @@ pub fn attach_deletion_trace(
     let mut traced_blocks = Vec::new();
 
     for block in blocks {
-        traced_blocks.push(attach_block_deletion_trace(context, block, &scope)?);
+        traced_blocks.push(attach_block_deletion_trace(
+            context,
+            block,
+            &scope,
+            &mut source_validation,
+        )?);
     }
 
     Ok(traced_blocks)
@@ -45,6 +52,7 @@ fn attach_block_deletion_trace(
     context: &AttributionContext<'_>,
     mut block: DiffBlockOutput,
     scope: &DeletionTraceScope<'_>,
+    source_validation: &mut SourceValidationCache,
 ) -> Result<DiffBlockOutput, AppError> {
     if !has_old_side_deletion(&block) {
         return Ok(block);
@@ -55,7 +63,8 @@ fn attach_block_deletion_trace(
         return Ok(block);
     }
 
-    let related_commits = find_deletion_commits(context, &block, &deleted_lines, scope)?;
+    let related_commits =
+        find_deletion_commits(context, &block, &deleted_lines, scope, source_validation)?;
     if related_commits.is_empty() {
         return Ok(block);
     }
@@ -74,6 +83,7 @@ fn find_deletion_commits(
     block: &DiffBlockOutput,
     deleted_lines: &[String],
     scope: &DeletionTraceScope<'_>,
+    source_validation: &mut SourceValidationCache,
 ) -> Result<Vec<RelatedCommitOutput>, AppError> {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
@@ -94,6 +104,12 @@ fn find_deletion_commits(
             .iter()
             .filter(|change| change_touches_active_path(change, &active_paths))
         {
+            if source_validation
+                .validate_first_parent_source(context, &commit, &change.path)?
+                .is_none()
+            {
+                continue;
+            }
             let touched_ranges = deletion_touched_ranges(
                 context,
                 &commit,
