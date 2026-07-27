@@ -59,7 +59,7 @@ pub fn initialize_schema(
         );
         ",
     )
-    .map_err(|error| AppError::DuckDb(error.to_string()))?;
+    .map_err(|error| AppError::DuckDb(error))?;
     initialize_cache_schema(conn)?;
 
     let now = Utc::now().to_rfc3339();
@@ -209,7 +209,7 @@ pub(crate) fn initialize_cache_schema(conn: &duckdb::Connection) -> Result<(), A
           on commit_files (old_path, commit_hash);
         ",
     )
-    .map_err(|error| AppError::DuckDb(error.to_string()))?;
+    .map_err(|error| AppError::DuckDb(error))?;
     Ok(())
 }
 
@@ -220,9 +220,9 @@ pub fn read_schema_version(conn: &duckdb::Connection) -> Result<Option<u32>, App
 
     metadata_value(conn, "schema_version")?
         .map(|value| {
-            value
-                .parse::<u32>()
-                .map_err(|error| AppError::DuckDb(error.to_string()))
+            value.parse::<u32>().map_err(|error| {
+                AppError::SchemaIncompatible(format!("schema_version 无法解析：{error}"))
+            })
         })
         .transpose()
 }
@@ -230,13 +230,13 @@ pub fn read_schema_version(conn: &duckdb::Connection) -> Result<Option<u32>, App
 pub fn list_tables(conn: &duckdb::Connection) -> Result<Vec<String>, AppError> {
     let mut stmt = conn
         .prepare("select table_name from information_schema.tables order by table_name")
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
     let rows = stmt
         .query_map([], |row| row.get::<_, String>(0))
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
 
     rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| AppError::DuckDb(error.to_string()))
+        .map_err(|error| AppError::DuckDb(error))
 }
 
 fn metadata_table_exists(conn: &duckdb::Connection) -> Result<bool, AppError> {
@@ -245,7 +245,7 @@ fn metadata_table_exists(conn: &duckdb::Connection) -> Result<bool, AppError> {
         [],
         |row| row.get(0),
     )
-    .map_err(|error| AppError::DuckDb(error.to_string()))
+    .map_err(|error| AppError::DuckDb(error))
 }
 
 fn metadata_value(conn: &duckdb::Connection, key: &str) -> Result<Option<String>, AppError> {
@@ -260,17 +260,17 @@ fn metadata_value(conn: &duckdb::Connection, key: &str) -> Result<Option<String>
     ) {
         Ok(value) => Ok(Some(value)),
         Err(duckdb::Error::QueryReturnedNoRows) => Ok(None),
-        Err(error) => Err(AppError::DuckDb(error.to_string())),
+        Err(error) => Err(AppError::DuckDb(error)),
     }
 }
 
 fn upsert_metadata(conn: &duckdb::Connection, key: &str, value: &str) -> Result<(), AppError> {
     conn.execute("delete from metadata where key = ?", params![key])
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
     conn.execute(
         "insert into metadata (key, value) values (?, ?)",
         params![key, value],
     )
-    .map_err(|error| AppError::DuckDb(error.to_string()))?;
+    .map_err(|error| AppError::DuckDb(error))?;
     Ok(())
 }

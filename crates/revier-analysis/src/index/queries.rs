@@ -15,16 +15,16 @@ pub struct IndexStatusRecord {
 }
 
 pub fn status_record(conn: &duckdb::Connection) -> Result<IndexStatusRecord, AppError> {
-    let indexed_commit_count =
-        conn.query_row("select count(*) from commits", [], |row| {
+    let indexed_commit_count = conn
+        .query_row("select count(*) from commits", [], |row| {
             row.get::<_, i64>(0)
         })
-        .map_err(|error| AppError::DuckDb(error.to_string()))? as u64;
+        .map_err(|error| AppError::DuckDb(error))? as u64;
     let indexed_file_count = conn
         .query_row("select count(*) from commit_files", [], |row| {
             row.get::<_, i64>(0)
         })
-        .map_err(|error| AppError::DuckDb(error.to_string()))? as u64;
+        .map_err(|error| AppError::DuckDb(error))? as u64;
     let updated_at = conn
         .query_row(
             "select value from metadata where key = 'updated_at'",
@@ -46,18 +46,18 @@ pub fn commit_exists(conn: &duckdb::Connection, hash: &str) -> Result<bool, AppE
         params![hash],
         |row| row.get(0),
     )
-    .map_err(|error| AppError::DuckDb(error.to_string()))
+    .map_err(|error| AppError::DuckDb(error))
 }
 
 pub fn indexed_commit_hashes(conn: &duckdb::Connection) -> Result<HashSet<String>, AppError> {
     let mut statement = conn
         .prepare("select hash from commits")
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
     let rows = statement
         .query_map([], |row| row.get::<_, String>(0))
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
     rows.collect::<Result<HashSet<_>, _>>()
-        .map_err(|error| AppError::DuckDb(error.to_string()))
+        .map_err(|error| AppError::DuckDb(error))
 }
 
 pub fn parent_hashes(conn: &duckdb::Connection, hash: &str) -> Result<Vec<String>, AppError> {
@@ -68,13 +68,13 @@ pub fn parent_hashes(conn: &duckdb::Connection, hash: &str) -> Result<Vec<String
              where commit_hash = ?
              order by parent_index",
         )
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
     let rows = stmt
         .query_map(params![hash], |row| row.get::<_, String>(0))
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
 
     rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| AppError::DuckDb(error.to_string()))
+        .map_err(|error| AppError::DuckDb(error))
 }
 
 pub fn commit_metadata(
@@ -104,7 +104,7 @@ pub fn commit_metadata(
         match row {
             Ok(row) => row,
             Err(duckdb::Error::QueryReturnedNoRows) => return Ok(None),
-            Err(error) => return Err(AppError::DuckDb(error.to_string())),
+            Err(error) => return Err(AppError::DuckDb(error)),
         };
 
     Ok(Some(IndexedCommit {
@@ -136,7 +136,7 @@ pub fn commit_metadata_batch(
                     strftime(committed_at, '%Y-%m-%dT%H:%M:%S+00:00'), subject, is_merge
              from commits where hash in ({placeholders})"
         ))
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
     let rows = statement
         .query_map(duckdb::params_from_iter(hashes.iter()), |row| {
             Ok(IndexedCommit {
@@ -151,10 +151,10 @@ pub fn commit_metadata_batch(
                 parents: Vec::new(),
             })
         })
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
     let mut commits = HashMap::new();
     for row in rows {
-        let commit = row.map_err(|error| AppError::DuckDb(error.to_string()))?;
+        let commit = row.map_err(|error| AppError::DuckDb(error))?;
         commits.insert(commit.hash.clone(), commit);
     }
     Ok(commits)
@@ -226,7 +226,7 @@ fn query_files_internal(
                  where commit_hash = ?
                  order by path",
             )
-            .map_err(|error| AppError::DuckDb(error.to_string()))?;
+            .map_err(|error| AppError::DuckDb(error))?;
         let rows = stmt
             .query_map([commit_hash], |row| {
                 let old_path: String = row.get(1)?;
@@ -242,11 +242,11 @@ fn query_files_internal(
                     is_previewable: row.get(6)?,
                 })
             })
-            .map_err(|error| AppError::DuckDb(error.to_string()))?;
+            .map_err(|error| AppError::DuckDb(error))?;
 
         for file in rows {
             context.check_cancelled()?;
-            let file = file.map_err(|error| AppError::DuckDb(error.to_string()))?;
+            let file = file.map_err(|error| AppError::DuckDb(error))?;
             if path_matches(&matcher, &file.path, file.old_path.as_deref()) {
                 files.push(file);
             }
@@ -275,7 +275,7 @@ fn ensure_range_indexed(conn: &duckdb::Connection, base: &str, head: &str) -> Re
             [head],
             |row| row.get(0),
         )
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
     if indexed_head == 0 {
         return Err(AppError::IndexUnavailable(format!(
             "查询范围 head {head} 未被索引，请先执行 index build"
@@ -288,7 +288,7 @@ fn ensure_range_indexed(conn: &duckdb::Connection, base: &str, head: &str) -> Re
             [base],
             |row| row.get(0),
         )
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
     if indexed_base == 0 {
         return Err(AppError::IndexUnavailable(format!(
             "查询范围 base {base} 未被索引，请先执行 index build"
@@ -308,7 +308,7 @@ fn matching_commits(
             "select hash, author_key, author_name, coalesce(author_email, ''), subject, strftime(committed_at, '%Y-%m-%dT%H:%M:%S+00:00')
              from commits",
         )
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
@@ -320,7 +320,7 @@ fn matching_commits(
                 row.get::<_, String>(5)?,
             ))
         })
-        .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        .map_err(|error| AppError::DuckDb(error))?;
 
     let normalized_authors = filter
         .authors
@@ -337,7 +337,7 @@ fn matching_commits(
     for row in rows {
         context.check_cancelled()?;
         let (hash, author_key, author_name, author_email, subject, committed_at) =
-            row.map_err(|error| AppError::DuckDb(error.to_string()))?;
+            row.map_err(|error| AppError::DuckDb(error))?;
         let committed_at = parse_filter_time(&committed_at, "committed_at")?;
         if !normalized_authors.is_empty() && !normalized_authors.contains(&author_key) {
             continue;

@@ -215,6 +215,26 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn analysis_error_mapping_keeps_stable_codes_for_source_errors() {
+        let duckdb = map_analysis_error(AnalysisAppError::DuckDb(
+            duckdb::Error::InvalidParameterName("missing".into()),
+        ));
+        assert_eq!(duckdb.code, "DUCKDB_ERROR");
+        assert_eq!(duckdb.message, "分析库调用失败");
+
+        let json_error =
+            serde_json::from_str::<serde_json::Value>("{").expect_err("无效 JSON 应失败");
+        let json = map_analysis_error(AnalysisAppError::Json(json_error));
+        assert_eq!(json.code, "JSON_ERROR");
+
+        let io = map_analysis_error(AnalysisAppError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "missing",
+        )));
+        assert_eq!(io.code, "IO_ERROR");
+    }
+
+    #[test]
     fn adds_and_lists_projects() {
         let dir = tempdir().expect("创建临时目录失败");
         let store_path = dir.path().join("projects.json");

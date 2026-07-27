@@ -13,15 +13,11 @@ impl DatabaseRegistry {
         let path = absolute_database_path(path)?;
         let mut roots = self.roots.lock().expect("数据库注册表锁被污染");
         if let Some(root) = roots.get(&path) {
-            return root
-                .try_clone()
-                .map_err(|error| AppError::DuckDb(error.to_string()));
+            return root.try_clone().map_err(|error| AppError::DuckDb(error));
         }
 
         let root = open_database(&path)?;
-        let connection = root
-            .try_clone()
-            .map_err(|error| AppError::DuckDb(error.to_string()))?;
+        let connection = root.try_clone().map_err(|error| AppError::DuckDb(error))?;
         roots.insert(path, root);
         Ok(connection)
     }
@@ -29,9 +25,9 @@ impl DatabaseRegistry {
 
 pub fn open_database(path: &Path) -> Result<duckdb::Connection, AppError> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| AppError::DuckDb(error.to_string()))?;
+        std::fs::create_dir_all(parent).map_err(AppError::Io)?;
     }
-    duckdb::Connection::open(path).map_err(|error| AppError::DuckDb(error.to_string()))
+    duckdb::Connection::open(path).map_err(|error| AppError::DuckDb(error))
 }
 
 pub fn default_database_path(repo_id: &str) -> Result<PathBuf, AppError> {
@@ -48,7 +44,7 @@ fn absolute_database_path(path: &Path) -> Result<PathBuf, AppError> {
     }
     std::env::current_dir()
         .map(|current_dir| current_dir.join(path))
-        .map_err(|error| AppError::DuckDb(error.to_string()))
+        .map_err(AppError::Io)
 }
 
 fn default_app_data_dir() -> Result<PathBuf, AppError> {

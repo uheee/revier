@@ -123,7 +123,7 @@ pub fn load_branch_snapshot(
     ) {
         Ok(snapshot) => snapshot,
         Err(DuckDbError::QueryReturnedNoRows) => return Ok(None),
-        Err(error) => return Err(AppError::DuckDb(error.to_string())),
+        Err(error) => return Err(AppError::DuckDb(error)),
     };
 
     let mut snapshot = snapshot;
@@ -933,5 +933,5 @@ fn optional_i64(value: Option<u64>, field: &str) -> Result<Option<i64>, AppError
 }
 
 fn duckdb_error(error: DuckDbError) -> AppError {
-    AppError::DuckDb(error.to_string())
+    AppError::DuckDb(error)
 }

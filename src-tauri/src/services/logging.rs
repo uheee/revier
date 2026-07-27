@@ -8,9 +8,7 @@ use std::{
 #[cfg(not(test))]
 use tauri::Runtime;
 #[cfg(not(test))]
-use tauri_plugin_log::{
-    RotationStrategy, Target, TargetKind, TimezoneStrategy,
-};
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 const DEFAULT_LEVEL: &str = "info";
 const DEFAULT_FORMAT: &str = "[${time:yyyy-MM-ddTHH:mm:ss.ms}][${level:short}] ${content}";
@@ -32,9 +30,10 @@ pub struct LoggingService {
 impl LoggingService {
     pub fn load(path: PathBuf) -> Self {
         let result = load_logging_config(&path);
-        let warning = result.as_ref().err().map(|error| {
-            format!("日志配置 {} 无法使用：{error}", path.display())
-        });
+        let warning = result
+            .as_ref()
+            .err()
+            .map(|error| format!("日志配置 {} 无法使用：{error}", path.display()));
         Self {
             config: result.unwrap_or_default(),
             warning,
@@ -189,18 +188,13 @@ fn enabled_channels(config: &LoggingConfig) -> Vec<(LogChannel, &ChannelConfig)>
         .channels
         .iter()
         .filter_map(|(channel, channel_config)| {
-            channel_config
-                .enabled
-                .then_some((*channel, channel_config))
+            channel_config.enabled.then_some((*channel, channel_config))
         })
         .collect()
 }
 
 #[cfg(not(test))]
-fn build_target(
-    channel: LogChannel,
-    config: &ChannelConfig,
-) -> Result<Target, String> {
+fn build_target(channel: LogChannel, config: &ChannelConfig) -> Result<Target, String> {
     let level = parse_level_filter(&config.level)?;
     let format = config.format.clone();
     let target = match channel {
@@ -240,7 +234,9 @@ fn render_log_format(
     template
         .replace(
             "${time:yyyy-MM-ddTHH:mm:ss.ms}",
-            &chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string(),
+            &chrono::Local::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3f")
+                .to_string(),
         )
         .replace("${level:short}", short_level(record.level()))
         .replace("${level}", record.level().as_str())
@@ -297,10 +293,7 @@ fn write_default_logging_config(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     file.write_all(default_logging_toml().as_bytes())
 }
 
@@ -399,12 +392,16 @@ fn merge_channel_options(
     override_value: ChannelOverride,
 ) -> Result<ChannelOptions, String> {
     match (channel, current) {
-        (LogChannel::File, ChannelOptions::File { max_size, rotation_count }) => {
-            Ok(ChannelOptions::File {
-                max_size: override_value.max_size.unwrap_or(max_size),
-                rotation_count: override_value.rotation_count.unwrap_or(rotation_count),
-            })
-        }
+        (
+            LogChannel::File,
+            ChannelOptions::File {
+                max_size,
+                rotation_count,
+            },
+        ) => Ok(ChannelOptions::File {
+            max_size: override_value.max_size.unwrap_or(max_size),
+            rotation_count: override_value.rotation_count.unwrap_or(rotation_count),
+        }),
         (LogChannel::Console, ChannelOptions::Console { color }) => Ok(ChannelOptions::Console {
             color: override_value.color.unwrap_or(color),
         }),
@@ -608,7 +605,10 @@ enbale = true
 
     #[test]
     fn 支持解析常用日志级别和文件大小() {
-        assert_eq!(parse_level_filter("warning").unwrap(), log::LevelFilter::Warn);
+        assert_eq!(
+            parse_level_filter("warning").unwrap(),
+            log::LevelFilter::Warn
+        );
         assert_eq!(parse_size_bytes("5m").unwrap(), 5 * 1024 * 1024);
         assert_eq!(parse_size_bytes("12kb").unwrap(), 12 * 1024);
     }

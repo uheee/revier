@@ -271,5 +271,5 @@ fn as_i64(value: u64, field: &str) -> Result<i64, AppError> {
 }
 
 fn duckdb_error(error: duckdb::Error) -> AppError {
-    AppError::DuckDb(error.to_string())
+    AppError::DuckDb(error)
 }

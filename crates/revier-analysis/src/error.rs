@@ -24,7 +24,7 @@ pub enum AppError {
     CacheInvalid(String),
 
     #[error("DuckDB 读写失败：{0}")]
-    DuckDb(String),
+    DuckDb(#[from] duckdb::Error),
 
     #[error("gix 能力验证失败：{0}")]
     Spike(String),
@@ -40,6 +40,34 @@ pub enum AppError {
 
     #[error("文件读写失败：{0}")]
     Io(#[from] std::io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+
+    #[test]
+    fn duckdb_错误保留_source_且退出码不变() {
+        let inner = duckdb::Error::InvalidParameterName("missing".into());
+        let error = AppError::DuckDb(inner);
+
+        assert!(error.source().is_some());
+        assert_eq!(error.exit_code(), 6);
+    }
+
+    #[test]
+    fn json_和_io_错误保留_source_且退出码不变() {
+        let json_error: serde_json::Error =
+            serde_json::from_str::<serde_json::Value>("{").expect_err("无效 JSON 应失败");
+        let json_error = AppError::Json(json_error);
+        assert!(json_error.source().is_some());
+        assert_eq!(json_error.exit_code(), 10);
+
+        let io_error = AppError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "missing"));
+        assert!(io_error.source().is_some());
+        assert_eq!(io_error.exit_code(), 10);
+    }
 }
 
 impl AppError {
