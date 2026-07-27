@@ -29,5 +29,11 @@ specta-typescript = "0.0.12"
 thiserror = "2.0"
 
 [dev-dependencies]
+criterion = "0.8.2"
+imara-diff = "0.2.0"
 insta = { version = "1.42", features = ["json"] }
 tempfile = "3.10"
+
+[[bench]]
+name = "line_diff"
+harness = false
