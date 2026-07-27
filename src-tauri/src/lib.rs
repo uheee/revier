@@ -4,6 +4,7 @@ mod services;
 mod state;
 
 use services::editor_settings::EditorSettingsService;
+use services::logging::LoggingService;
 use services::projects::ProjectService;
 use services::review::ReviewService;
 use state::AppState;
@@ -15,6 +16,22 @@ pub fn run() {
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let data_dir = app.path().app_data_dir()?;
+            let logging = LoggingService::load(config_dir.join("logging.toml"));
+            if let Some(warning) = logging.warning() {
+                eprintln!("{warning}");
+            }
+            #[cfg(not(test))]
+            match logging.build_plugin() {
+                Ok(Some(plugin)) => {
+                    if let Err(error) = app.handle().plugin(plugin) {
+                        eprintln!("日志插件初始化失败：{error}");
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("日志配置无法映射到插件：{error}");
+                }
+            }
             let editor_settings = EditorSettingsService::load(config_dir.join("editor.toml"));
             let project_service = ProjectService::new(data_dir.join("projects.json"));
             let review_service = ReviewService::default();

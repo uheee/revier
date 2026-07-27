@@ -9,6 +9,7 @@ import {
   useEditorSettings
 } from './composables/useEditorSettings';
 import { addNotification } from './composables/useNotifications';
+import { initializeRendererLogger, logError } from './api/logger';
 import { initializeMonacoSyntax } from './editor/monacoEnvironment';
 
 function errorDetail(error: unknown): string {
@@ -16,12 +17,19 @@ function errorDetail(error: unknown): string {
 }
 
 async function bootstrap(): Promise<void> {
+  try {
+    await initializeRendererLogger();
+  } catch (error) {
+    logError('前端日志桥接初始化失败', error, { source: 'bootstrap' });
+  }
+
   await initializeEditorSettings();
   const { snapshot } = useEditorSettings();
 
   try {
     await initializeMonacoSyntax(snapshot.value.settings.themes);
   } catch (error) {
+    logError('Monaco 语法高亮初始化失败', error, { source: 'Shiki' });
     addNotification({
       type: 'error',
       title: 'Monaco 语法高亮初始化失败',

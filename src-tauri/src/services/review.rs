@@ -110,7 +110,7 @@ impl OperationProgressReporter for TaskProgressReporter {
     fn report(&self, update: OperationProgressUpdate) {
         #[cfg(debug_assertions)]
         if std::env::var_os("REVIER_TRACE_OPERATIONS").is_some() {
-            eprintln!(
+            log::debug!(
                 "分析进度 task={} stage={:?} completed={:?} total={:?} elapsed_ms={}",
                 self.task_id,
                 update.stage,

@@ -27,6 +27,7 @@
   "dependencies": {
     "@shikijs/monaco": "^4.3.1",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-log": "^2.9.0",
     "@vueuse/components": "^10.11.0",
     "@vueuse/core": "^10.11.0",
     "diff": "^5.2.0",

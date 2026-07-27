@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"允许主窗口订阅 Review 任务事件并打开目录选择对话框。","local":true,"windows":["main"],"permissions":["core:event:default","dialog:allow-open"]}}
+{"default":{"identifier":"default","description":"允许主窗口订阅 Review 任务事件、打开目录选择对话框并写入本地日志。","local":true,"windows":["main"],"permissions":["core:event:default","dialog:allow-open","log:default"]}}

@@ -2,6 +2,7 @@ import * as monaco from 'monaco-editor';
 import type { editor } from 'monaco-editor';
 import type { DiffBlock, EditorSettings } from '../generated/bindings';
 import { toFontFamily } from './editorTheme';
+import { logError } from '../api/logger';
 import { resolveInitializedLanguage } from './monacoEnvironment';
 import {
   diffBlocksSignature,
@@ -143,7 +144,9 @@ export function createMonacoDiffSession(
 
   const reportCleanupErrors = (errors: unknown[], message: string): void => {
     if (errors.length > 0) {
-      console.error(message, new AggregateError(errors, message));
+      logError(message, new AggregateError(errors, message), {
+        source: 'monaco-diff-session'
+      });
     }
   };
 

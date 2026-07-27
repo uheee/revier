@@ -2,6 +2,7 @@
 import { NPopover } from 'naive-ui';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { editor } from 'monaco-editor';
+import { logError } from '../../api/logger';
 import type { AuthorSummary, DiffBlock } from '../../generated/bindings';
 import {
   AUTHOR_POPOVER_MAX_HEIGHT,
@@ -83,7 +84,7 @@ function disposeListeners(): void {
     try {
       listener.dispose();
     } catch (error) {
-      console.error('AuthorRail 编辑器监听清理失败', error);
+      logError('AuthorRail 编辑器监听清理失败', error, { source: 'diff-author-rail' });
     }
   }
 }

@@ -19,4 +19,13 @@ describe('Tauri capabilities', () => {
     expect(capability.windows).toContain('main');
     expect(capability.permissions).toContain('dialog:allow-open');
   });
+
+  it('主窗口具备日志权限', () => {
+    const capability = JSON.parse(
+      readFileSync(resolve(process.cwd(), 'src-tauri/capabilities/default.json'), 'utf8')
+    );
+
+    expect(capability.windows).toContain('main');
+    expect(capability.permissions).toContain('log:default');
+  });
 });
