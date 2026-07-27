@@ -1,23 +1,49 @@
 <script setup lang="ts">
 import { FolderOpen } from 'lucide-vue-next';
 import { storeToRefs } from 'pinia';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { toErrorMessage } from '../api/errors';
 import ProjectEditor from '../components/projects/ProjectEditor.vue';
 import ProjectList from '../components/projects/ProjectList.vue';
 import NotificationCenter from '../components/NotificationCenter.vue';
+import { useProjectListQuery } from '../queries/projectQueries';
 import { useProjectStore } from '../stores/projectStore';
 
 const router = useRouter();
 const projectStore = useProjectStore();
-const { projects, loading, error } = storeToRefs(projectStore);
+const { projects: storedProjects } = storeToRefs(projectStore);
+const projectListQuery = useProjectListQuery();
+const projects = computed(() => projectListQuery.data.value ?? storedProjects.value);
+const loading = computed(() => projectListQuery.isLoading.value || projectStore.loading);
+const error = computed(() =>
+  projectStore.error
+  ?? (projectListQuery.error.value ? toErrorMessage(projectListQuery.error.value) : undefined)
+);
 const projectDialogVisible = ref(false);
 const projectOpenError = ref<string>();
 const dialogError = computed(() => projectOpenError.value ?? projectStore.error);
 
 onMounted(() => {
-  void projectStore.loadProjects();
+  void refreshProjects();
 });
+
+watch(
+  () => projectListQuery.data.value,
+  (projects) => {
+    if (projects) {
+      projectStore.projects = projects;
+    }
+  },
+  { immediate: true }
+);
+
+async function refreshProjects(): Promise<void> {
+  const state = await projectListQuery.refetch();
+  if (state.status === 'success') {
+    projectStore.projects = state.data;
+  }
+}
 
 function openProjectDialog(): void {
   projectOpenError.value = undefined;
@@ -31,8 +57,10 @@ async function addProjectAndOpen(payload: { repoPath: string; name?: string }): 
   if (projectStore.error) {
     return;
   }
+  await projectListQuery.invalidate();
+  await refreshProjects();
 
-  const project = projects.value.find(
+  const project = projectStore.projects.find(
     (candidate) => normalizeRepoPath(candidate.repoPath) === normalizeRepoPath(payload.repoPath)
   );
   if (!project) {
@@ -44,8 +72,12 @@ async function addProjectAndOpen(payload: { repoPath: string; name?: string }): 
   await router.push({ name: 'review', params: { projectId: project.id } });
 }
 
-function removeProject(projectId: string): void {
-  void projectStore.removeProject(projectId);
+async function removeProject(projectId: string): Promise<void> {
+  await projectStore.removeProject(projectId);
+  if (!projectStore.error) {
+    await projectListQuery.invalidate();
+    await refreshProjects();
+  }
 }
 
 function openProject(projectId: string): void {
@@ -66,7 +98,7 @@ function normalizeRepoPath(repoPath: string): string {
       </div>
       <div class="project-topbar__actions">
         <NotificationCenter />
-        <n-button :loading="loading" @click="projectStore.loadProjects()">刷新</n-button>
+        <n-button :loading="loading" @click="refreshProjects()">刷新</n-button>
         <n-button
           data-test="open-project-dialog"
           type="primary"

@@ -28,9 +28,19 @@ vi.mock('vue-router', () => ({
 vi.mock('../../src/renderer/stores/projectStore', () => ({
   useProjectStore: () => ({
     error: undefined,
+    projects: harness.projects.value,
     loadProjects: harness.loadProjects,
     addProject: vi.fn(),
     removeProject: vi.fn()
+  })
+}));
+vi.mock('../../src/renderer/queries/projectQueries', () => ({
+  useProjectListQuery: () => ({
+    data: harness.projects,
+    error: { __v_isRef: true, value: null },
+    isLoading: harness.loading,
+    refetch: vi.fn(async () => ({ status: 'success', data: harness.projects.value })),
+    invalidate: vi.fn()
   })
 }));
 

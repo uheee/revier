@@ -3,6 +3,7 @@ import naive from 'naive-ui';
 import App from './App.vue';
 import router from './router';
 import { createPinia } from 'pinia';
+import { PiniaColada } from '@pinia/colada';
 import './styles.css';
 import {
   initializeEditorSettings,
@@ -11,6 +12,10 @@ import {
 import { addNotification } from './composables/useNotifications';
 import { initializeRendererLogger, logError } from './api/logger';
 import { initializeMonacoSyntax } from './editor/monacoEnvironment';
+import {
+  createRevierQueryHooksPlugin,
+  revierQueryDefaults
+} from './queries/queryClient';
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -38,7 +43,16 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  createApp(App).use(createPinia()).use(router).use(naive).mount('#app');
+  const pinia = createPinia();
+  createApp(App)
+    .use(pinia)
+    .use(PiniaColada, {
+      queryOptions: revierQueryDefaults,
+      plugins: [createRevierQueryHooksPlugin()]
+    })
+    .use(router)
+    .use(naive)
+    .mount('#app');
 }
 
 void bootstrap();

@@ -25,6 +25,7 @@
     "generate:bindings:check": "pnpm generate:bindings && git diff --exit-code -- src/renderer/generated/bindings.ts"
   },
   "dependencies": {
+    "@pinia/colada": "^1.4.2",
     "@shikijs/monaco": "^4.3.1",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-log": "^2.9.0",
