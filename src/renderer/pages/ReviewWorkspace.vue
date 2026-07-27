@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useDebounceFn } from '@vueuse/shared';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import BlockDetailPanel from '../components/review/BlockDetailPanel.vue';
@@ -76,11 +77,13 @@ const effectiveSavedFilters = computed(() => reviewStore.restoredFilters ?? save
 const initialAuthorBranch = computed(() => effectiveSavedFilters.value?.branch ?? defaultBranch.value);
 let unsubscribe: (() => void) | undefined;
 let unsubscribeOperation: (() => void) | undefined;
-let pendingReviewFilterSave: number | undefined;
 let latestReviewFilters: ReviewFilters | undefined;
 let workspaceActive = false;
 let metadataRequestId = 0;
 let activeBranch = '';
+const debouncedReviewFilterSave = useDebounceFn(() => {
+  flushPendingReviewFilterSave();
+}, 300);
 
 onMounted(async () => {
   workspaceActive = true;
@@ -210,13 +213,7 @@ async function restoreWorkspaceBranch(branch: string): Promise<void> {
 
 function scheduleReviewFilterSave(filters: ReviewFilters): void {
   latestReviewFilters = filters;
-  if (pendingReviewFilterSave !== undefined) {
-    window.clearTimeout(pendingReviewFilterSave);
-  }
-
-  pendingReviewFilterSave = window.setTimeout(() => {
-    flushPendingReviewFilterSave();
-  }, 300);
+  void debouncedReviewFilterSave();
 }
 
 function handleFiltersChange(filters: ReviewFilters): void {
@@ -228,11 +225,6 @@ function handleFiltersChange(filters: ReviewFilters): void {
 }
 
 function flushPendingReviewFilterSave(): void {
-  if (pendingReviewFilterSave !== undefined) {
-    window.clearTimeout(pendingReviewFilterSave);
-    pendingReviewFilterSave = undefined;
-  }
-
   if (!latestReviewFilters) {
     return;
   }

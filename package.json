@@ -30,6 +30,7 @@
     "@tauri-apps/plugin-log": "^2.9.0",
     "@vueuse/components": "^10.11.0",
     "@vueuse/core": "^10.11.0",
+    "@vueuse/shared": "^10.11.1",
     "diff": "^5.2.0",
     "lucide-vue-next": "^0.468.0",
     "minimatch": "^9.0.5",

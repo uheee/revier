@@ -1,4 +1,5 @@
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, ref } from 'vue';
+import { useEventListener, useStorage } from '@vueuse/core';
 
 export const reviewLayoutStorageKey = 'revier.reviewLayout.v1';
 export const defaultReviewLayout = { left: 320, right: 320 };
@@ -39,7 +40,16 @@ export function clampReviewLayout(
 
 export function useReviewLayoutSizes() {
   const container = ref<HTMLElement>();
-  const sizes = ref<ReviewLayoutSizes>(loadStoredLayout());
+  const sizes = useStorage<ReviewLayoutSizes>(
+    reviewLayoutStorageKey,
+    defaultReviewLayout,
+    window.localStorage,
+    {
+      serializer: reviewLayoutSerializer,
+      writeDefaults: false,
+      listenToStorageChanges: false
+    }
+  );
   const gridTemplateColumns = computed(
     () => `${sizes.value.left}px 6px minmax(0, 1fr) 6px ${sizes.value.right}px`
   );
@@ -55,7 +65,6 @@ export function useReviewLayoutSizes() {
         ? { ...sizes.value, left: sizes.value.left + delta }
         : { ...sizes.value, right: Math.min(Math.max(sizes.value.right - delta, rightMin), rightMax) };
     applyClamp();
-    window.localStorage.setItem(reviewLayoutStorageKey, JSON.stringify(sizes.value));
   }
 
   function applyClamp(): void {
@@ -63,21 +72,25 @@ export function useReviewLayoutSizes() {
     sizes.value = clampReviewLayout(sizes.value, { containerWidth: width, centerMin: 360 });
   }
 
-  onMounted(() => window.addEventListener('resize', applyClamp));
-  onUnmounted(() => window.removeEventListener('resize', applyClamp));
+  useEventListener(window, 'resize', applyClamp);
 
   return { sizes, gridTemplateColumns, setContainer, resize };
 }
 
-function loadStoredLayout(): ReviewLayoutSizes {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(reviewLayoutStorageKey) ?? 'null') as
-      | ReviewLayoutSizes
-      | null;
-    return parsed && Number.isFinite(parsed.left) && Number.isFinite(parsed.right)
-      ? parsed
-      : defaultReviewLayout;
-  } catch {
-    return defaultReviewLayout;
+const reviewLayoutSerializer = {
+  read(value: string): ReviewLayoutSizes {
+    try {
+      const parsed = JSON.parse(value) as ReviewLayoutSizes | null;
+      return isReviewLayoutSizes(parsed) ? parsed : defaultReviewLayout;
+    } catch {
+      return defaultReviewLayout;
+    }
+  },
+  write(value: ReviewLayoutSizes): string {
+    return JSON.stringify(value);
   }
+};
+
+function isReviewLayoutSizes(value: ReviewLayoutSizes | null): value is ReviewLayoutSizes {
+  return Boolean(value && Number.isFinite(value.left) && Number.isFinite(value.right));
 }

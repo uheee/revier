@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
+import { useEventListener } from '@vueuse/core';
 import type { ResolvedTextEncoding, TextEncoding } from '../../generated/bindings';
 import { EDITOR_LANGUAGES } from '../../editor/editorLanguages';
 
@@ -105,15 +106,8 @@ function handleMenuKeyDown(event: KeyboardEvent): void {
   items[next].focus();
 }
 
-onMounted(() => {
-  document.addEventListener('pointerdown', handleDocumentPointerDown);
-  document.addEventListener('keydown', handleDocumentKeyDown);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', handleDocumentPointerDown);
-  document.removeEventListener('keydown', handleDocumentKeyDown);
-});
+useEventListener(document, 'pointerdown', handleDocumentPointerDown);
+useEventListener(document, 'keydown', handleDocumentKeyDown);
 </script>
 
 <template>

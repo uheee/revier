@@ -1,4 +1,5 @@
 import { computed, readonly, ref, type Ref } from 'vue';
+import { useEventListener } from '@vueuse/core';
 import { editor as monacoEditor } from 'monaco-editor';
 import { revierClient } from '../api/revierClient';
 import type {
@@ -106,6 +107,7 @@ const readonlySnapshot = computed<EditorSettingsSnapshot>(() => snapshot.value);
 
 let initialization: Promise<void> | undefined;
 let colorSchemeQuery: MediaQueryList | undefined;
+let stopColorSchemeListener: (() => void) | undefined;
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -187,7 +189,11 @@ async function initialize(): Promise<void> {
     try {
       colorSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
       systemDark.value = colorSchemeQuery.matches;
-      colorSchemeQuery.addEventListener('change', handleSystemThemeChange);
+      stopColorSchemeListener = useEventListener(
+        colorSchemeQuery,
+        'change',
+        handleSystemThemeChange
+      );
     } catch (error) {
       colorSchemeQuery = undefined;
       systemDark.value = false;
@@ -226,6 +232,6 @@ export function useEditorSettings(): {
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
-    colorSchemeQuery?.removeEventListener('change', handleSystemThemeChange);
+    stopColorSchemeListener?.();
   });
 }

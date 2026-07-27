@@ -120,8 +120,8 @@ describe('EditorStatusBar', () => {
     expect(pointerHandler).toBeDefined();
     expect(keyHandler).toBeDefined();
     wrapper.unmount();
-    expect(remove).toHaveBeenCalledWith('pointerdown', pointerHandler);
-    expect(remove).toHaveBeenCalledWith('keydown', keyHandler);
+    expect(remove).toHaveBeenCalledWith('pointerdown', pointerHandler, undefined);
+    expect(remove).toHaveBeenCalledWith('keydown', keyHandler, undefined);
     add.mockRestore();
     remove.mockRestore();
   });

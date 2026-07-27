@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { ref } from 'vue';
+import { useEventListener } from '@vueuse/core';
+
 const props = defineProps<{
   side: 'left' | 'right';
 }>();
@@ -8,22 +11,28 @@ const emit = defineEmits<{
 }>();
 
 let startX = 0;
+const dragging = ref(false);
 
 function onPointerDown(event: PointerEvent): void {
   startX = event.clientX;
-  window.addEventListener('pointermove', onPointerMove);
-  window.addEventListener('pointerup', onPointerUp, { once: true });
+  dragging.value = true;
 }
 
 function onPointerMove(event: PointerEvent): void {
+  if (!dragging.value) {
+    return;
+  }
   const delta = event.clientX - startX;
   startX = event.clientX;
   emit('resize', props.side, delta);
 }
 
 function onPointerUp(): void {
-  window.removeEventListener('pointermove', onPointerMove);
+  dragging.value = false;
 }
+
+useEventListener(window, 'pointermove', onPointerMove);
+useEventListener(window, 'pointerup', onPointerUp);
 </script>
 
 <template>

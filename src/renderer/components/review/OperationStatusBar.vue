@@ -1,27 +1,25 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { useIntervalFn } from '@vueuse/shared';
 import type { OperationProgressSnapshot } from '../../generated/bindings';
 
 const props = defineProps<{ operation?: OperationProgressSnapshot }>();
 const now = ref(Date.now());
-let timer: number | undefined;
+const { pause, resume } = useIntervalFn(() => {
+  now.value = Date.now();
+}, 100, { immediate: false });
 
 watch(
   () => props.operation?.status,
   (status) => {
-    if (timer !== undefined) window.clearInterval(timer);
-    timer = undefined;
+    pause();
     now.value = Date.now();
     if (status === 'running') {
-      timer = window.setInterval(() => { now.value = Date.now(); }, 100);
+      resume();
     }
   },
   { immediate: true }
 );
-
-onBeforeUnmount(() => {
-  if (timer !== undefined) window.clearInterval(timer);
-});
 
 const elapsedMs = computed(() => {
   const operation = props.operation;
