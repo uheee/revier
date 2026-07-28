@@ -18,7 +18,7 @@ fn migrates_version_one_and_preserves_commit_index() {
 
     assert_eq!(
         revier_analysis::index::schema::read_schema_version(&conn).expect("读取 schema 版本"),
-        Some(3)
+        Some(4)
     );
     let commit_count: i64 = conn
         .query_row(
@@ -54,7 +54,7 @@ fn version_one_migration_is_idempotent() {
 
     assert_eq!(
         revier_analysis::index::schema::read_schema_version(&conn).expect("读取 schema 版本"),
-        Some(3)
+        Some(4)
     );
 }
 
@@ -85,7 +85,7 @@ fn migrates_version_two_snapshot_and_preserves_cached_analysis() {
 
     assert_eq!(
         revier_analysis::index::schema::read_schema_version(&conn).expect("读取 schema 版本"),
-        Some(3)
+        Some(4)
     );
     let cached: (String, Option<String>) = conn
         .query_row(

@@ -5,7 +5,7 @@ use std::process::Command;
 use tempfile::tempdir;
 
 #[test]
-fn initializes_schema_version_three_tables() {
+fn initializes_schema_version_four_tables() {
     let dir = tempdir().expect("创建临时目录");
     let db_path = dir.path().join("index.duckdb");
     let conn = revier_analysis::index::connection::open_database(&db_path).expect("打开 DuckDB");
@@ -20,7 +20,7 @@ fn initializes_schema_version_three_tables() {
 
     let version =
         revier_analysis::index::schema::read_schema_version(&conn).expect("读取 schema version");
-    assert_eq!(version, Some(3));
+    assert_eq!(version, Some(4));
 
     let tables = revier_analysis::index::schema::list_tables(&conn).expect("读取表列表");
     assert!(tables.contains(&"metadata".to_string()));
@@ -28,6 +28,43 @@ fn initializes_schema_version_three_tables() {
     assert!(tables.contains(&"commit_parents".to_string()));
     assert!(tables.contains(&"commit_files".to_string()));
     assert!(tables.contains(&"index_runs".to_string()));
+    assert!(tables.contains(&"schema_migrations".to_string()));
+
+    let migration_count: i64 = conn
+        .query_row("select count(*) from schema_migrations", [], |row| {
+            row.get(0)
+        })
+        .expect("读取迁移历史数量");
+    assert_eq!(migration_count, 2);
+}
+
+#[test]
+fn repeated_schema_initialization_keeps_migration_history_once() {
+    let dir = tempdir().expect("创建临时目录");
+    let db_path = dir.path().join("index.duckdb");
+    let conn = revier_analysis::index::connection::open_database(&db_path).expect("打开 DuckDB");
+
+    revier_analysis::index::schema::initialize_schema(
+        &conn,
+        "repo-1",
+        "E:/repo/app",
+        "E:/repo/app/.git",
+    )
+    .expect("首次初始化 schema");
+    revier_analysis::index::schema::initialize_schema(
+        &conn,
+        "repo-1",
+        "E:/repo/app",
+        "E:/repo/app/.git",
+    )
+    .expect("重复初始化 schema");
+
+    let migration_count: i64 = conn
+        .query_row("select count(*) from schema_migrations", [], |row| {
+            row.get(0)
+        })
+        .expect("读取迁移历史数量");
+    assert_eq!(migration_count, 2);
 }
 
 #[test]

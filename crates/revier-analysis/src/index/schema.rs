@@ -71,6 +71,7 @@ pub fn initialize_schema(
         upsert_metadata(conn, "created_at", &now)?;
     }
     upsert_metadata(conn, "updated_at", &now)?;
+    crate::index::migrations::initialize_current_migration_history(conn)?;
     Ok(())
 }
 
