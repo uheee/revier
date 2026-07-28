@@ -22,9 +22,7 @@ const config: KnipConfig = {
     // 阶段一只记录候选，不在未完成独立确认和回归前删除。
     '@vueuse/components',
     'diff',
-    'minimatch',
-    // 阶段四性质测试会使用，阶段一先随 Node 测试依赖加入。
-    'fast-check'
+    'minimatch'
   ]
 };
 

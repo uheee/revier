@@ -33,6 +33,7 @@ thiserror = "2.0"
 criterion = "0.8.2"
 imara-diff = "0.2.0"
 insta = { version = "1.42", features = ["json"] }
+proptest = "1.11.0"
 tempfile = "3.10"
 
 [[bench]]
