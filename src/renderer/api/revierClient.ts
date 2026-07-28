@@ -20,18 +20,43 @@ import type {
   ReviewFilters,
   ReviewProject
 } from '../generated/bindings';
+import { parseBoundary } from '../contracts/runtime/parseBoundary';
+import {
+  editorSettingsSnapshotSchema,
+  reviewProjectListSchema,
+  reviewProjectSchema
+} from '../contracts/runtime/schemas';
 
 type Unsubscribe = () => void;
 
 export const revierClient = {
   settings: {
-    getEditorSettings: () => invoke<EditorSettingsSnapshot>('editor_settings_get')
+    async getEditorSettings(): Promise<EditorSettingsSnapshot> {
+      return parseBoundary(editorSettingsSnapshotSchema, await invoke<unknown>('editor_settings_get'), {
+        source: 'editor_settings_get'
+      });
+    }
   },
   projects: {
-    list: () => invoke<ReviewProject[]>('projects_list'),
-    add: (repoPath: string, options?: Partial<ReviewProject>) =>
-      invoke<ReviewProject>('projects_add', { repoPath, options }),
-    update: (project: ReviewProject) => invoke<ReviewProject>('projects_update', { project }),
+    async list(): Promise<ReviewProject[]> {
+      return parseBoundary(reviewProjectListSchema, await invoke<unknown>('projects_list'), {
+        source: 'projects_list'
+      });
+    },
+    async add(repoPath: string, options?: Partial<ReviewProject>): Promise<ReviewProject> {
+      return parseBoundary(
+        reviewProjectSchema,
+        await invoke<unknown>('projects_add', { repoPath, options }),
+        { source: 'projects_add' }
+      );
+    },
+    async update(project: ReviewProject): Promise<ReviewProject> {
+      return parseBoundary(
+        reviewProjectSchema,
+        await invoke<unknown>('projects_update', { project }),
+        { source: 'projects_update' }
+      );
+    },
     remove: (projectId: string) => invoke<void>('projects_remove', { projectId }),
     selectDirectory: async () =>
       (await invoke<DirectorySelection | null>('projects_select_directory')) ?? undefined,

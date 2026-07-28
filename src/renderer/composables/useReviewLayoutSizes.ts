@@ -1,5 +1,7 @@
 import { computed, ref } from 'vue';
 import { useEventListener, useStorage } from '@vueuse/core';
+import { parseBoundary } from '../contracts/runtime/parseBoundary';
+import { reviewLayoutSizesSchema } from '../contracts/runtime/schemas';
 
 export const reviewLayoutStorageKey = 'revier.reviewLayout.v1';
 export const defaultReviewLayout = { left: 320, right: 320 };
@@ -80,8 +82,9 @@ export function useReviewLayoutSizes() {
 const reviewLayoutSerializer = {
   read(value: string): ReviewLayoutSizes {
     try {
-      const parsed = JSON.parse(value) as ReviewLayoutSizes | null;
-      return isReviewLayoutSizes(parsed) ? parsed : defaultReviewLayout;
+      return parseBoundary(reviewLayoutSizesSchema, JSON.parse(value), {
+        source: `localStorage:${reviewLayoutStorageKey}`
+      });
     } catch {
       return defaultReviewLayout;
     }
@@ -90,7 +93,3 @@ const reviewLayoutSerializer = {
     return JSON.stringify(value);
   }
 };
-
-function isReviewLayoutSizes(value: ReviewLayoutSizes | null): value is ReviewLayoutSizes {
-  return Boolean(value && Number.isFinite(value.left) && Number.isFinite(value.right));
-}

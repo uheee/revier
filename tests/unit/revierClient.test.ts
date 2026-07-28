@@ -68,6 +68,55 @@ const overlay: FileOverlay = {
   resolvedEncoding: 'utf-8'
 };
 
+const editorColors = {
+  workspaceBackground: '#F4F6F8',
+  panelBackground: '#FFFFFF',
+  editorBackground: '#FCFDFE',
+  border: '#DFE5EC',
+  foreground: '#273448',
+  muted: '#768296',
+  accent: '#0F766E',
+  selection: '#DCEFEB',
+  diffRemoved: '#FBE7E5',
+  diffRemovedStrong: '#BC3D35',
+  diffRemovedWord: '#F1B9B3',
+  diffAdded: '#E2F3E8',
+  diffAddedStrong: '#26804A',
+  diffAddedWord: '#A9DBBB',
+  syntax: {
+    comment: '#768296',
+    keyword: '#893CAD',
+    string: '#0B7952',
+    number: '#A05B00',
+    type: '#0969DA',
+    function: '#1C63A5',
+    variable: '#273448'
+  }
+};
+
+const editorSettingsSnapshot = {
+  configPath: 'C:/config/editor.toml',
+  settings: {
+    version: 1,
+    theme: 'system',
+    defaultEncoding: 'auto',
+    editor: {
+      fontFamilies: ['monospace'],
+      fontSize: 13,
+      lineHeight: 22,
+      minimap: true
+    },
+    largeFile: {
+      maxBytes: 1_048_576,
+      maxLines: 5_000
+    },
+    themes: {
+      light: editorColors,
+      dark: editorColors
+    }
+  }
+};
+
 describe('revierClient', () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();
@@ -75,7 +124,7 @@ describe('revierClient', () => {
   });
 
   it('invokes editor settings command without a payload', async () => {
-    vi.mocked(invoke).mockResolvedValue(undefined);
+    vi.mocked(invoke).mockResolvedValue(editorSettingsSnapshot);
 
     await revierClient.settings.getEditorSettings();
 
