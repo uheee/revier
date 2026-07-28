@@ -32,7 +32,11 @@
         >清空全部</button>
       </header>
       <div v-if="!notifications.length" class="notification-center__empty">暂无通知</div>
-      <n-scrollbar v-else class="notification-center__list notification-center__list--scrollable">
+      <n-scrollbar
+        v-else
+        class="notification-center__list notification-center__list--scrollable"
+        :style="{ maxHeight: listMaxHeight }"
+      >
         <article
           v-for="notification in notifications"
           :key="notification.id"
@@ -62,6 +66,7 @@ import { useNotifications } from '../composables/useNotifications';
 
 const show = ref(false);
 const { notifications, unreadCount, unreadBadge, markAllRead, remove, clear } = useNotifications();
+const listMaxHeight = `${Math.max(160, Math.min(460, window.innerHeight - 96))}px`;
 
 function handleVisibilityChange(visible: boolean): void {
   if (visible) {
@@ -145,7 +150,8 @@ function formatTime(value: string): string {
   text-align: center;
 }
 
-.notification-center__list {
+:deep(.notification-center__list) {
+  max-height: 460px;
   max-height: min(460px, calc(100vh - 96px));
 }
 

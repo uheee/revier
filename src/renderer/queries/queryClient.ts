@@ -1,14 +1,13 @@
 import {
   PiniaColadaQueryHooksPlugin,
   type PiniaColadaPlugin,
-  type UseQueryOptionsGlobal,
-  type UseQueryEntry
+  type UseQueryOptionsGlobal
 } from '@pinia/colada';
 import { toErrorMessage } from '../api/errors';
 import { logError } from '../api/logger';
 import { addNotification } from '../composables/useNotifications';
 
-export interface RevierQueryMeta {
+interface RevierQueryMeta {
   title: string;
   source: string;
   context?: string;
@@ -46,8 +45,4 @@ export function createRevierQueryHooksPlugin(): PiniaColadaPlugin {
       });
     }
   });
-}
-
-export function queryMeta(entry: UseQueryEntry): RevierQueryMeta | undefined {
-  return entry.meta as unknown as RevierQueryMeta | undefined;
 }

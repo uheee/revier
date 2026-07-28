@@ -10,6 +10,13 @@
   "engines": {
     "node": ">=24 <25"
   },
+  "pnpm": {
+    "overrides": {
+      "brace-expansion": "5.0.8",
+      "glob": "10.5.0",
+      "postcss": "8.5.18"
+    }
+  },
   "scripts": {
     "dev": "pnpm tauri dev",
     "build": "pnpm typecheck && pnpm generate:bindings:check && pnpm tauri build",
@@ -21,6 +28,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "pnpm typecheck && eslint .",
+    "check:deps": "knip",
+    "audit:deps": "pnpm audit --audit-level high --registry https://registry.npmjs.org",
     "generate:bindings": "cargo run -p revier-analysis -- export-bindings --out src/renderer/generated/bindings.ts",
     "generate:bindings:check": "pnpm generate:bindings && git diff --exit-code -- src/renderer/generated/bindings.ts"
   },
@@ -34,7 +43,7 @@
     "@vueuse/shared": "^10.11.1",
     "diff": "^5.2.0",
     "lucide-vue-next": "^0.468.0",
-    "minimatch": "^9.0.5",
+    "minimatch": "^10.2.6",
     "monaco-editor": "^0.55.1",
     "naive-ui": "^2.44.1",
     "pinia": "^2.2.2",
@@ -47,11 +56,13 @@
     "@types/node": "^22.5.0",
     "@vitejs/plugin-vue": "^5.1.2",
     "@vue/test-utils": "^2.4.6",
-    "eslint": "^9.9.0",
-    "jsdom": "^24.1.1",
+    "eslint": "^10.8.0",
+    "fast-check": "^4.9.0",
+    "jsdom": "^30.0.0",
+    "knip": "^6.29.0",
     "typescript": "^5.5.4",
-    "vite": "^5.4.2",
-    "vitest": "^2.0.5",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.7",
     "vue-tsc": "^2.0.29"
   }
 }

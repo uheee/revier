@@ -790,6 +790,7 @@ textarea {
 }
 
 .notification-center__list--scrollable {
+  max-height: 460px;
   max-height: min(460px, calc(100vh - 96px));
   overflow-y: auto;
 }

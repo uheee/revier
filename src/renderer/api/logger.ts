@@ -31,7 +31,7 @@ export async function initializeRendererLogger(): Promise<void> {
   detachConsole = await attachConsole();
 }
 
-export async function writeLog(
+async function writeLog(
   level: LogLevel,
   message: string,
   context?: Record<string, string | number | boolean | undefined>

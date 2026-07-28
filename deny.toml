@@ -1,0 +1,64 @@
+# Revier Rust 供应链治理基线。
+# 初始策略：安全公告阻塞，重复版本先报告，许可证仅允许已确认的开源许可证。
+
+[graph]
+all-features = false
+
+[advisories]
+ignore = [
+  { id = "RUSTSEC-2024-0411", reason = "Tauri/Wry 在 Linux 目标间接依赖 gtk-rs GTK3 绑定；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2024-0412", reason = "Tauri/Wry 在 Linux 目标间接依赖 gtk-rs GTK3 绑定；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2024-0413", reason = "Tauri/Wry 在 Linux 目标间接依赖 gtk-rs GTK3 绑定；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2024-0414", reason = "Tauri/Wry 在 Linux 目标间接依赖 gtk-rs GTK3 绑定；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2024-0415", reason = "Tauri/Wry 在 Linux 目标间接依赖 gtk-rs GTK3 绑定；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2024-0416", reason = "Tauri/Wry 在 Linux 目标间接依赖 gtk-rs GTK3 绑定；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2024-0417", reason = "Tauri/Wry 在 Linux 目标间接依赖 gtk-rs GTK3 绑定；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2024-0418", reason = "Tauri/Wry 在 Linux 目标间接依赖 gtk-rs GTK3 绑定；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2024-0419", reason = "Tauri/Wry 在 Linux 目标间接依赖 gtk-rs GTK3 绑定；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2024-0420", reason = "Tauri/Wry 在 Linux 目标间接依赖 gtk-rs GTK3 绑定；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error 由 gtk-rs 旧链路间接引入；当前无安全升级路径，跟踪 Tauri/Wry 上游替换。" },
+  { id = "RUSTSEC-2025-0075", reason = "unic 系列由 tauri-utils 的 urlpattern 间接引入；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2025-0080", reason = "unic 系列由 tauri-utils 的 urlpattern 间接引入；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2025-0081", reason = "unic 系列由 tauri-utils 的 urlpattern 间接引入；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2025-0098", reason = "unic 系列由 tauri-utils 的 urlpattern 间接引入；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+  { id = "RUSTSEC-2025-0100", reason = "unic 系列由 tauri-utils 的 urlpattern 间接引入；当前无安全升级路径，跟踪 Tauri 上游替换。" },
+]
+
+[licenses]
+confidence-threshold = 0.8
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+highlight = "simplest-path"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
