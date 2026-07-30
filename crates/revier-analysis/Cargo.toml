@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+fuzzing = []
+
 [dependencies]
 anyhow = "1.0.104"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }

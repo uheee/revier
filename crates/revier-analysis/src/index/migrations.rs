@@ -269,6 +269,21 @@ fn migration_checksum(sql: &[u8]) -> String {
     hex::encode(digest)
 }
 
+#[cfg(feature = "fuzzing")]
+pub fn validate_migration_manifest_for_fuzz(entries: &[(String, Vec<u8>)]) -> Result<(), AppError> {
+    let mut versions = HashSet::new();
+    for (file_name, sql) in entries {
+        let (version, _) = parse_migration_file_name(file_name)?;
+        if !versions.insert(version) {
+            return Err(AppError::SchemaIncompatible(format!(
+                "迁移版本重复：{version}"
+            )));
+        }
+        let _ = migration_checksum(sql);
+    }
+    Ok(())
+}
+
 fn execute_migration_sql(
     conn: &duckdb::Connection,
     migration: &EmbeddedMigration,

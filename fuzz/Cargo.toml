@@ -1,0 +1,38 @@
+[package]
+name = "revier-analysis-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.revier-analysis]
+path = "../crates/revier-analysis"
+features = ["fuzzing"]
+
+[[bin]]
+name = "line_diff"
+path = "fuzz_targets/line_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "text_decode"
+path = "fuzz_targets/text_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "migration_manifest"
+path = "fuzz_targets/migration_manifest.rs"
+test = false
+doc = false
+bench = false
