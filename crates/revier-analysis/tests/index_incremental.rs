@@ -28,12 +28,6 @@ fn appends_only_one_new_commit_after_initial_build() {
     );
     let second = run_index_build(fixture.repo.path(), &db_path, "main");
 
-    eprintln!(
-        "首次索引={}ms，增量索引={}ms，增量提交数={}",
-        first["elapsedMs"].as_u64().expect("首次索引耗时"),
-        second["elapsedMs"].as_u64().expect("增量索引耗时"),
-        second["indexedCommitCount"]
-    );
     assert!(first["indexedCommitCount"].as_u64().expect("首次提交数") >= 2);
     assert_eq!(second["indexedCommitCount"], 1);
     assert_eq!(count_rows(&db_path, "commits"), first_total + 1);

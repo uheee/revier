@@ -26,9 +26,10 @@ export function createRevierQueryHooksPlugin(): PiniaColadaPlugin {
   return PiniaColadaQueryHooksPlugin({
     onError(error, entry) {
       const meta = entry.meta as Partial<RevierQueryMeta> | undefined;
+      const queryType = typeof entry.key[0] === 'string' ? entry.key[0] : 'unknown';
       logError(meta?.title ?? '普通查询失败', error, {
         source: meta?.source ?? 'Query',
-        queryKey: entry.key.join(':')
+        queryType
       });
       if (meta?.notify === false || !meta?.title) {
         return;

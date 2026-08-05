@@ -338,7 +338,9 @@ describe('createMonacoDiffSession', () => {
     expect(result.originalModel.model.dispose).toHaveBeenCalledTimes(1);
     expect(result.modifiedModel.model.dispose).toHaveBeenCalledTimes(1);
     expect(consoleError).toHaveBeenCalledTimes(1);
-    expect(consoleError.mock.calls[0][1]).toBeInstanceOf(AggregateError);
+    expect(consoleError).toHaveBeenCalledWith(
+      'Monaco Diff 会话资源清理失败：AggregateError',
+    );
     consoleError.mockRestore();
   });
 

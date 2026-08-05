@@ -4,6 +4,8 @@ const harness = vi.hoisted(() => ({
   order: [] as string[],
   initializeEditorSettings: vi.fn(),
   initializeMonacoSyntax: vi.fn(),
+  initializeRendererLogger: vi.fn(),
+  logError: vi.fn(),
   addNotification: vi.fn(),
   mount: vi.fn(),
   resolveSettings: undefined as (() => void) | undefined,
@@ -20,6 +22,10 @@ vi.mock('../../src/renderer/composables/useEditorSettings', () => ({
 }));
 vi.mock('../../src/renderer/editor/monacoEnvironment', () => ({
   initializeMonacoSyntax: harness.initializeMonacoSyntax
+}));
+vi.mock('../../src/renderer/api/logger', () => ({
+  initializeRendererLogger: harness.initializeRendererLogger,
+  logError: harness.logError
 }));
 vi.mock('../../src/renderer/composables/useNotifications', () => ({
   addNotification: harness.addNotification
@@ -55,6 +61,8 @@ describe('渲染器启动流程', () => {
     harness.initializeMonacoSyntax.mockReset().mockImplementation(async () => {
       harness.order.push('syntax');
     });
+    harness.initializeRendererLogger.mockReset().mockResolvedValue(undefined);
+    harness.logError.mockReset();
     harness.addNotification.mockReset();
     harness.mount.mockReset().mockImplementation(() => {
       harness.order.push('mount');
@@ -92,5 +100,10 @@ describe('渲染器启动流程', () => {
       message: 'syntax unavailable',
       source: 'Shiki'
     });
+    expect(harness.logError).toHaveBeenCalledWith(
+      'Monaco 语法高亮初始化失败',
+      expect.any(Error),
+      { source: 'Shiki' }
+    );
   });
 });

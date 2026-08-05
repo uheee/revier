@@ -5,18 +5,23 @@ mod state;
 
 use anyhow::Context;
 use services::editor_settings::EditorSettingsService;
-use services::logging::LoggingService;
+use services::logging::{redact_sensitive_log_text, LoggingService};
 use services::projects::ProjectService;
 use services::review::ReviewService;
 use state::AppState;
+use std::fmt;
 use tauri::App;
 use tauri::Manager;
 
 pub fn run() {
     if let Err(error) = try_run() {
-        eprintln!("{error:#}");
+        report_startup_diagnostic(format_args!("{error:#}"));
         std::process::exit(1);
     }
+}
+
+fn report_startup_diagnostic(message: impl fmt::Display) {
+    eprintln!("{}", redact_sensitive_log_text(&message.to_string()));
 }
 
 fn try_run() -> anyhow::Result<()> {
@@ -60,18 +65,18 @@ fn configure_app(app: &mut App) -> anyhow::Result<()> {
     let data_dir = app.path().app_data_dir().context("读取应用数据目录失败")?;
     let logging = LoggingService::load(config_dir.join("logging.toml"));
     if let Some(warning) = logging.warning() {
-        eprintln!("{warning}");
+        report_startup_diagnostic(warning);
     }
     #[cfg(not(test))]
     match logging.build_plugin() {
         Ok(Some(plugin)) => {
             if let Err(error) = app.handle().plugin(plugin) {
-                eprintln!("日志插件初始化失败：{error}");
+                report_startup_diagnostic(format_args!("日志插件初始化失败：{error}"));
             }
         }
         Ok(None) => {}
         Err(error) => {
-            eprintln!("日志配置无法映射到插件：{error}");
+            report_startup_diagnostic(format_args!("日志配置无法映射到插件：{error}"));
         }
     }
     let editor_settings = EditorSettingsService::load(config_dir.join("editor.toml"));

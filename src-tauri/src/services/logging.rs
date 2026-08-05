@@ -10,8 +10,30 @@ use tauri::Runtime;
 #[cfg(not(test))]
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
-const DEFAULT_LEVEL: &str = "info";
 const DEFAULT_FORMAT: &str = "[${time:yyyy-MM-ddTHH:mm:ss.ms}][${level:short}] ${content}";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildProfile {
+    Debug,
+    Release,
+}
+
+impl BuildProfile {
+    const fn current() -> Self {
+        if cfg!(debug_assertions) {
+            Self::Debug
+        } else {
+            Self::Release
+        }
+    }
+
+    const fn default_level(self) -> &'static str {
+        match self {
+            Self::Debug => "debug",
+            Self::Release => "warn",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoggingConfig {
@@ -86,15 +108,22 @@ pub enum ChannelOptions {
 
 impl Default for LoggingConfig {
     fn default() -> Self {
+        Self::for_profile(BuildProfile::current())
+    }
+}
+
+impl LoggingConfig {
+    pub fn for_profile(profile: BuildProfile) -> Self {
+        let default_level = profile.default_level();
         let mut channels = BTreeMap::new();
         channels.insert(
             LogChannel::File,
             ChannelConfig {
-                enabled: false,
-                level: DEFAULT_LEVEL.into(),
+                enabled: true,
+                level: default_level.into(),
                 format: DEFAULT_FORMAT.into(),
                 options: ChannelOptions::File {
-                    max_size: "5m".into(),
+                    max_size: "1m".into(),
                     rotation_count: 5,
                 },
             },
@@ -103,7 +132,7 @@ impl Default for LoggingConfig {
             LogChannel::Console,
             ChannelConfig {
                 enabled: true,
-                level: DEFAULT_LEVEL.into(),
+                level: default_level.into(),
                 format: DEFAULT_FORMAT.into(),
                 options: ChannelOptions::Console { color: true },
             },
@@ -111,8 +140,8 @@ impl Default for LoggingConfig {
         channels.insert(
             LogChannel::Webview,
             ChannelConfig {
-                enabled: true,
-                level: DEFAULT_LEVEL.into(),
+                enabled: matches!(profile, BuildProfile::Debug),
+                level: default_level.into(),
                 format: DEFAULT_FORMAT.into(),
                 options: ChannelOptions::Webview,
             },
@@ -120,7 +149,7 @@ impl Default for LoggingConfig {
 
         Self {
             enabled: true,
-            level: DEFAULT_LEVEL.into(),
+            level: default_level.into(),
             format: DEFAULT_FORMAT.into(),
             channels,
         }
@@ -151,7 +180,7 @@ pub fn build_log_plugin<R: Runtime>(
         return Ok(None);
     }
 
-    let enabled_channels = enabled_channels(config);
+    let enabled_channels = enabled_channels(config, BuildProfile::current());
     if enabled_channels.is_empty() {
         return Ok(None);
     }
@@ -183,14 +212,26 @@ pub fn build_log_plugin<R: Runtime>(
 }
 
 #[cfg(not(test))]
-fn enabled_channels(config: &LoggingConfig) -> Vec<(LogChannel, &ChannelConfig)> {
+fn enabled_channels(
+    config: &LoggingConfig,
+    profile: BuildProfile,
+) -> Vec<(LogChannel, &ChannelConfig)> {
     config
         .channels
         .iter()
         .filter_map(|(channel, channel_config)| {
-            channel_config.enabled.then_some((*channel, channel_config))
+            channel_enabled_for_profile(*channel, channel_config, profile)
+                .then_some((*channel, channel_config))
         })
         .collect()
+}
+
+fn channel_enabled_for_profile(
+    channel: LogChannel,
+    config: &ChannelConfig,
+    profile: BuildProfile,
+) -> bool {
+    config.enabled && !(channel == LogChannel::Webview && profile == BuildProfile::Release)
 }
 
 #[cfg(not(test))]
@@ -224,13 +265,84 @@ fn level_allows(filter: log::LevelFilter, level: log::Level) -> bool {
     }
 }
 
+pub fn redact_sensitive_log_text(text: &str) -> String {
+    let mut redacted = String::with_capacity(text.len());
+    for segment in text.split_inclusive(char::is_whitespace) {
+        let content = segment.trim_end_matches(char::is_whitespace);
+        let whitespace = &segment[content.len()..];
+        if looks_like_email(content) {
+            redacted.push_str("[邮箱已脱敏]");
+        } else if looks_like_path(content) {
+            redacted.push_str("[路径已脱敏]");
+        } else {
+            redacted.push_str(content);
+        }
+        redacted.push_str(whitespace);
+    }
+    redacted
+}
+
+fn looks_like_email(value: &str) -> bool {
+    let value = trim_log_punctuation(value);
+    let Some((local, domain)) = value.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !domain.contains('@')
+}
+
+fn looks_like_path(value: &str) -> bool {
+    let value = trim_log_punctuation(value);
+    let bytes = value.as_bytes();
+    let windows_drive_path = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\');
+    let unc_path = value.starts_with("\\\\");
+    let unix_absolute_path = value.starts_with('/') && value.len() > 1;
+    let path_fragment = value.len() > 1 && (value.contains('/') || value.contains('\\'));
+    windows_drive_path || unc_path || unix_absolute_path || path_fragment
+}
+
+fn trim_log_punctuation(value: &str) -> &str {
+    value.trim_matches(|character: char| {
+        matches!(
+            character,
+            ',' | '.'
+                | ';'
+                | ':'
+                | '!'
+                | '?'
+                | '，'
+                | '。'
+                | '；'
+                | '：'
+                | '！'
+                | '？'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '"'
+                | '\''
+        )
+    })
+}
+
 #[cfg(not(test))]
 fn render_log_format(
     template: &str,
     message: &std::fmt::Arguments<'_>,
     record: &log::Record<'_>,
 ) -> String {
-    let content = message.to_string();
+    let content = redact_sensitive_log_text(&message.to_string());
     template
         .replace(
             "${time:yyyy-MM-ddTHH:mm:ss.ms}",
@@ -294,20 +406,32 @@ fn write_default_logging_config(path: &Path) -> io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    file.write_all(default_logging_toml().as_bytes())
+    file.write_all(default_logging_toml(BuildProfile::current()).as_bytes())
 }
 
-fn default_logging_toml() -> &'static str {
-    r#"[logging]
+fn default_logging_toml(profile: BuildProfile) -> String {
+    let webview_enabled = matches!(profile, BuildProfile::Debug);
+    format!(
+        r#"[logging]
 enabled = true
-level = "info"
-format = "[${time:yyyy-MM-ddTHH:mm:ss.ms}][${level:short}] ${content}"
+level = "{}"
+format = "[${{time:yyyy-MM-ddTHH:mm:ss.ms}}][${{level:short}}] ${{content}}"
 
-[logging.channels]
-file = false
-console = true
-webview = true
-"#
+[logging.channels.file]
+enabled = true
+max_size = "1m"
+rotation_count = 5
+
+[logging.channels.console]
+enabled = true
+color = true
+
+[logging.channels.webview]
+enabled = {}
+"#,
+        profile.default_level(),
+        webview_enabled
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -482,7 +606,7 @@ fn default_true() -> bool {
 }
 
 fn default_level() -> String {
-    DEFAULT_LEVEL.into()
+    BuildProfile::current().default_level().into()
 }
 
 fn default_format() -> String {
@@ -498,15 +622,73 @@ mod tests {
     }
 
     #[test]
-    fn 默认配置启用_console_和_webview_但不启用_file() {
+    fn 构建模式决定安全的默认日志通道() {
+        let debug = LoggingConfig::for_profile(BuildProfile::Debug);
+        let release = LoggingConfig::for_profile(BuildProfile::Release);
+
+        assert_eq!(debug.level, "debug");
+        assert_eq!(release.level, "warn");
+        assert!(channel(&debug, LogChannel::File).enabled);
+        assert!(channel(&release, LogChannel::File).enabled);
+        assert_eq!(
+            channel(&debug, LogChannel::File).options,
+            ChannelOptions::File {
+                max_size: "1m".into(),
+                rotation_count: 5,
+            }
+        );
+        assert!(channel(&debug, LogChannel::Webview).enabled);
+        assert!(!channel(&release, LogChannel::Webview).enabled);
+        assert!(!channel_enabled_for_profile(
+            LogChannel::Webview,
+            channel(&debug, LogChannel::Webview),
+            BuildProfile::Release,
+        ));
+
+        for (profile, expected) in [
+            (BuildProfile::Debug, debug),
+            (BuildProfile::Release, release),
+        ] {
+            let written = default_logging_toml(profile);
+            assert_eq!(
+                parse_logging_config(&written).expect("默认 TOML 应可重新解析"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn 日志文本隐藏路径和邮箱但保留诊断类别() {
+        let redacted = redact_sensitive_log_text(
+            "读取 E:\\Program Files\\secret\\main.rs、src/private/lib.rs 和 /home/user/repo/src/lib.rs 失败，联系 dev@example.com",
+        );
+
+        assert!(redacted.contains("读取"));
+        assert!(redacted.contains("失败"));
+        assert!(redacted.contains("[路径已脱敏]"));
+        assert!(redacted.contains("[邮箱已脱敏]"));
+        assert!(!redacted.contains("Program"));
+        assert!(!redacted.contains("Files"));
+        assert!(!redacted.contains("src/private"));
+        assert!(!redacted.contains("secret"));
+        assert!(!redacted.contains("/home/user"));
+        assert!(!redacted.contains("dev@example.com"));
+    }
+
+    #[test]
+    fn 缺省_toml_继承当前构建的安全默认值() {
         let config = parse_logging_config("[logging]\n").expect("配置应可解析");
+        let expected = LoggingConfig::default();
 
         assert!(config.enabled);
-        assert_eq!(config.level, "info");
+        assert_eq!(config.level, expected.level);
         assert_eq!(config.format, DEFAULT_FORMAT);
-        assert!(!channel(&config, LogChannel::File).enabled);
+        assert!(channel(&config, LogChannel::File).enabled);
         assert!(channel(&config, LogChannel::Console).enabled);
-        assert!(channel(&config, LogChannel::Webview).enabled);
+        assert_eq!(
+            channel(&config, LogChannel::Webview).enabled,
+            cfg!(debug_assertions)
+        );
     }
 
     #[test]
@@ -619,12 +801,37 @@ enbale = true
         let path = directory.path().join("logging.toml");
 
         let config = load_logging_config(&path).expect("默认配置应可加载");
+        let written = fs::read_to_string(&path).expect("默认配置应可读取");
 
         assert!(path.exists());
         assert_eq!(config, LoggingConfig::default());
-        assert!(fs::read_to_string(path)
-            .expect("默认配置应可读取")
-            .contains("[logging.channels]"));
+        assert!(written.contains(&format!(
+            "level = \"{}\"",
+            BuildProfile::current().default_level()
+        )));
+        assert!(written.contains("[logging.channels.file]"));
+        assert!(written.contains("max_size = \"1m\""));
+        assert!(written.contains("rotation_count = 5"));
+        assert_eq!(
+            parse_logging_config(&written).expect("写出的默认配置应可重新解析"),
+            config
+        );
+    }
+
+    #[test]
+    fn 损坏配置保留原文件并降级到安全默认值() {
+        let directory = tempfile::tempdir().expect("临时目录应可创建");
+        let path = directory.path().join("logging.toml");
+        let original = b"[logging\nlevel = \"trace\"";
+        fs::write(&path, original).expect("损坏配置应可写入");
+
+        let service = LoggingService::load(path.clone());
+
+        assert_eq!(fs::read(&path).expect("原配置应可读取"), original);
+        assert_eq!(service.config(), &LoggingConfig::default());
+        let warning = service.warning().expect("损坏配置应产生 warning");
+        assert!(warning.contains(&path.to_string_lossy().to_string()));
+        assert!(warning.contains("解析失败"));
     }
 
     #[test]

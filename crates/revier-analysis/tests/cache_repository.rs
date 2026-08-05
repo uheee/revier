@@ -87,7 +87,6 @@ fn records_compact_two_branch_cache_counts_and_database_size() {
         .expect("读取缓存数据库大小")
         .len();
 
-    eprintln!("两分支缓存表行数={counts:?}，数据库大小={database_size} 字节");
     assert_eq!(counts, [2, 2, 2, 2]);
     assert!(database_size > 0);
 }

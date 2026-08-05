@@ -3504,7 +3504,6 @@ mod tests {
         assert_eq!(restored.cache_state, CacheState::Hit);
         assert_eq!(restored.files.len(), 1);
         assert_eq!(restored.last_selected_path.as_deref(), Some("src/app.txt"));
-        eprintln!("分支快照热缓存恢复={}ms", restored.cache_read_elapsed_ms);
         let task = restored.task.expect("恢复结果应包含任务快照");
         assert!(matches!(task.status, AnalysisTaskStatus::Completed));
         assert_eq!(
@@ -3670,10 +3669,6 @@ mod tests {
             .expect("增量项目分析失败");
         let incremental = load_cached_snapshot(&service, fixture.path()).expect("增量快照应存在");
 
-        eprintln!(
-            "首次项目分析={}ms，增量项目刷新={}ms",
-            initial.elapsed_ms, incremental.elapsed_ms
-        );
         assert_ne!(initial.analysis_id, incremental.analysis_id);
         assert_eq!(incremental.files.len(), 1);
     }
@@ -3818,24 +3813,18 @@ mod tests {
             }],
         };
 
-        let cold_started = Instant::now();
         let first = service
             .attribute_blocks(request.clone())
             .expect("首次文件归因失败");
-        let cold_elapsed = cold_started.elapsed();
-        let hot_started = Instant::now();
         let second = service
             .attribute_blocks(request.clone())
             .expect("缓存文件归因失败");
-        let hot_elapsed = hot_started.elapsed();
-        let refresh_started = Instant::now();
         let refreshed = service
             .attribute_blocks(AttributeBlocksRequest {
                 cache_mode: CacheMode::Refresh,
                 ..request.clone()
             })
             .expect("刷新文件归因失败");
-        let refresh_elapsed = refresh_started.elapsed();
         let after_refresh = service
             .attribute_blocks(request)
             .expect("刷新后读取文件归因缓存失败");
@@ -3850,12 +3839,6 @@ mod tests {
         assert_eq!(
             second.attributions[0].related_commits[0].hash,
             first.attributions[0].related_commits[0].hash
-        );
-        eprintln!(
-            "文件归因冷缓存={}ms，热缓存={}ms，强制刷新={}ms",
-            cold_elapsed.as_millis(),
-            hot_elapsed.as_millis(),
-            refresh_elapsed.as_millis()
         );
     }
 
@@ -3904,16 +3887,12 @@ mod tests {
             encoding: None,
         };
 
-        let cold_started = Instant::now();
         let cold = service
             .get_commit_overlay_with_cache(request.clone())
             .expect("首次提交下钻失败");
-        let cold_elapsed = cold_started.elapsed();
-        let hot_started = Instant::now();
         let hot = service
             .get_commit_overlay_with_cache(request.clone())
             .expect("提交下钻缓存读取失败");
-        let hot_elapsed = hot_started.elapsed();
         assert_eq!(cold.cache_state, CacheState::Miss);
         assert_eq!(hot.cache_state, CacheState::Hit);
         assert_eq!(hot.overlay.old_content, cold.overlay.old_content);
@@ -4000,11 +3979,6 @@ mod tests {
             })
             .expect("热缓存不应重新解析范围历史");
         assert_eq!(cached_after_context_damage.cache_state, CacheState::Hit);
-        eprintln!(
-            "提交下钻冷缓存={}ms，热缓存={}ms",
-            cold_elapsed.as_millis(),
-            hot_elapsed.as_millis()
-        );
     }
 
     #[test]
