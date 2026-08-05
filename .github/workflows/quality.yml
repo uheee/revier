@@ -1,0 +1,100 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  checks:
+    name: Quality checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.28.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Install Rust nightly for fuzz build
+        run: rustup toolchain install nightly --profile minimal
+
+      - name: Install Linux Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Cargo tools
+        run: |
+          cargo install cargo-deny --version 0.20.2 --locked
+          cargo install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Rust format
+        run: cargo fmt --all -- --check
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Frontend tests
+        run: pnpm test
+
+      - name: Fuzz target build
+        run: |
+          cargo +nightly fuzz build line_diff
+          cargo +nightly fuzz build text_decode
+          cargo +nightly fuzz build migration_manifest
+
+      - name: Rust supply chain report
+        continue-on-error: true
+        run: cargo deny check
+
+      - name: Node advisory report
+        continue-on-error: true
+        run: pnpm audit:deps
+
+      - name: Node dependency usage report
+        continue-on-error: true
+        run: pnpm check:deps
